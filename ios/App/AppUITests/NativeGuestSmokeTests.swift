@@ -1346,6 +1346,29 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     }
 
     @MainActor
+    func testPersonalLunarPickerWithMotionDisabled() {
+        let app = launchGuest()
+        openSettings(app, captureNavigationEvidence: false)
+        openAppearance(app)
+        guard let originalMotion = checked(app.switches["Hiệu ứng chuyển động"].firstMatch) else {
+            XCTFail("Actual motion switch must expose its initial state")
+            return
+        }
+        setMotion(false, app: app)
+        openPersonal(app)
+        let lunar = "QA bảng chọn ngày âm"
+        addEvent(lunar, solar: false, day: 15, month: 7, app: app)
+        editEvent(lunar, app: app)
+        XCTAssertEqual(namedControl("Ngày Âm lịch:", app: app).value as? String, "15")
+        XCTAssertEqual(namedControl("Tháng Âm lịch:", app: app).value as? String, "Tháng 7")
+        evidence("personal-lunar-picker-motion-disabled", app: app)
+        collapseEditor(app)
+        deleteEvent(lunar, app: app)
+        openAppearance(app)
+        setMotion(originalMotion, app: app)
+    }
+
+    @MainActor
     func testPersonalLunarSolarCrudInvalidDateCancelAndPersistence() {
         let app = launchGuest()
         openSettings(app, captureNavigationEvidence: false)

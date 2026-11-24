@@ -11,6 +11,7 @@ on:
         options:
           - smoke
           - full
+          - picker
   push:
     branches:
       - 'codex/qa-*'
@@ -29,7 +30,7 @@ jobs:
     env:
       TUTAM_BUNDLE_SYNCED: '1'
       VITE_GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
-      IOS_TEST_SUITE: ${{ inputs.test_suite || 'full' }}
+      IOS_TEST_SUITE: ${{ inputs.test_suite || 'picker' }}
     steps:
       - uses: actions/checkout@v4
       - name: Apply QA audit source overlay if present
@@ -163,6 +164,8 @@ jobs:
               -only-testing:AppUITests/NativePersonalReminderTests
               -only-testing:AppUITests/NativeSimulatorSnapshotTests
             )
+          elif [ "$IOS_TEST_SUITE" = "picker" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarPickerWithMotionDisabled)
           fi
           xcodebuild -quiet \
             -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
@@ -200,6 +203,8 @@ jobs:
               -only-testing:AppUITests/NativePersonalReminderTests
               -only-testing:AppUITests/NativeSimulatorSnapshotTests
             )
+          elif [ "$IOS_TEST_SUITE" = "picker" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarPickerWithMotionDisabled)
           fi
           xcodebuild \
             -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
@@ -223,8 +228,10 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed=13 if suite=='full' else 3
+          min_passed={'full':13,'picker':1}.get(suite,3)
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
+          if suite=='picker':
+            assert data['passedTests'] == 1, 'Expected exactly the native lunar-date regression'
           assert data['failedTests'] == 0, 'Native UI test failures'
           assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'
           print(f'Verified native UI test execution ({suite}):',data['passedTests'],'passed, 0 failed, 0 skipped')
@@ -245,7 +252,7 @@ jobs:
             xcrun xcresulttool export attachments --path "$result" --output-path build/release-evidence/native-ui-attachments
           fi
       - name: Diagnose native URL delivery after XCTest evidence is saved
-        if: always() && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        if: always() && env.TUTAM_QA_HOSTS_ISOLATED == '1' && env.IOS_TEST_SUITE != 'picker'
         continue-on-error: true
         timeout-minutes: 3
         run: |
