@@ -1,0 +1,72 @@
+:root:is([data-native-app='true'], [data-performance='efficient']) :is(
+  .qts-nav, .qts-bottom-nav, .tt-topbar, .qt-top-floating-banners,
+  .art-left-panel, .card-status-badge, .pt-toolbar, .pt-tabs,
+  .pt-mini-player, .pt-mp-restore-card, .pt-fp-backdrop,
+  .reader-boundary, .reader-tools-panel:not([data-dialog-glass]), .sheet-backdrop
+) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root:is([data-native-app='true'], [data-performance='efficient']) :is(
+  .pt-mp-spin-ring, .pt-restore-disc, .playing-bars i,
+  .pt-mp-expand-hint, .pt-mp-hint-badge, .pt-mp-hint-hand, .pt-mp-hint-pointer,
+  .pt-mp-circle-action-btn.expand.has-hint, .art-card, .tt-card
+) {
+  animation: none !important;
+}
+
+:root:is([data-native-app='true'], [data-performance='efficient']) .qts-bottom-nav__item:active {
+  background: var(--gold-muted);
+}
+
+@media (hover: none) {
+  .art-card:hover, .tt-card:hover { transform: none; }
+}
+
+.tt-rosary button.tt-rosary__count-button {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+}
+
+.tt-rosary__count-button::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--gold);
+  content: '';
+  pointer-events: none;
+}
+
+.tt-rosary__count-button:enabled:active::before {
+  background: var(--gold2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-ui-motion='off']) .tt-rosary__count-button::before {
+    transition: transform var(--motion-press) var(--ease-standard);
+  }
+
+  :root:not([data-ui-motion='off']) .tt-rosary__count-button:enabled:active::before {
+    transform: scale(.965);
+  }
+}
+
+/* Preserve functional breathing cue phase visibility, timers and direct gesture transforms. */
+:root[data-ui-motion='off'], :root[data-ui-motion='off'] * { scroll-behavior:auto!important; }
+:root[data-ui-motion='off'] *, :root[data-ui-motion='off'] *::before, :root[data-ui-motion='off'] *::after {
+  transition-duration:0s!important; transition-delay:0s!important;
+}
+:root[data-ui-motion='off'] *:not(.meditation-screen__breathing-cue span),
+:root[data-ui-motion='off'] *::before, :root[data-ui-motion='off'] *::after { animation:none!important; }
+
+/* The fixed native tab strip is a tap surface, not a viewport pan/zoom surface. */
+:root[data-native-app='true'] .qts-bottom-nav__item {
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+:root[data-native-app='true'] .qts-bottom-nav__item:active {
+  transform: none;
+}

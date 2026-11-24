@@ -1,0 +1,255 @@
+@font-face { font-family:'San Francisco Web'; font-style:normal; font-weight:400; font-display:swap; src:url('/fonts/san-francisco/SanFranciscoText-Regular.otf') format('opentype'); }
+@font-face { font-family:'San Francisco Web'; font-style:normal; font-weight:500; font-display:swap; src:url('/fonts/san-francisco/SanFranciscoText-Medium.otf') format('opentype'); }
+@font-face { font-family:'San Francisco Web'; font-style:normal; font-weight:600; font-display:swap; src:url('/fonts/san-francisco/SanFranciscoText-Semibold.otf') format('opentype'); }
+@font-face { font-family:'San Francisco Web'; font-style:normal; font-weight:700; font-display:swap; src:url('/fonts/san-francisco/SanFranciscoText-Bold.otf') format('opentype'); }
+
+:root {
+  --reading-paper-white:#fff;
+  --reading-paper-white-ink:#1c1a15;
+  --reading-paper-reader-cream:#f4ecd8;
+  --reading-paper-reader-cream-ink:#33271f;
+  --reading-paper-reader-gray-ink:#222;
+  --reading-paper-cream:#faf6ee;
+  --reading-paper-cream-ink:#3a2e1a;
+  --reading-paper-gray:#e8e8e8;
+  --reading-paper-gray-ink:#2a2a2a;
+  --reading-paper-dark:#15120d;
+  --reading-paper-dark-ink:#ede8df;
+  --reading-paper-light-accent:#b37d22;
+  --reading-paper-dark-accent:#d4a84b;
+  --reading-paper-light-accent-bg:#fbf3e4;
+  --reading-paper-dark-accent-bg:#221c13;
+  --reading-paper-white-border:#ccc;
+  --reading-paper-cream-border:#9b8069;
+  --reading-paper-gray-border:#bbb;
+  --reading-paper-dark-border:#3a3227;
+  --copy-paper-white:#fff;
+  --copy-paper-cream:#fbf4e6;
+  --copy-paper-gray:#eeede6;
+  --copy-paper-ink:#1c1a15;
+  --copy-paper-rule:#ddd8cc;
+  --copy-ghost-opacity:.28;
+  --practice-meditation-tint: var(--reading-paper-purple);
+  --practice-meditation-ink: var(--reading-paper-purple-ink);
+  --reading-paper-purple: #eee6fa;
+  --reading-paper-purple-ink: #594174;
+  --reading-paper-purple-border: var(--reading-paper-purple-ink);
+  --practice-mantra-tint: #e2effb;
+  --practice-mantra-ink: #315b83;
+  --practice-card-blue-start: #7bb9f5;
+  --practice-card-blue-end: #bbddff;
+  --practice-card-blue-ink: #244f7b;
+  --practice-card-mint-start: #69d2b4;
+  --practice-card-mint-end: #b1edda;
+  --practice-card-mint-ink: #185d51;
+  --practice-name-copy-start: color-mix(in srgb, var(--practice-card-blue-start), var(--practice-card-mint-start));
+  --practice-name-copy-end: color-mix(in srgb, var(--practice-card-blue-end), var(--practice-card-mint-end));
+  --practice-name-copy-ink: color-mix(in srgb, var(--practice-card-blue-ink) 75%, var(--on-gold));
+
+  --ui-font-scale: 1;
+  --font-app: -apple-system, BlinkMacSystemFont, 'San Francisco Web', system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-reader: 'Bookerly', Georgia, serif;
+  --font-size-body: calc(12.15px * var(--ui-font-scale, 1));
+  --font-size-input: max(16px, calc(16px * var(--ui-font-scale, 1)));
+  --font-size-meta: calc(10.35px * var(--ui-font-scale, 1));
+  --font-size-label: calc(11.25px * var(--ui-font-scale, 1));
+  --font-size-card-title: calc(13.5px * var(--ui-font-scale, 1));
+  --font-size-section-title: calc(15.75px * var(--ui-font-scale, 1));
+  --font-size-ritual-reading: calc(15.3px * var(--ui-font-scale, 1));
+  --font-size-nav: 12.5px;
+  --gold: #c8963e;
+  --gold2: #e0ad5a;
+  --gold-light: #fbf4e6;
+  --gold-muted: #f5e9cc;
+  --on-gold: #24180c;
+  --video-surface: var(--on-gold);
+  --video-ink: #fafaf8;
+  --highlight-ink: #24180c;
+  --brown: #6b4c2a;
+  --brown2: #8b6340;
+  --brown-dark: #3e2c1a;
+  --bg: #fafaf8;
+  --bg2: #f4f3ee;
+  --bg3: #eeede6;
+  --white: #fff;
+  --card: #fff;
+  --hover: #f5f0e8;
+  --text: #1c1a15;
+  --text2: #4a4033;
+  --muted: #8a7b68;
+  --border: #ddd8cc;
+  --border2: #e8e4da;
+  --red: #c05050;
+  --danger-text: #a1342a;
+  --green-ok: #4a7c59;
+  --vegan-green: #15543a;
+  --vegan-green-deep: #0e3e2b;
+  --vegan-on-green: #fff;
+  --library-popular-ink: #f97316;
+  --library-popular-tint: rgba(249,115,22,.08);
+  --nav-base-h: 62px;
+  --touch-target-size: 44px;
+  --meditation-surface: #171320;
+  --nav-h: var(--nav-base-h);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+  --radius-card: 18px;
+  --radius-feature: 24px;
+  --radius-control: 14px;
+  --practice-dialog-width: 680px;
+  --practice-dialog-height: min(760px, calc(100dvh - max(16px, var(--app-safe-top, 0px)) - max(16px, env(safe-area-inset-bottom, 0px))));
+  --practice-dialog-backdrop: #0007;
+  --notice-padding: 12px;
+  --notice-gap: 8px;
+  --notice-glass: #ecf9edc9;
+  --notice-edge: #ffffffdb;
+  --notice-ink: #163e2b;
+  --notice-copy: #345b47;
+  --notice-chip: #ffffff96;
+  --notice-line: #37735448;
+  --notice-primary: #205e40;
+  --notice-on-primary: #fff;
+  --notice-shadow: 0 8px 24px #1d473526;
+  --notice-filter: blur(14px);
+  --dialog-glass-background: color-mix(in srgb, var(--card) 78%, transparent);
+  --dialog-glass-border: color-mix(in srgb, var(--card) 70%, var(--border));
+  --dialog-glass-filter: blur(22px) saturate(135%);
+  --dialog-glass-shadow: var(--shadow-xl), inset 0 1px 0 var(--glass-button-edge);
+  --dialog-compact-width: 400px;
+  --dialog-corner: 16px;
+  --dialog-action-gap: 8px;
+  --dialog-action-space: 16px;
+  --font-size-dialog-title: calc(15.3px * var(--ui-font-scale, 1));
+  --font-size-dialog-count: calc(25.2px * var(--ui-font-scale, 1));
+  --practice-name-copy-card-start: #c9dfbc;
+  --practice-name-copy-card-end: #a9dfce;
+  --practice-name-copy-card-ink: #274b16;
+  --practice-scripture-copy-card-start: #edd69a;
+  --practice-scripture-copy-card-end: #edc5a8;
+  --practice-scripture-copy-card-ink: #674811;
+  --practice-card-ink-strong: #3e2c1a;
+  --practice-scripture-icon: #41759d;
+  --practice-flower-icon: #ed799e;
+  --space-page: 20px;
+  --motion-press: 120ms;
+  --motion-fast: 180ms;
+  --motion-enter: 260ms;
+  --ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --calendar-bg: #f4eee2;
+  --calendar-ink: #48392a;
+  --calendar-accent: #84602c;
+  --calendar-muted: #70604e;
+  --shadow-sm: 0 1px 4px rgba(60, 40, 10, 0.05);
+  --shadow: 0 2px 16px rgba(60, 40, 10, 0.07);
+  --shadow-md: 0 4px 16px rgba(60, 40, 10, 0.08);
+  --shadow-lg: 0 8px 40px rgba(60, 40, 10, 0.12);
+  --shadow-xl: 0 20px 60px rgba(60, 40, 10, 0.16);
+  --glass-button-edge: color-mix(in srgb, var(--video-ink) 65%, transparent);
+  --glass-button-shade: color-mix(in srgb, var(--on-gold) 10%, transparent);
+  --glass-button-shadow: inset 0 1px 0 var(--glass-button-edge), inset 0 8px 16px color-mix(in srgb, var(--glass-button-edge) 18%, transparent), inset 0 -1px 0 var(--glass-button-shade), var(--shadow);
+  --glass-button-pressed-shadow: inset 0 1px 3px var(--glass-button-shade), inset 0 -1px 0 var(--glass-button-edge);
+  --app-safe-top: env(safe-area-inset-top, 0px);
+  color-scheme: light;
+}
+
+:root[data-native-app='true'] {
+  --app-safe-top: max(env(safe-area-inset-top, 0px), 32px);
+}
+
+/* Android đã chừa system bars/cutout bằng margin native, không cộng thêm 32px. */
+:root[data-native-app='true'][data-native-insets='true'] {
+  --app-safe-top: 0px;
+}
+
+:root[data-theme='dark'] {
+  --notice-glass: #203d31dc;
+  --notice-edge: #8bc0a45c;
+  --notice-ink: #edf9ef;
+  --notice-copy: #c3dccb;
+  --notice-chip: #b4edc91b;
+  --notice-line: #a9ddbd66;
+  --notice-primary: #b1dfbf;
+  --notice-on-primary: #153b28;
+  --notice-shadow: 0 8px 24px #07160e70;
+  --calendar-bg: var(--bg2);
+  --calendar-ink: var(--text);
+  --calendar-accent: var(--gold2);
+  --calendar-muted: var(--text2);
+  --library-popular-ink: #fb923c;
+  --library-popular-tint: rgba(249,115,22,.15);
+  --practice-meditation-tint:#30273d;
+  --practice-meditation-ink:#d4c2eb;
+  --practice-mantra-tint:#1d3041;
+  --practice-mantra-ink:#b9d4ef;
+  --gold: #d4a84b;
+  --gold2: #e8bc6a;
+  --gold-light: #2a2318;
+  --gold-muted: #2e2415;
+  --brown: #c8a87a;
+  --brown2: #d4b890;
+  --brown-dark: #e8d0a8;
+  --bg: #15120d;
+  --bg2: #1c1812;
+  --bg3: #231e16;
+  --white: #1f1b14;
+  --card: #1c1812;
+  --hover: #2a2318;
+  --text: #ede8df;
+  --text2: #c8bfb0;
+  --muted: #8a7e6e;
+  --border: #3a3226;
+  --border2: #2e2820;
+  --red: #e06060;
+  --danger-text: #e06060;
+  --green-ok: #6aa87a;
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.2);
+  --shadow: 0 2px 16px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.5);
+  --glass-button-edge: color-mix(in srgb, var(--video-ink) 16%, transparent);
+  color-scheme: dark;
+}
+
+/* Giao diện ứng dụng dùng cùng bảng giấy; data-theme vẫn giữ contract sáng/tối. */
+:root[data-theme='light'][data-app-palette] {
+  --app-palette-surface: var(--reading-paper-white);
+  --bg: var(--app-palette-surface);
+  --bg2: var(--app-palette-surface);
+  --bg3: var(--app-palette-surface);
+  --card: var(--app-palette-surface);
+  --white: var(--app-palette-surface);
+  --muted: var(--text2);
+}
+:root[data-theme='light'][data-app-palette='cream'] {
+  --app-palette-surface: var(--reading-paper-cream);
+  --text: var(--reading-paper-cream-ink);
+}
+:root[data-theme='light'][data-app-palette='gray'] {
+  --app-palette-surface: var(--reading-paper-gray);
+  --text: var(--reading-paper-gray-ink);
+}
+:root[data-theme='light'][data-app-palette='purple'] {
+  --app-palette-surface: var(--reading-paper-purple);
+  --text: var(--reading-paper-purple-ink);
+  --text2: var(--reading-paper-purple-ink);
+  --brown: var(--reading-paper-purple-ink);
+  --brown2: var(--reading-paper-purple-ink);
+  --brown-dark: var(--reading-paper-purple-ink);
+  --gold: var(--reading-paper-purple-ink);
+  --gold2: var(--reading-paper-purple-ink);
+  --on-gold: var(--reading-paper-white);
+  --gold-light: color-mix(in srgb, var(--reading-paper-purple-ink) 8%, var(--reading-paper-purple));
+  --gold-muted: color-mix(in srgb, var(--reading-paper-purple-ink) 14%, var(--reading-paper-purple));
+  --border: color-mix(in srgb, var(--reading-paper-purple-border) 30%, var(--reading-paper-purple));
+  --border2: var(--border);
+}
+:root[data-app-palette]:not(:has(.reader-modal, .tt-preview, .tt-practice)) :is(.qts-nav, .nav, .tt-topbar, .qts-bottom-nav, .qts-footer) {
+  background: var(--bg);
+  color: var(--text);
+}
+:root[data-app-palette]:not(:has(.reader-modal, .tt-preview, .tt-practice)) .tt-topbar {
+  --gold: var(--text);
+  --gold2: var(--text);
+}

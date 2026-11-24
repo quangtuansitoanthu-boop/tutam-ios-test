@@ -1,0 +1,2556 @@
+[
+  {
+    "id": "dish_01",
+    "name": "Cháo đậu xanh hạt sen",
+    "meal_types": [
+      "morning"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 40,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Gạo tẻ thơm",
+        "amount": "100g"
+      },
+      {
+        "name": "Đậu xanh cà vỏ",
+        "amount": "50g",
+        "note": "ngâm 30 phút"
+      },
+      {
+        "name": "Hạt sen tươi",
+        "amount": "50g",
+        "note": "bỏ tâm sen nếu sợ đắng"
+      },
+      {
+        "name": "Mè đen rang",
+        "amount": "1 muỗng canh"
+      },
+      {
+        "name": "Dầu mè & muối",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Vo sạch gạo và đậu xanh, cho vào nồi cùng 1 lít nước, đun sôi rồi hạ nhỏ lửa ninh nhừ 30 phút.",
+      "Cho hạt sen tươi vào nấu cùng thêm 10 phút đến khi hạt sen bở mềm.",
+      "Nêm chút muối hạt nhạt thanh cho vừa khẩu vị.",
+      "Múc cháo ra tô, rắc mè đen rang thơm và nhỏ vài giọt dầu mè lên bề mặt."
+    ],
+    "nutrition": {
+      "protein_g": 9,
+      "fiber_g": 6,
+      "calories_kcal": 280,
+      "highlight": "Giàu đạm thực vật, hạt sen an thần giúp tâm an tĩnh đầu ngày"
+    },
+    "tags": [
+      "an thần",
+      "nhẹ bụng",
+      "bổ dưỡng",
+      "dễ tiêu"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_02",
+    "name": "Bánh mì kẹp đậu hũ sả ớt",
+    "meal_types": [
+      "morning"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 20,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bánh mì giòn",
+        "amount": "1 ổ"
+      },
+      {
+        "name": "Đậu hũ trắng",
+        "amount": "1 miếng (150g)"
+      },
+      {
+        "name": "Sả băm & ớt",
+        "amount": "1 muỗng canh"
+      },
+      {
+        "name": "Dưa leo & cà rốt đồ chua",
+        "amount": "50g"
+      },
+      {
+        "name": "Rau mùi (ngò rí), nước tương",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Đậu hũ cắt lát dày 1cm, ướp với sả băm, ớt và 1 muỗng canh nước tương trong 5 phút.",
+      "Áp chảo đậu hũ vàng giòn hai mặt trên lửa vừa.",
+      "Xẻ dọc ổ bánh mì, phết chút nước tương hoặc pate đậu mè nếu có.",
+      "Xếp đậu hũ sả, dưa leo thái lát, đồ chua và vài cọng rau mùi vào giữa rồi thưởng thức."
+    ],
+    "nutrition": {
+      "protein_g": 14,
+      "fiber_g": 4,
+      "calories_kcal": 360,
+      "highlight": "Đậu hũ cung cấp đạm dồi dào, sả ấm bụng hỗ trợ tiêu hóa"
+    },
+    "tags": [
+      "nhanh gọn",
+      "giàu protein",
+      "tiện lợi"
+    ],
+    "emoji": "🥖"
+  },
+  {
+    "id": "dish_03",
+    "name": "Xôi nếp đậu phộng mè đen",
+    "meal_types": [
+      "morning"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 45,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Gạo nếp cái hoa vàng",
+        "amount": "150g",
+        "note": "ngâm 3-4 tiếng"
+      },
+      {
+        "name": "Đậu phộng (lạc)",
+        "amount": "50g",
+        "note": "luộc chín mềm"
+      },
+      {
+        "name": "Mè đen",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Muối mè, dừa nạo",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Trộn đều gạo nếp đã ráo nước với đậu phộng đã luộc và một nhúm muối nhỏ.",
+      "Cho vào xửng hấp khoảng 30-35 phút đến khi hạt nếp dẻo thơm, bóng mượt.",
+      "Rang thơm mè đen, giã nhẹ với một ít muối hầm.",
+      "Xới xôi ra đĩa, rắc mè đen và chút dừa nạo sợi lên trên."
+    ],
+    "nutrition": {
+      "protein_g": 11,
+      "fiber_g": 5,
+      "calories_kcal": 410,
+      "highlight": "Mè đen cực giàu canxi, đậu phộng bổ sung chất béo lành mạnh"
+    },
+    "tags": [
+      "no lâu",
+      "giàu canxi",
+      "truyền thống"
+    ],
+    "emoji": "🍚"
+  },
+  {
+    "id": "dish_04",
+    "name": "Bún riêu chay thanh tịnh",
+    "meal_types": [
+      "morning",
+      "noon"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 40,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bún tươi",
+        "amount": "200g"
+      },
+      {
+        "name": "Đậu hũ non & đậu hũ chiên",
+        "amount": "150g"
+      },
+      {
+        "name": "Cà chua chín",
+        "amount": "2 quả"
+      },
+      {
+        "name": "Nấm rơm hoặc nấm đùi gà",
+        "amount": "80g"
+      },
+      {
+        "name": "Củ cải, bắp ngọt hầm nước dùng",
+        "amount": "1 củ"
+      },
+      {
+        "name": "Rau muống chẻ, giá, ngò gai",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Hầm củ cải trắng và bắp ngọt 25 phút để lấy nước dùng ngọt tự nhiên.",
+      "Làm riêu: bóp nhuyễn đậu hũ non với chút bột nêm chay và mộc nhĩ băm nhỏ.",
+      "Xào cà chua tạo màu đỏ đẹp tự nhiên, thả vào nồi nước dùng cùng nấm rơm.",
+      "Múc từng muỗng đậu hũ làm riêu thả nổi trên mặt nước sôi.",
+      "Xếp bún vào tô, chan nước dùng riêu nóng hổi, ăn cùng rau ghém tươi sạch."
+    ],
+    "nutrition": {
+      "protein_g": 12,
+      "fiber_g": 7,
+      "calories_kcal": 330,
+      "highlight": "Nước dùng củ quả thanh khiết, cà chua dồi dào lycopene chống oxy hóa"
+    },
+    "tags": [
+      "thanh mát",
+      "món nước",
+      "ấm bụng",
+      "dễ ăn"
+    ],
+    "emoji": "🍜"
+  },
+  {
+    "id": "dish_05",
+    "name": "Phở nấm hương gừng nướng",
+    "meal_types": [
+      "morning"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 45,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bánh phở tươi",
+        "amount": "200g"
+      },
+      {
+        "name": "Nấm hương, nấm đùi gà",
+        "amount": "100g"
+      },
+      {
+        "name": "Gừng tươi, hoa hồi, quế chi",
+        "amount": "nướng thơm"
+      },
+      {
+        "name": "Củ cải trắng, lê gọt vỏ",
+        "amount": "nấu nước dùng"
+      },
+      {
+        "name": "Ngò gai, húng quế, giá đỗ",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Nướng thơm gừng, hoa hồi, quế chi rồi cho vào nồi cùng củ cải, lê hầm nước ngọt 30 phút.",
+      "Nấm hương ngâm mềm, nấm đùi gà xắt lát mỏng, xào áp chảo với chút nước tương.",
+      "Trần bánh phở qua nước sôi, xếp vào tô lớn.",
+      "Bày nấm xào lên mặt, chan nước dùng phở trong vắt, rắc ngò gai, ăn kèm chanh ớt."
+    ],
+    "nutrition": {
+      "protein_g": 9,
+      "fiber_g": 5,
+      "calories_kcal": 310,
+      "highlight": "Vị ngọt hoàn toàn từ hoa quả và nấm, gừng hồi làm ấm tỳ vị"
+    },
+    "tags": [
+      "ấm tỳ vị",
+      "truyền thống",
+      "thơm ngon"
+    ],
+    "emoji": "🍲"
+  },
+  {
+    "id": "dish_06",
+    "name": "Cháo yến mạch chuối hạt chia",
+    "meal_types": [
+      "morning"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 10,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Yến mạch cán dẹt",
+        "amount": "50g"
+      },
+      {
+        "name": "Sữa đậu nành hoặc sữa hạt điều",
+        "amount": "250ml"
+      },
+      {
+        "name": "Chuối tiêu chín",
+        "amount": "1 quả"
+      },
+      {
+        "name": "Hạt chia",
+        "amount": "1 muỗng cà phê"
+      },
+      {
+        "name": "Quế bột",
+        "amount": "1 nhúm nhỏ"
+      }
+    ],
+    "steps": [
+      "Đun nhẹ sữa hạt trong nồi nhỏ, cho yến mạch vào khuấy đều tay 3-5 phút đến khi sánh mịn.",
+      "Dằm nhuyễn 1/2 quả chuối vào cháo, phần còn lại thái lát mỏng xếp lên trên.",
+      "Tắt bếp, múc cháo ra chén, rắc hạt chia và chút bột quế thơm.",
+      "Dùng ấm ngay đầu ngày để nạp năng lượng tươi mới."
+    ],
+    "nutrition": {
+      "protein_g": 10,
+      "fiber_g": 8,
+      "calories_kcal": 290,
+      "highlight": "Chất xơ Beta-glucan bảo vệ tim mạch, hạt chia giàu omega-3 ALA"
+    },
+    "tags": [
+      "nhanh 10 phút",
+      "giàu omega-3",
+      "tốt tim mạch"
+    ],
+    "emoji": "🍌"
+  },
+  {
+    "id": "dish_07",
+    "name": "Bánh cuốn chay nhân nấm mộc nhĩ",
+    "meal_types": [
+      "morning"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 35,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bánh cuốn tráng sẵn",
+        "amount": "250g"
+      },
+      {
+        "name": "Nấm đùi gà, mộc nhĩ băm nhỏ",
+        "amount": "100g"
+      },
+      {
+        "name": "Cà rốt bào sợi nhuyễn",
+        "amount": "30g"
+      },
+      {
+        "name": "Nước tương pha chanh đường ớt",
+        "amount": "3 muỗng canh"
+      },
+      {
+        "name": "Dầu mè, rau thơm",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Xào thơm nấm đùi gà, mộc nhĩ và cà rốt với chút dầu mè và hạt nêm chay làm nhân.",
+      "Trải bánh cuốn ra đĩa, xúc nhân vào giữa rồi cuộn tròn gọn gàng.",
+      "Pha nước chấm chay thanh từ nước tương ngon, nước dừa tươi, chanh và ớt chỉ thiên.",
+      "Cắt bánh miếng vừa ăn, rắc rau thơm và chấm nước tương thanh dịu."
+    ],
+    "nutrition": {
+      "protein_g": 8,
+      "fiber_g": 5,
+      "calories_kcal": 270,
+      "highlight": "Mộc nhĩ giàu chất chống đông máu tự nhiên và khoáng chất vi lượng"
+    },
+    "tags": [
+      "thanh nhẹ",
+      "dễ tiêu",
+      "bữa sáng ngon"
+    ],
+    "emoji": "🥟"
+  },
+  {
+    "id": "dish_08",
+    "name": "Sinh tố xanh rau bina chuối hạt lanh",
+    "meal_types": [
+      "morning"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 5,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Cải bó xôi (rau bina)",
+        "amount": "50g",
+        "note": "rửa sạch để ráo"
+      },
+      {
+        "name": "Chuối chín đông lạnh",
+        "amount": "1 quả"
+      },
+      {
+        "name": "Sữa hạt sen hoặc đậu nành",
+        "amount": "200ml"
+      },
+      {
+        "name": "Bột hạt lanh xay mịn",
+        "amount": "1 muỗng canh"
+      },
+      {
+        "name": "Chút gừng tươi",
+        "amount": "1 lát mỏng"
+      }
+    ],
+    "steps": [
+      "Cho rau bina, chuối đông lạnh, sữa hạt và lát gừng nhỏ vào cối xay sinh tố.",
+      "Xay nhuyễn tốc độ cao trong 45-60 giây đến khi hỗn hợp mịn như kem.",
+      "Rót ra ly thủy tinh, rắc bột hạt lanh lên bề mặt.",
+      "Uống từng ngụm chậm rãi để hấp thu trọn vẹn enzyme và dưỡng chất."
+    ],
+    "nutrition": {
+      "protein_g": 7,
+      "fiber_g": 6,
+      "calories_kcal": 220,
+      "highlight": "Bổ sung sắt non-heme kèm vitamin C từ chuối, giàu Omega-3 từ hạt lanh"
+    },
+    "tags": [
+      "5 phút",
+      "giàu sắt",
+      "thải độc",
+      "tươi mới"
+    ],
+    "emoji": "🥤"
+  },
+  {
+    "id": "dish_09",
+    "name": "Bánh ướt cuộn rau mầm sốt tương mè",
+    "meal_types": [
+      "morning"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 15,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bánh ướt tươi",
+        "amount": "200g"
+      },
+      {
+        "name": "Rau mầm củ cải trắng",
+        "amount": "50g"
+      },
+      {
+        "name": "Dưa leo, cà rốt thái chỉ",
+        "amount": "50g"
+      },
+      {
+        "name": "Sốt mè rang chay",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Đậu phộng rang giã dập",
+        "amount": "1 muỗng canh"
+      }
+    ],
+    "steps": [
+      "Trải bánh ướt phẳng lên đĩa sạch.",
+      "Đặt rau mầm, dưa leo và cà rốt thái chỉ vào đầu mép bánh.",
+      "Cuộn tròn chặt tay tngò rí các cuốn thon dài vừa miệng.",
+      "Cắt đôi cuốn bánh, chấm sốt mè rang chay bùi béo rắc đậu phộng thơm."
+    ],
+    "nutrition": {
+      "protein_g": 6,
+      "fiber_g": 4,
+      "calories_kcal": 240,
+      "highlight": "Rau mầm giàu enzyme tiêu hóa sống, mè rang cung cấp canxi và kẽm"
+    },
+    "tags": [
+      "tươi sống",
+      "thanh sạch",
+      "nhanh gọn"
+    ],
+    "emoji": "🥗"
+  },
+  {
+    "id": "dish_10",
+    "name": "Cháo gạo lứt rong biển gừng tươi",
+    "meal_types": [
+      "morning",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 45,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Gạo lứt huyết rồng",
+        "amount": "80g",
+        "note": "ngâm 2 tiếng"
+      },
+      {
+        "name": "Rong biển khô ngâm nở",
+        "amount": "20g"
+      },
+      {
+        "name": "Gừng tươi xắt sợi",
+        "amount": "1 muỗng cà phê"
+      },
+      {
+        "name": "Hạt nêm nấm chay, dầu mè",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Ninh gạo lứt với 800ml nước trên lửa nhỏ khoảng 35 phút cho hạt gạo nở búp.",
+      "Cho rong biển đã rửa sạch cắt khúc và gừng thái chỉ vào nồi.",
+      "Nấu thêm 10 phút, nêm hạt nêm nấm và một nhúm muối hầm.",
+      "Tắt bếp, múc ra chén, nhỏ vài giọt dầu mè nguyên chất giữ ấm cơ thể."
+    ],
+    "nutrition": {
+      "protein_g": 7,
+      "fiber_g": 6,
+      "calories_kcal": 260,
+      "highlight": "Rong biển bổ sung iod và khoáng đại dương, gạo lứt giữ trọn vitamin nhóm B"
+    },
+    "tags": [
+      "dưỡng sinh",
+      "giàu iod",
+      "ấm bụng",
+      "gạo lứt"
+    ],
+    "emoji": "🍲"
+  },
+  {
+    "id": "dish_11",
+    "name": "Đậu hũ kho nấm đùi gà sả ớt",
+    "meal_types": [
+      "noon"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 25,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Đậu hũ trắng chiên sơ",
+        "amount": "2 bìa (250g)"
+      },
+      {
+        "name": "Nấm đùi gà tươi",
+        "amount": "150g"
+      },
+      {
+        "name": "Sả băm nhuyễn",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Nước tương tamari, nước màu dừa",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Ớt sừng, tiêu đen giã dập",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Đậu hũ cắt miếng vuông quân cờ, nấm đùi gà rửa sạch khía nhẹ bề mặt cho ngấm sốt.",
+      "Phi thơm sả băm trên chảo dầu nóng đến khi ngả vàng óng.",
+      "Cho nấm đùi gà và đậu hũ vào đảo đều, rưới nước tương, chút nước màu dừa và đường thốt nốt.",
+      "Thêm 1/2 chén nước ấm, đậy nắp kho liu riu 15 phút cho nước kho sánh quyện đậm đà.",
+      "Rắc tiêu giã dập, dùng nóng cùng cơm gạo lứt hoặc cơm trắng."
+    ],
+    "nutrition": {
+      "protein_g": 18,
+      "fiber_g": 5,
+      "calories_kcal": 310,
+      "highlight": "Cung cấp lượng đạm cao vượt trội, nấm đùi gà giàu ergothioneine chống lão hóa"
+    },
+    "tags": [
+      "đậm đà đưa cơm",
+      "giàu protein",
+      "món kho kinh điển"
+    ],
+    "emoji": "🥘"
+  },
+  {
+    "id": "dish_12",
+    "name": "Mít non kho nước dừa xiêm",
+    "meal_types": [
+      "noon"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 35,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Mít non luộc mềm",
+        "amount": "250g",
+        "note": "cắt lát dày"
+      },
+      {
+        "name": "Nước dừa tươi xiêm",
+        "amount": "1 chén (200ml)"
+      },
+      {
+        "name": "Sả đập dập",
+        "amount": "2 nhánh"
+      },
+      {
+        "name": "Nước tương, dầu màu điều, tiêu",
+        "amount": "vừa đủ"
+      },
+      {
+        "name": "Rau răm rửa sạch",
+        "amount": "vài nhánh"
+      }
+    ],
+    "steps": [
+      "Chiên sơ hai mặt miếng mít non cho hơi se lại để khi kho không bị nát.",
+      "Lót sả đập dập dưới đáy nồi, xếp mít non lên trên.",
+      "Rưới nước tương, đường thốt nốt, dầu màu điều và đổ ngập nước dừa tươi.",
+      "Kho trên lửa nhỏ 25-30 phút đến khi nước dừa cạn sền sệt, mít chuyển màu nâu cánh gián bùi ngậy.",
+      "Múc ra đĩa, rắc tiêu và vài lá rau răm thơm nồng."
+    ],
+    "nutrition": {
+      "protein_g": 6,
+      "fiber_g": 9,
+      "calories_kcal": 280,
+      "highlight": "Chất xơ tự nhiên cực dồi dào, thớ mít bùi ngọt mô phỏng cấu trúc món kho hoàn hảo"
+    },
+    "tags": [
+      "đặc sản miền Trung",
+      "giàu chất xơ",
+      "dân dã thanh tịnh"
+    ],
+    "emoji": "🍲"
+  },
+  {
+    "id": "dish_13",
+    "name": "Canh chua chay Nam Bộ",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 20,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Đậu hũ non",
+        "amount": "1 hộp (200g)"
+      },
+      {
+        "name": "Thơm (dứa) xắt lát",
+        "amount": "1/4 quả"
+      },
+      {
+        "name": "Cà chua chín, đậu bắp",
+        "amount": "2 quả, 5 quả"
+      },
+      {
+        "name": "Bạc hà (dọc mùng), giá đỗ",
+        "amount": "100g"
+      },
+      {
+        "name": "Nước cốt me, ngò ôm, ngò gai",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Nấu sôi 800ml nước, cho nước cốt me và thơm vào trước để tạo vị chua ngọt thanh mát.",
+      "Thêm cà chua, đậu bắp và bạc hà vào đun sôi tiếp 3 phút.",
+      "Thả nhẹ đậu hũ non cắt miếng vào nồi, nêm đường phèn, muối hầm và hạt nêm chay cho vị hài hòa.",
+      "Thêm giá đỗ, tắt bếp ngay để rau củ giữ trọn độ giòn ngọt.",
+      "Múc canh ra tô, rắc ngò ôm và ngò gai thái nhỏ thơm nức."
+    ],
+    "nutrition": {
+      "protein_g": 10,
+      "fiber_g": 6,
+      "calories_kcal": 190,
+      "highlight": "Vitamin C từ me dứa giúp tăng cường hấp thu sắt gấp 3 lần cho bữa cơm chay"
+    },
+    "tags": [
+      "giải nhiệt",
+      "tăng hấp thu sắt",
+      "kinh điển mâm cơm"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_14",
+    "name": "Rau muống xào tương bần gừng non",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 10,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Rau muống ngọn non",
+        "amount": "300g"
+      },
+      {
+        "name": "Tương bần truyền thống",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Gừng non xắt sợi chỉ",
+        "amount": "1 muỗng canh"
+      },
+      {
+        "name": "Dầu phộng (dầu lạc)",
+        "amount": "1 muỗng canh"
+      }
+    ],
+    "steps": [
+      "Rau muống nhặt ngọn non, rửa sạch ngâm nước muối loãng, vớt ra để ráo.",
+      "Làm nóng dầu phộng trong chảo lớn, cho gừng non xắt sợi vào phi thơm lừng.",
+      "Trút rau muống vào xào trên lửa lớn đảo thật nhanh tay giữ màu xanh mướt.",
+      "Rưới 2 muỗng tương bần vào, đảo nhanh thêm 30 giây rồi tắt bếp bày ra đĩa."
+    ],
+    "nutrition": {
+      "protein_g": 6,
+      "fiber_g": 5,
+      "calories_kcal": 140,
+      "highlight": "Rau muống giàu sắt và diệp lục tố, gừng non trợ tiêu hóa chống lạnh bụng"
+    },
+    "tags": [
+      "nhanh 10 phút",
+      "giàu sắt",
+      "không ngũ tân"
+    ],
+    "emoji": "🥬"
+  },
+  {
+    "id": "dish_15",
+    "name": "Đậu hũ sốt cà chua ngò rí",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 15,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Đậu hũ mơ hoặc đậu khuôn",
+        "amount": "3 bìa (300g)"
+      },
+      {
+        "name": "Cà chua chín mọng",
+        "amount": "3 quả to",
+        "note": "băm nhuyễn"
+      },
+      {
+        "name": "Ngò rí (rau mùi)",
+        "amount": "1 nắm nhỏ"
+      },
+      {
+        "name": "Nước tương, đường thốt nốt, tiêu",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Đậu hũ cắt miếng tam giác, chiên vàng giòn mặt ngoài hoặc áp chảo không dầu.",
+      "Phi thơm đầu cọng ngò rí giã dập, cho cà chua băm vào xào nhuyễn tngò rí sốt mịn.",
+      "Nêm nước tương, đường thốt nốt và chút nước ấm tạo độ sánh chua ngọt.",
+      "Thả đậu hũ vào rim nhỏ lửa 5-7 phút cho ngấm đẫm sốt cà chua.",
+      "Bày ra đĩa, rắc tiêu đen và lá ngò rí tươi lên trên."
+    ],
+    "nutrition": {
+      "protein_g": 16,
+      "fiber_g": 4,
+      "calories_kcal": 260,
+      "highlight": "Lycopene hòa tan trong chất béo của đậu nành tăng sinh khả dụng bảo vệ tế bào"
+    },
+    "tags": [
+      "dễ làm",
+      "giàu canxi",
+      "món ăn tuổi thơ"
+    ],
+    "emoji": "🍅"
+  },
+  {
+    "id": "dish_16",
+    "name": "Bún bò Huế chay thơm sả sa tế",
+    "meal_types": [
+      "noon"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 45,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bún bò sợi to",
+        "amount": "200g"
+      },
+      {
+        "name": "Đậu hũ chiên, chả lụa chay đậu xanh",
+        "amount": "100g"
+      },
+      {
+        "name": "Nấm bào ngư & nấm đùi gà",
+        "amount": "100g"
+      },
+      {
+        "name": "Sả cây đập dập",
+        "amount": "5 nhánh"
+      },
+      {
+        "name": "Sa tế chay dầu màu điều, thơm (dứa)",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Bắp chuối bào, giá sống, rau thơm",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Hầm thơm, củ cải và 5 nhánh sả đập dập trong 30 phút lấy nước ngọt nồng ấm đặc trưng xứ Huế.",
+      "Xào nấm bào ngư, đậu hũ chiên cùng sa tế chay và dầu màu điều cho dậy hương.",
+      "Trút toàn bộ phần xào vào nồi nước dùng, nêm hạt nêm nấm và muối hạt vừa miệng.",
+      "Trần bún qua nước sôi, xếp vào tô cùng chả chay đậu xanh cắt lát.",
+      "Chan nước dùng sả ớt đỏ au sôi sục, thưởng thức cùng bắp chuối bào thanh mát."
+    ],
+    "nutrition": {
+      "protein_g": 15,
+      "fiber_g": 7,
+      "calories_kcal": 380,
+      "highlight": "Tinh dầu sả kháng khuẩn mạnh mẽ, phong phú axit amin thiết yếu từ nấm tự nhiên"
+    },
+    "tags": [
+      "đậm đà xứ Huế",
+      "ấm tỳ vị",
+      "cuối tuần"
+    ],
+    "emoji": "🍜"
+  },
+  {
+    "id": "dish_17",
+    "name": "Cơm chiên hạt sen ngũ sắc",
+    "meal_types": [
+      "noon"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 20,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Cơm nguội ráo hạt (hoặc cơm lứt)",
+        "amount": "1 tô (250g)"
+      },
+      {
+        "name": "Hạt sen tươi luộc chín",
+        "amount": "50g"
+      },
+      {
+        "name": "Cà rốt, đậu cô ve, bắp ngọt hạt",
+        "amount": "mỗi loại 30g"
+      },
+      {
+        "name": "Đậu hũ non nghiền bột nghệ",
+        "amount": "50g",
+        "note": "tạo màu vàng tươi"
+      },
+      {
+        "name": "Dầu mè, tiêu đen, nước tương",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Cắt hạt lựu cà rốt, đậu cô ve; luộc sơ cùng bắp ngọt và hạt sen.",
+      "Bóp đậu hũ non với chút bột nghệ, xào săn trên chảo làm tơi như trứng chay.",
+      "Cho cơm nguội vào đảo đều tay trên lửa lớn cho hạt cơm săn lại và lên màu vàng đẹp.",
+      "Trút toàn bộ rau củ ngũ sắc và hạt sen vào đảo đều trong 3 phút.",
+      "Nêm nước tương, rắc tiêu đen thơm lừng và chút dầu mè trước khi tắt bếp."
+    ],
+    "nutrition": {
+      "protein_g": 11,
+      "fiber_g": 6,
+      "calories_kcal": 390,
+      "highlight": "Ngũ sắc tượng trưng ngũ ngò rí, hạt sen dưỡng tâm, tinh bột hấp thu chậm"
+    },
+    "tags": [
+      "đẹp mắt",
+      "ngũ sắc ngũ ngò rí",
+      "no lâu"
+    ],
+    "emoji": "🍛"
+  },
+  {
+    "id": "dish_18",
+    "name": "Súp bí đỏ kem dừa hạt bí rang",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 25,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bí đỏ hồ lô chín ngọt",
+        "amount": "300g"
+      },
+      {
+        "name": "Nước cốt dừa nguyên chất",
+        "amount": "50ml"
+      },
+      {
+        "name": "Hạt bí xanh tách vỏ rang giòn",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Gừng tươi băm nhỏ",
+        "amount": "1 nhúm nhỏ"
+      },
+      {
+        "name": "Muối biển, tiêu trắng",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Bí đỏ gọt vỏ, thái lát mỏng, hấp chín mềm trong 15 phút.",
+      "Cho bí đỏ hấp cùng 200ml nước hầm rau củ và nhúm gừng vào máy xay mịn mượt.",
+      "Đổ súp vào nồi đun sôi lăn tăn, hòa nước cốt dừa, nêm muối biển vừa thanh dịu.",
+      "Múc súp ra chén sâu lòng, rắc hạt bí xanh giòn tan lên bề mặt.",
+      "Dùng nóng tạo cảm giác ấm êm, thư thái cho dạ dày."
+    ],
+    "nutrition": {
+      "protein_g": 8,
+      "fiber_g": 6,
+      "calories_kcal": 240,
+      "highlight": "Hạt bí là quán quân kẽm và magie thực vật, bí đỏ dồi dào tiền sinh tố A"
+    },
+    "tags": [
+      "dễ nuốt",
+      "giàu kẽm",
+      "đẹp da sáng mắt"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_19",
+    "name": "Gỏi cuốn nấm đậu tương đậu phộng",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 25,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bánh tráng dẻo gạo lứt",
+        "amount": "10 cái"
+      },
+      {
+        "name": "Đậu hũ áp chảo cắt que",
+        "amount": "150g"
+      },
+      {
+        "name": "Nấm đùi gà rim nước tương",
+        "amount": "100g"
+      },
+      {
+        "name": "Xà lách, dưa leo, cà rốt, húng lủi",
+        "amount": "1 đĩa to"
+      },
+      {
+        "name": "Bơ đậu phộng pha tương ngọt",
+        "amount": "4 muỗng canh"
+      }
+    ],
+    "steps": [
+      "Đậu hũ áp chảo vàng cắt thanh dài; nấm đùi gà xé sợi rim mặn ngọt se khô.",
+      "Làm sốt chấm: khuấy đều bơ đậu phộng nguyên chất, tương đen hoisin chay, nước ấm và nước cốt chanh.",
+      "Thấm ướt nhẹ bánh tráng, xếp lần lượt xà lách, rau thơm, dưa leo, đậu hũ và nấm rim vào giữa.",
+      "Gập hai mép bên cuộn tròn chặt tay thon đều.",
+      "Chấm đẫm sốt bơ đậu phộng thơm bùi, thưởng thức vị giòn mát tươi nguyên."
+    ],
+    "nutrition": {
+      "protein_g": 13,
+      "fiber_g": 7,
+      "calories_kcal": 320,
+      "highlight": "Chất béo đơn bất bão hòa từ bơ đậu phộng hòa tan vitamin, rau sống giàu enzyme"
+    },
+    "tags": [
+      "thanh mát",
+      "ít calo",
+      "nhiều rau tươi"
+    ],
+    "emoji": "🌯"
+  },
+  {
+    "id": "dish_20",
+    "name": "Đậu cô ve xào nấm kim châm cà rốt",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 15,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Đậu cô ve non",
+        "amount": "150g",
+        "note": "tước xơ bẻ đôi"
+      },
+      {
+        "name": "Nấm kim châm tươi",
+        "amount": "100g",
+        "note": "cắt gốc xé nhỏ"
+      },
+      {
+        "name": "Cà rốt tỉa hoa thái lát",
+        "amount": "1/2 củ"
+      },
+      {
+        "name": "Nước tương ngon, dầu mè, tiêu",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Chần sơ đậu cô ve và cà rốt qua nước sôi có pha chút muối để giữ màu xanh giòn.",
+      "Làm nóng dầu thực vật trong chảo, cho cà rốt và đậu vào đảo nhanh trên lửa lớn.",
+      "Thêm nấm kim châm vào đảo nhanh trong 1 phút để nấm không bị ra nước.",
+      "Nêm 1 muỗng nước tương và tiêu đen giã nhỏ vừa ăn.",
+      "Trút ra đĩa, rưới vài giọt dầu mè bóng đẹp thơm nồng."
+    ],
+    "nutrition": {
+      "protein_g": 6,
+      "fiber_g": 5,
+      "calories_kcal": 130,
+      "highlight": "Nấm kim châm giàu vitamin nhóm B hỗ trợ chuyển hóa, đậu cô ve dồi dào folate"
+    },
+    "tags": [
+      "15 phút",
+      "thanh mát",
+      "đầy đủ sắc màu"
+    ],
+    "emoji": "🫛"
+  },
+  {
+    "id": "dish_21",
+    "name": "Bánh xèo nghệ chay giòn rụm",
+    "meal_types": [
+      "noon"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 35,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bột gạo pha nghệ và nước cốt dừa",
+        "amount": "200g bột"
+      },
+      {
+        "name": "Đậu xanh đãi vỏ hấp chín",
+        "amount": "50g"
+      },
+      {
+        "name": "Nấm rơm hoặc nấm hương tươi",
+        "amount": "100g"
+      },
+      {
+        "name": "Giá đỗ tươi",
+        "amount": "100g"
+      },
+      {
+        "name": "Cải bẹ xanh cay, rau xà lách ghém",
+        "amount": "1 rổ to"
+      },
+      {
+        "name": "Nước mắm chay chua ngọt thanh",
+        "amount": "1 chén"
+      }
+    ],
+    "steps": [
+      "Quấy bột bánh xèo với nước dừa loãng và bột nghệ cho sánh mượt, nghỉ 15 phút.",
+      "Láng chút dầu vào chảo gang thật nóng, múc 1 vá bột tráng mỏng quanh chảo nghe xèo xèo giòn rụm.",
+      "Rải đậu xanh chín, nấm xào và giá đỗ lên 1/2 mặt bánh, đậy nắp 2 phút cho chín vỏ giòn.",
+      "Mở nắp để vành bánh khô cong giòn tan, gập đôi bánh gắp ra đĩa.",
+      "Cuốn cùng cải bẹ xanh tươi cay nồng chấm nước mắm chay chua ngọt."
+    ],
+    "nutrition": {
+      "protein_g": 10,
+      "fiber_g": 7,
+      "calories_kcal": 360,
+      "highlight": "Curcumin từ nghệ kháng viêm bảo vệ niêm mạc ruột, đậu xanh thanh nhiệt giải độc"
+    },
+    "tags": [
+      "giòn rụm",
+      "cuối tuần ấm cúng",
+      "đậm chất quê hương"
+    ],
+    "emoji": "🥞"
+  },
+  {
+    "id": "dish_22",
+    "name": "Canh nấm đông cô hạt sen củ cải ngọt",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 35,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Hạt sen tươi hoặc khô ngâm mềm",
+        "amount": "80g"
+      },
+      {
+        "name": "Nấm đông cô tươi (hoặc nấm hương khô)",
+        "amount": "60g"
+      },
+      {
+        "name": "Củ cải trắng, cà rốt",
+        "amount": "mỗi thứ 1 củ"
+      },
+      {
+        "name": "Bông cải xanh (súp lơ)",
+        "amount": "60g"
+      },
+      {
+        "name": "Ngò rí, tiêu hạt, muối hầm",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Hầm hạt sen và củ cải trắng với 800ml nước trong 20 phút cho mềm ngọt tinh khiết.",
+      "Khía hoa trên mũ nấm đông cô, cho nấm và cà rốt vào nấu tiếp 10 phút.",
+      "Thêm súp lơ xanh vào nấu sôi bùng 2 phút cho vừa chín tới giữ sắc xanh ngọc.",
+      "Nêm muối hầm và hạt nêm chay tự nhiên cho vị thanh nhẹ.",
+      "Múc ra tô lớn, rắc ngò rí và tiêu sọ trắng giã nhỏ."
+    ],
+    "nutrition": {
+      "protein_g": 8,
+      "fiber_g": 6,
+      "calories_kcal": 180,
+      "highlight": "Vị umami thuần khiết tự nhiên của nấm đông cô kết hợp hạt sen bổ tâm dưỡng tỳ"
+    },
+    "tags": [
+      "an thần",
+      "ngọt nước",
+      "thanh tao"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_23",
+    "name": "Cháo trắng lá dứa muối mè truyền thống",
+    "meal_types": [
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 35,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Gạo tẻ ngon pha chút nếp",
+        "amount": "80g"
+      },
+      {
+        "name": "Lá dứa (lá nếp)",
+        "amount": "3 lá",
+        "note": "cuộn thắt gút"
+      },
+      {
+        "name": "Mè vàng hoặc mè đen rang thơm",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Muối hầm truyền thống",
+        "amount": "1/2 muỗng cà phê"
+      },
+      {
+        "name": "Đậu phộng rang giã nhuyễn (tùy thích)",
+        "amount": "1 muỗng canh"
+      }
+    ],
+    "steps": [
+      "Vo gạo sạch, ninh với 1 lít nước cùng bó lá dứa trên lửa liu riu 30 phút cho hạt gạo nở bung mềm nhừ.",
+      "Vớt bỏ bó lá dứa, cháo tỏa hương thơm dìu dịu mát lành.",
+      "Giã mè rang cùng muối hầm theo tỷ lệ 10 phần mè : 1 phần muối cho mịn đều bùi thơm.",
+      "Múc cháo trắng nóng hổi ra tô sánh mịn.",
+      "Rắc muối mè đậm đà lên trên, thưởng thức từng muỗng cháo thanh đạm an lành buổi tối."
+    ],
+    "nutrition": {
+      "protein_g": 6,
+      "fiber_g": 3,
+      "calories_kcal": 210,
+      "highlight": "Cực kỳ êm dịu dạ dày buổi tối, mè cung cấp canxi giúp cơ thể dễ đi vào giấc ngủ sâu"
+    },
+    "tags": [
+      "kinh điển nhà chùa",
+      "êm dịu dạ dày",
+      "ngủ ngon"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_24",
+    "name": "Đậu hũ non hấp gừng tương tamari",
+    "meal_types": [
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 15,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Đậu hũ non mịn",
+        "amount": "1 hộp (300g)"
+      },
+      {
+        "name": "Gừng tươi bánh tẻ",
+        "amount": "1 củ nhỏ",
+        "note": "bào sợi nhuyễn"
+      },
+      {
+        "name": "Nước tương tamari lâu năm",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Dầu mè nguyên chất",
+        "amount": "1 muỗng cà phê"
+      },
+      {
+        "name": "Mè rang",
+        "amount": "1 muỗng cà phê"
+      }
+    ],
+    "steps": [
+      "Khéo léo trút đậu hũ non ra đĩa sâu lòng chịu nhiệt, khía vài đường nông trên mặt.",
+      "Rải đều gừng non bào sợi chỉ lên khắp mặt đậu hũ.",
+      "Đặt đĩa vào xửng hấp cách thủy trong 8-10 phút cho đậu nóng thấu và gừng dậy mùi thơm nức.",
+      "Hòa nước tương tamari cùng chút đường phèn và dầu mè rưới đều lên đĩa đậu hấp.",
+      "Rắc mè rang thơm, xúc từng muỗng đậu mềm mịn tan ngay đầu lưỡi."
+    ],
+    "nutrition": {
+      "protein_g": 14,
+      "fiber_g": 2,
+      "calories_kcal": 170,
+      "highlight": "Đạm đậu nành hoàn chỉnh tinh sạch, gừng xua tan khí hàn buổi đêm giữ ấm cơ thể"
+    },
+    "tags": [
+      "nhẹ bụng tối",
+      "ấm bụng",
+      "dễ làm 15 phút"
+    ],
+    "emoji": "🥢"
+  },
+  {
+    "id": "dish_25",
+    "name": "Canh rau ngót nấu đậu hũ non",
+    "meal_types": [
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 10,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Rau ngót tuốt lá sạch",
+        "amount": "150g"
+      },
+      {
+        "name": "Đậu hũ non",
+        "amount": "1 bìa (150g)"
+      },
+      {
+        "name": "Hạt nêm nấm chay, muối",
+        "amount": "vừa đủ"
+      },
+      {
+        "name": "Dầu ăn",
+        "amount": "1 muỗng cà phê"
+      }
+    ],
+    "steps": [
+      "Rau ngót rửa sạch, dùng tay vò nhẹ cho dập lá để khi nấu nước canh ngọt đượm.",
+      "Đun sôi 600ml nước, thả đậu hũ non xắt miếng vuông vào đun sôi bùng.",
+      "Thả rau ngót vào, nêm 1 muỗng hạt nêm nấm và nhúm muối vừa miệng.",
+      "Nấu sôi lại khoảng 2 phút cho rau chín mềm giữ màu xanh non rồi tắt bếp ngay.",
+      "Múc canh ra tô dùng ấm cùng cơm thanh tịnh."
+    ],
+    "nutrition": {
+      "protein_g": 11,
+      "fiber_g": 5,
+      "calories_kcal": 130,
+      "highlight": "Rau ngót đứng đầu bảng rau về canxi (169mg/100g) và vitamin C, cực nhẹ cho thận ban đêm"
+    },
+    "tags": [
+      "10 phút",
+      "quán quân canxi",
+      "nhẹ nhàng thanh lọc"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_26",
+    "name": "Miến dong xào rau củ mộc nhĩ",
+    "meal_types": [
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 20,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Miến dong làng So",
+        "amount": "100g",
+        "note": "ngâm mềm cắt khúc"
+      },
+      {
+        "name": "Mộc nhĩ, nấm hương khô",
+        "amount": "ngâm nở thái sợi 50g"
+      },
+      {
+        "name": "Cà rốt & bắp cải thái sợi mỏng",
+        "amount": "100g"
+      },
+      {
+        "name": "Nước tương, dầu mè, tiêu thơm",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Chần miến dong qua nước sôi 1 phút, xả nước lạnh rồi trộn vài giọt dầu mè cho sợi miến tơi không dính.",
+      "Xào thơm nấm hương, mộc nhĩ, cà rốt và bắp cải trên chảo lớn với lửa lớn vừa chín tới.",
+      "Trút miến dong vào chảo, vặn nhỏ lửa, rưới nước tương ngon nêm nếm vừa vặn.",
+      "Dùng đũa xốc đều tay trong 2 phút cho sợi miến thấm gia vị óng ả mềm dai.",
+      "Rắc tiêu đen, dọn ra đĩa thưởng thức khi còn nóng hổi."
+    ],
+    "nutrition": {
+      "protein_g": 6,
+      "fiber_g": 6,
+      "calories_kcal": 250,
+      "highlight": "Tinh bột miến dong có chỉ số GI thấp, không làm tăng đường huyết ban đêm"
+    },
+    "tags": [
+      "GI thấp",
+      "dễ tiêu",
+      "dai giòn sần sật"
+    ],
+    "emoji": "🍜"
+  },
+  {
+    "id": "dish_27",
+    "name": "Súp đậu lăng đỏ khoai lang nghệ ấm",
+    "meal_types": [
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 30,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Đậu lăng đỏ tách đôi",
+        "amount": "80g",
+        "note": "rửa sạch không cần ngâm"
+      },
+      {
+        "name": "Khoai lang vàng ngọt",
+        "amount": "1 củ nhỏ (100g)",
+        "note": "gọt vỏ cắt vuông"
+      },
+      {
+        "name": "Bột nghệ nguyên chất & gừng",
+        "amount": "1/2 muỗng cà phê nghệ, 1 lát gừng"
+      },
+      {
+        "name": "Nước cốt dừa",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Rau mùi tươi",
+        "amount": "vài cọng"
+      }
+    ],
+    "steps": [
+      "Cho đậu lăng đỏ và khoai lang vào nồi cùng 600ml nước, gừng và bột nghệ.",
+      "Đun sôi rồi hạ lửa nhỏ ninh trong 20 phút đến khi đậu lăng và khoai tự nhuyễn mịn.",
+      "Dùng phới lồng khuấy nhẹ tạo độ sánh mượt tự nhiên mà không cần bột năng.",
+      "Hòa 2 muỗng nước cốt dừa béo nhẹ, nêm muối hầm vừa miệng.",
+      "Múc súp vàng óng ra tô, rắc ngò rí tươi, ăn ấm trước giờ tọa thiền hoặc nghỉ ngơi."
+    ],
+    "nutrition": {
+      "protein_g": 16,
+      "fiber_g": 9,
+      "calories_kcal": 280,
+      "highlight": "Đậu lăng đỏ giàu folate và sắt, no lâu nhưng bụng dạ nhẹ tênh, nghệ bảo vệ bao tử"
+    },
+    "tags": [
+      "giàu sắt",
+      "đậu lăng siêu đạm",
+      "ấm tỳ vị"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_28",
+    "name": "Bắp cải cuộn đậu hũ mộc nhĩ hấp thanh đạm",
+    "meal_types": [
+      "evening"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 25,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Lá bắp cải tươi nguyên lành",
+        "amount": "6 lá to"
+      },
+      {
+        "name": "Đậu hũ trắng bóp nhuyễn",
+        "amount": "150g"
+      },
+      {
+        "name": "Mộc nhĩ, cà rốt thái hạt lựu",
+        "amount": "50g"
+      },
+      {
+        "name": "Sợi miến dong cắt ngắn",
+        "amount": "20g"
+      },
+      {
+        "name": "Nước tương gừng chấm kèm",
+        "amount": "2 muỗng canh"
+      }
+    ],
+    "steps": [
+      "Chần lá bắp cải qua nước sôi cho mềm dai dễ cuộn, lạng bớt phần sống lưng lá.",
+      "Trộn đều đậu hũ nghiền, mộc nhĩ, cà rốt, miến dong với hạt nêm chay và chút tiêu làm nhân.",
+      "Trải lá bắp cải, xúc nhân vào giữa, cuộn tròn gập mép như chả giò.",
+      "Xếp các cuốn bắp cải vào xửng hấp chín trong 12-15 phút.",
+      "Gắp ra đĩa, chấm nước tương gừng thanh ngọt dịu dàng."
+    ],
+    "nutrition": {
+      "protein_g": 10,
+      "fiber_g": 5,
+      "calories_kcal": 160,
+      "highlight": "Sulforaphane trong bắp cải thải độc gan ban đêm, calo thấp không tích mỡ"
+    },
+    "tags": [
+      "thanh tao",
+      "ít calo",
+      "đẹp da"
+    ],
+    "emoji": "🥬"
+  },
+  {
+    "id": "dish_29",
+    "name": "Cháo yến mạch mè đen táo đỏ dưỡng tâm",
+    "meal_types": [
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 15,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Yến mạch cán",
+        "amount": "50g"
+      },
+      {
+        "name": "Mè đen rang thơm xay mịn",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Táo đỏ Tân Cương",
+        "amount": "4 quả",
+        "note": "khía múi"
+      },
+      {
+        "name": "Sữa hạt óc chó hoặc đậu nành",
+        "amount": "250ml"
+      },
+      {
+        "name": "Đường phèn tự nhiên (tùy thích)",
+        "amount": "1 thìa nhỏ"
+      }
+    ],
+    "steps": [
+      "Cho táo đỏ và sữa hạt vào nồi nhỏ đun sôi lăn tăn 5 phút cho táo tiết vị ngọt thanh.",
+      "Trút yến mạch và bột mè đen rang vào khuấy đều tay 3 phút trên lửa nhỏ.",
+      "Cháo sánh mịn thơm lừng mùi mè đen quyện cùng sữa hạt óc chó béo bùi.",
+      "Nêm chút xíu đường phèn nếu thích vị ngọt dịu.",
+      "Thưởng thức ấm chén cháo thơm trước khi ngủ 1-2 tiếng giúp tâm an giấc lành."
+    ],
+    "nutrition": {
+      "protein_g": 9,
+      "fiber_g": 7,
+      "calories_kcal": 260,
+      "highlight": "Hàm lượng canxi và tryptophan cao kích thích sản sinh melatonin tự nhiên cho giấc ngủ sâu"
+    },
+    "tags": [
+      "dưỡng tâm an thần",
+      "ngủ sâu",
+      "giàu canxi"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_30",
+    "name": "Canh rong biển đậu hũ gừng tươi thanh nhiệt",
+    "meal_types": [
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 12,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Rong biển wakame khô",
+        "amount": "10g",
+        "note": "ngâm nở 5 phút cắt ngắn"
+      },
+      {
+        "name": "Đậu hũ non cắt quân cờ",
+        "amount": "1 hộp (200g)"
+      },
+      {
+        "name": "Gừng tươi thái sợi",
+        "amount": "1 muỗng cà phê"
+      },
+      {
+        "name": "Dầu mè nguyên chất",
+        "amount": "1/2 muỗng cà phê"
+      },
+      {
+        "name": "Hạt nêm nấm chay",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Đun sôi 600ml nước cùng gừng thái sợi cho dậy mùi thơm ấm dịu.",
+      "Nhẹ nhàng thả đậu hũ non vào đun sôi lăn tăn 2 phút.",
+      "Cho rong biển wakame đã ngâm nở vào nồi, nêm 1 muỗng hạt nêm nấm vừa thanh ngọt.",
+      "Nấu thêm 1 phút là tắt bếp ngay (không đun rong biển quá lâu sẽ mất độ giòn ngọt).",
+      "Nhỏ vài giọt dầu mè thơm ngát, múc ra tô dùng nóng nhẹ bụng thư thái."
+    ],
+    "nutrition": {
+      "protein_g": 9,
+      "fiber_g": 3,
+      "calories_kcal": 120,
+      "highlight": "Cung cấp iod vi lượng biển sâu cần thiết cho tuyến giáp, gừng cân bằng tính hàn của rong biển"
+    },
+    "tags": [
+      "nhẹ bụng tuyệt đối",
+      "giàu iod",
+      "cân bằng âm dương"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_31",
+    "name": "Cơm tấm sườn non chay chả hấp",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 35,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Gạo tấm",
+        "amount": "150g"
+      },
+      {
+        "name": "Sườn non chay",
+        "amount": "100g",
+        "note": "ngâm mềm, ướp tiêu, sả băm, dầu hào chay"
+      },
+      {
+        "name": "Đậu hũ non & mộc nhĩ làm chả",
+        "amount": "150g"
+      },
+      {
+        "name": "Dưa leo & cà chua",
+        "amount": "1 quả"
+      },
+      {
+        "name": "Nước mắm chay chua ngọt",
+        "amount": "3 muỗng canh"
+      }
+    ],
+    "steps": [
+      "Nấu chín cơm tấm trong nồi cơm điện.",
+      "Sườn non chay ngâm nở, vắt ráo, ướp sả gừng và áp chảo vàng giòn.",
+      "Đậu hũ non nghiền nhuyễn trộn nấm mèo, bún tàu, hấp 15 phút làm chả trứng chay.",
+      "Xới cơm ra đĩa, xếp sườn chay, lát chả hấp, dưa leo cà chua và rưới dầu mè phi thơm ngò rí."
+    ],
+    "nutrition": {
+      "protein_g": 16,
+      "fiber_g": 5,
+      "calories_kcal": 480,
+      "highlight": "Bữa trưa đậm đà, giàu năng lượng và protein thực vật"
+    },
+    "tags": [
+      "cơm chay",
+      "đậm đà",
+      "no lâu"
+    ],
+    "emoji": "🍛"
+  },
+  {
+    "id": "dish_32",
+    "name": "Cơm gạo lứt rong biển hạt sen",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 45,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Gạo lứt đỏ",
+        "amount": "150g",
+        "note": "ngâm 4 tiếng"
+      },
+      {
+        "name": "Hạt sen tươi",
+        "amount": "50g"
+      },
+      {
+        "name": "Rong biển sấy vụn",
+        "amount": "20g"
+      },
+      {
+        "name": "Mè rang thơm",
+        "amount": "1 muỗng canh"
+      },
+      {
+        "name": "Muối hầm",
+        "amount": "1/2 thìa cafe"
+      }
+    ],
+    "steps": [
+      "Nấu gạo lứt cùng hạt sen tươi với tỷ lệ 1 gạo : 1.8 nước đến khi chín mềm bùi.",
+      "Xới cơm ra tô to, rắc rong biển vụn và mè rang thơm lên trên.",
+      "Trộn đều nhẹ tay, dùng nóng kèm dưa leo hoặc rau luộc."
+    ],
+    "nutrition": {
+      "protein_g": 11,
+      "fiber_g": 9,
+      "calories_kcal": 360,
+      "highlight": "Cực giàu chất xơ, khoáng chất, tốt cho tim mạch và tiêu hóa"
+    },
+    "tags": [
+      "thực dưỡng",
+      "giàu chất xơ",
+      "bảo vệ sức khỏe"
+    ],
+    "emoji": "🍚"
+  },
+  {
+    "id": "dish_33",
+    "name": "Bún riêu cua chay đậu hũ cà chua",
+    "meal_types": [
+      "morning",
+      "noon"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 30,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bún tươi",
+        "amount": "300g"
+      },
+      {
+        "name": "Đậu hũ non & nấm rơm",
+        "amount": "200g",
+        "note": "làm riêu chay"
+      },
+      {
+        "name": "Sữa đậu nành nguyên chất không đường",
+        "amount": "300ml"
+      },
+      {
+        "name": "Cà chua chín",
+        "amount": "3 quả"
+      },
+      {
+        "name": "Rau muống chẻ, bắp chuối, rau kinh giới",
+        "amount": "100g"
+      }
+    ],
+    "steps": [
+      "Đun ấm sữa đậu nành, nhỏ cốt me/chanh vào để sữa kết tủa tạo riêu cua béo mịn.",
+      "Xào cà chua với dầu hạt điều và nấm rơm cho thơm, trút vào nồi nước dùng nấu cùng phần riêu.",
+      "Nêm hạt nêm nấm chay, đường phèn và chút muối hầm vừa thanh vị chua ngọt.",
+      "Trần bún vào tô, múc riêu, đậu hũ chiên, cà chua và chan nước dùng nóng, ăn kèm rau sống kinh giới."
+    ],
+    "nutrition": {
+      "protein_g": 15,
+      "fiber_g": 7,
+      "calories_kcal": 420,
+      "highlight": "Vị chua thanh mát, giàu đạm đậu nành và canxi"
+    },
+    "tags": [
+      "bún chay",
+      "thanh mát",
+      "món nước"
+    ],
+    "emoji": "🍜"
+  },
+  {
+    "id": "dish_34",
+    "name": "Bún chả giò chay rau sống nước mắm chua ngọt",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 35,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bún tươi",
+        "amount": "300g"
+      },
+      {
+        "name": "Chả giò chay (khoai môn, nấm mèo, cà rốt)",
+        "amount": "6 cuốn"
+      },
+      {
+        "name": "Rau xà lách, rau thơm các loại",
+        "amount": "100g"
+      },
+      {
+        "name": "Đậu phộng rang giã dập",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Nước mắm chay chua ngọt pha ớt tươi, chanh",
+        "amount": "1 bát nhỏ"
+      }
+    ],
+    "steps": [
+      "Chiên chả giò chay vàng giòn rụm trong dầu nóng, vớt ra để ráo dầu rồi cắt khúc vừa ăn.",
+      "Xếp rau sống thái nhỏ vào tô, cho bún tươi lên trên.",
+      "Đặt từng miếng chả giò giòn tan lên mặt, rắc đậu phộng rang thơm.",
+      "Rưới đều nước mắm chay chua ngọt và thưởng thức ngay."
+    ],
+    "nutrition": {
+      "protein_g": 10,
+      "fiber_g": 6,
+      "calories_kcal": 440,
+      "highlight": "Giòn rụm, hấp dẫn, kích thích vị giác người mới ăn chay"
+    },
+    "tags": [
+      "bún chay",
+      "dễ ăn",
+      "món trộn"
+    ],
+    "emoji": "🥗"
+  },
+  {
+    "id": "dish_35",
+    "name": "Phở trộn chua ngọt nấm áp chảo",
+    "meal_types": [
+      "morning",
+      "noon"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 20,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bánh phở tươi",
+        "amount": "250g"
+      },
+      {
+        "name": "Nấm đùi gà & nấm hương tươi",
+        "amount": "150g"
+      },
+      {
+        "name": "Rau thơm, ngò gai, giá đỗ chần",
+        "amount": "80g"
+      },
+      {
+        "name": "Đậu phộng rang & ngò rí phi thơm dầu mè",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Sốt trộn phở (tương đen, xì dầu, cốt chanh, đường)",
+        "amount": "3 muỗng canh"
+      }
+    ],
+    "steps": [
+      "Nấm đùi gà thái sợi, áp chảo với chút dầu mè và xì dầu đến khi xém cạnh thơm nức.",
+      "Chần nhanh bánh phở và giá đỗ qua nước sôi, xả ráo cho vào tô.",
+      "Cho nấm xào, rau thơm, ngò gai lên tô phở.",
+      "Rưới sốt chua ngọt đậm đà, rắc đậu phộng và ngò rí phi giòn, trộn đều khi còn ấm."
+    ],
+    "nutrition": {
+      "protein_g": 13,
+      "fiber_g": 5,
+      "calories_kcal": 380,
+      "highlight": "Hương thơm nấm tự nhiên, vị chua ngọt hài hòa, thanh mát"
+    },
+    "tags": [
+      "phở chay",
+      "nhanh gọn",
+      "dễ nấu"
+    ],
+    "emoji": "🍲"
+  },
+  {
+    "id": "dish_36",
+    "name": "Bánh mì bì chay thính gạo dưa chua",
+    "meal_types": [
+      "morning",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 15,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bánh mì giòn",
+        "amount": "2 ổ"
+      },
+      {
+        "name": "Bún tàu & đậu hũ chiên cắt sợi mỏng",
+        "amount": "100g"
+      },
+      {
+        "name": "Thính gạo rang vàng mịn",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Đồ chua (cà rốt, củ cải ngâm giấm)",
+        "amount": "50g"
+      },
+      {
+        "name": "Nước tương ớt tươi chay hoặc nước mắm chay",
+        "amount": "2 muỗng canh"
+      }
+    ],
+    "steps": [
+      "Đậu hũ chiên giòn thái chỉ, bún tàu ngâm mềm cắt khúc chần chín ráo nước.",
+      "Trộn đều đậu hũ, bún tàu cùng thính gạo rang vàng thơm lừng và chút muối tiêu làm bì chay.",
+      "Xẻ dọc ổ bánh mì, quết nước tương/sốt chay, nhồi đầy bì thính thơm bùi.",
+      "Kẹp thêm đồ chua giòn ngọt, dưa leo và ngò rí, ăn giòn rụm."
+    ],
+    "nutrition": {
+      "protein_g": 11,
+      "fiber_g": 5,
+      "calories_kcal": 330,
+      "highlight": "Bữa sáng kinh điển, nhanh gọn, mùi thơm thính gạo dân dã"
+    },
+    "tags": [
+      "bánh mì",
+      "bữa sáng",
+      "nhanh gọn"
+    ],
+    "emoji": "🥖"
+  },
+  {
+    "id": "dish_37",
+    "name": "Bánh mì xíu mại nấm sốt cà ri thơm",
+    "meal_types": [
+      "morning",
+      "noon"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 25,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bánh mì nóng giòn",
+        "amount": "2 ổ"
+      },
+      {
+        "name": "Đậu hũ ép ráo nước & nấm hương băm nhỏ",
+        "amount": "150g"
+      },
+      {
+        "name": "Củ sắn (củ đậu) vắt ráo",
+        "amount": "50g"
+      },
+      {
+        "name": "Cà chua chín & sốt cà chua",
+        "amount": "2 quả"
+      },
+      {
+        "name": "Bột bắp & ngò rí",
+        "amount": "1 thìa canh"
+      }
+    ],
+    "steps": [
+      "Trộn đậu hũ, nấm hương, củ sắn với bột bắp, viên tngò rí những viên xíu mại tròn vừa ăn rồi đem hấp 10 phút.",
+      "Làm sốt cà chua: phi thơm sả non dầu mè, xào nhừ cà chua, thêm chút nước dùng rau củ và nêm vị đậm đà.",
+      "Thả viên xíu mại chay vào chảo sốt cà đun liu riu 5 phút cho ngấm đượm sốt sánh đỏ.",
+      "Xẻ bánh mì cho xíu mại chan đẫm sốt cà chua sánh mịn, rắc ngò rí tiêu thơm."
+    ],
+    "nutrition": {
+      "protein_g": 14,
+      "fiber_g": 6,
+      "calories_kcal": 390,
+      "highlight": "Vị béo mềm thơm thảo của đậu hũ nấm, sốt cà ri đỏ bắt mắt"
+    },
+    "tags": [
+      "bánh mì",
+      "đậm đà",
+      "ấm bụng"
+    ],
+    "emoji": "🥪"
+  },
+  {
+    "id": "dish_38",
+    "name": "Cháo nấm tràm hạt kê bổ huyết",
+    "meal_types": [
+      "morning",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 30,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Hạt kê vàng & gạo tẻ",
+        "amount": "100g"
+      },
+      {
+        "name": "Nấm tràm (hoặc nấm hương tươi)",
+        "amount": "100g"
+      },
+      {
+        "name": "Gừng tươi thái sợi",
+        "amount": "1 nhánh nhỏ"
+      },
+      {
+        "name": "Dầu mè nguyên chất",
+        "amount": "1 muỗng cafe"
+      },
+      {
+        "name": "Hạt nêm nấm & tiêu xay",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Nấu nhừ hạt kê và gạo tẻ với 800ml nước đến khi sánh mịn vàng ươm.",
+      "Xào nấm với gừng sợi và dầu mè cho dậy mùi thơm nồng ấm.",
+      "Trút nấm xào vào nồi cháo hạt kê, khuấy nhẹ tay 5 phút trên lửa nhỏ.",
+      "Nêm chút gia vị nấm, múc ra bát rắc tiêu xay và thưởng thức khi còn nóng hổi."
+    ],
+    "nutrition": {
+      "protein_g": 10,
+      "fiber_g": 6,
+      "calories_kcal": 290,
+      "highlight": "Hạt kê bổ tỳ vị, nấm giải độc, ấm bụng an thần"
+    },
+    "tags": [
+      "cháo chay",
+      "dưỡng sinh",
+      "ấm bụng"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_39",
+    "name": "Rau củ kho quẹt chay cơm cháy giòn rụm",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "medium",
+    "cook_time_min": 25,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Cơm nguội ép chảo vàng giòn (hoặc rau củ hấp)",
+        "amount": "1 đĩa"
+      },
+      {
+        "name": "Đậu bắp, cà rốt, khổ qua, bông cải xanh luộc",
+        "amount": "200g"
+      },
+      {
+        "name": "Nấm đùi gà cắt hạt lựu & đậu hũ chiên hạt lựu",
+        "amount": "100g"
+      },
+      {
+        "name": "Tiêu xanh nguyên chùm & ớt hiểm",
+        "amount": "2 nhánh"
+      },
+      {
+        "name": "Nước tương, đường phèn, tương bần chay",
+        "amount": "4 muỗng canh"
+      }
+    ],
+    "steps": [
+      "Pha hỗn hợp kho quẹt: nước tương ngon, đường phèn, nước lọc đun sôi nhỏ lửa cho keo sánh.",
+      "Chiên đậu hũ và nấm đùi gà hạt lựu vàng giòn, cho vào nồi kho quẹt đun liu riu cùng tiêu xanh cay nồng.",
+      "Luộc chín tới các loại rau củ xanh mướt, vớt ngâm nước lạnh giữ màu tươi.",
+      "Bày đĩa rau củ cạnh tộ kho quẹt chay đặc sánh thơm phức, chấm ăn kèm cơm cháy giòn tan."
+    ],
+    "nutrition": {
+      "protein_g": 12,
+      "fiber_g": 10,
+      "calories_kcal": 340,
+      "highlight": "Cực nhiều vitamin và chất xơ từ 5 loại rau củ tươi, vị đậm bùi"
+    },
+    "tags": [
+      "rau củ",
+      "dân dã",
+      "hao cơm"
+    ],
+    "emoji": "🥬"
+  },
+  {
+    "id": "dish_40",
+    "name": "Cà ri rau củ nước cốt dừa bánh mì",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 30,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Khoai lang, khoai môn, cà rốt",
+        "amount": "250g",
+        "note": "gọt vỏ cắt khúc chiên sơ"
+      },
+      {
+        "name": "Đậu hũ chiên & nấm đông cô tươi",
+        "amount": "150g"
+      },
+      {
+        "name": "Nước cốt dừa béo & nước dừa tươi",
+        "amount": "250ml"
+      },
+      {
+        "name": "Bột cà ri chay & sả cây đập dập",
+        "amount": "3 nhánh sả"
+      },
+      {
+        "name": "Bánh mì hoặc bún ăn kèm",
+        "amount": "2 ổ"
+      }
+    ],
+    "steps": [
+      "Phi thơm sả đập dập với bột cà ri chay, cho nấm đông cô và đậu hũ vào xào ngấm màu vàng óng.",
+      "Trút khoai lang, khoai môn, cà rốt đã chiên sơ vào đảo cùng, đổ nước dừa tươi xâm xấp mặt hầm 15 phút mềm bùi.",
+      "Hạ lửa nhỏ, rưới nước cốt dừa vào khuấy đều tay, nêm đường phèn muối hầm cho vừa vị béo ngọt mặn mà.",
+      "Múc cà ri sóng sánh ra tô to, rắc ngò gai, ăn nóng chấm bánh mì giòn rụm hoặc chan bún."
+    ],
+    "nutrition": {
+      "protein_g": 13,
+      "fiber_g": 8,
+      "calories_kcal": 460,
+      "highlight": "Món ăn lễ tiệc chay ấm áp, béo thơm nước dừa, giàu beta-carotene"
+    },
+    "tags": [
+      "cà ri chay",
+      "món tiệc",
+      "béo thơm"
+    ],
+    "emoji": "🍛"
+  },
+  {
+    "id": "dish_41",
+    "name": "Rau muống luộc chấm tương bần gừng non",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 10,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Rau muống non xanh",
+        "amount": "300g",
+        "note": "nhặt khúc non rửa sạch"
+      },
+      {
+        "name": "Gừng tươi đập dập",
+        "amount": "1 nhánh nhỏ"
+      },
+      {
+        "name": "Nước cốt chanh tươi",
+        "amount": "1/2 quả",
+        "note": "vắt vào nước canh luộc"
+      },
+      {
+        "name": "Tương bần ngon (hoặc chao đậu đỏ)",
+        "amount": "3 muỗng canh"
+      },
+      {
+        "name": "Đường phèn & ớt tươi thái lát",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Đun nước thật sôi với chút muối hạt và gừng đập dập.",
+      "Thả rau muống vào luộc ngập nước lửa lớn trong 2-3 phút cho vừa chín tới xanh mướt.",
+      "Vớt rau ra đĩa, phần nước luộc vắt thêm chút chanh làm nước canh thanh mát giải nhiệt.",
+      "Pha tương bần với chút đường phèn và gừng non băm nhỏ, ớt lát chấm kèm rau muống giòn ngọt."
+    ],
+    "nutrition": {
+      "protein_g": 5,
+      "fiber_g": 4,
+      "calories_kcal": 110,
+      "highlight": "Món ăn dân dã Việt Nam, thanh nhiệt, giải độc, giàu chất xơ và sắt tự nhiên"
+    },
+    "tags": [
+      "dân dã",
+      "rau luộc",
+      "dễ làm",
+      "thanh nhiệt"
+    ],
+    "emoji": "🥬"
+  },
+  {
+    "id": "dish_42",
+    "name": "Khoai lang mật hấp mè rang",
+    "meal_types": [
+      "morning",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 20,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Khoai lang mật (hoặc khoai lang vàng)",
+        "amount": "350g",
+        "note": "rửa sạch vỏ ngoài"
+      },
+      {
+        "name": "Mè đen hoặc mè vàng rang thơm",
+        "amount": "1 muỗng canh"
+      },
+      {
+        "name": "Muối hầm",
+        "amount": "1 chút xíu"
+      }
+    ],
+    "steps": [
+      "Khoai lang rửa thật sạch bùn đất, cắt bỏ hai đầu cuống.",
+      "Xếp khoai vào xửng hấp cách thủy khoảng 18-20 phút đến khi xiên đũa qua mềm ngọt ứa mật.",
+      "Lấy khoai ra đĩa để ráo bớt hơi nóng.",
+      "Cắt khoai thành khoanh vừa ăn, rắc mè rang thơm lên trên, ăn ấm ngọt bùi tự nhiên."
+    ],
+    "nutrition": {
+      "protein_g": 4,
+      "fiber_g": 7,
+      "calories_kcal": 260,
+      "highlight": "Nguồn tinh bột kháng tuyệt hảo, nhuận tràng, bổ tỳ vị, no lâu mà nhẹ bụng"
+    },
+    "tags": [
+      "khoai hấp",
+      "nhuận tràng",
+      "bữa sáng",
+      "dưỡng sinh"
+    ],
+    "emoji": "🍠"
+  },
+  {
+    "id": "dish_43",
+    "name": "Khoai sọ hấp chấm muối vừng mè đen",
+    "meal_types": [
+      "morning",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 25,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Khoai sọ nhỏ (khoai môn sọ)",
+        "amount": "400g",
+        "note": "chọn củ tròn lành lặn"
+      },
+      {
+        "name": "Mè đen rang thơm giã nhỏ",
+        "amount": "2 muỗng canh"
+      },
+      {
+        "name": "Đậu phộng rang vàng giã dập",
+        "amount": "1 muỗng canh"
+      },
+      {
+        "name": "Muối hầm thiên nhiên",
+        "amount": "1/2 thìa cafe"
+      }
+    ],
+    "steps": [
+      "Khoai sọ rửa sạch đất cát, để nguyên vỏ cho vào nồi luộc hoặc hấp chín nhừ khoảng 20-25 phút.",
+      "Giã muối vừng: trộn mè đen rang, đậu phộng rang giã dập và muối hầm cho thơm bùi mặn nhẹ.",
+      "Khoai chín vớt ra để ấm, bóc nhẹ lớp vỏ mỏng ngoài.",
+      "Chấm từng củ khoai sọ bở tơi, dẻo quánh vào đĩa muối vừng mè đen thơm nức mũi."
+    ],
+    "nutrition": {
+      "protein_g": 6,
+      "fiber_g": 8,
+      "calories_kcal": 290,
+      "highlight": "Cực giàu canxi và kali, bổ khí huyết, dẻo thơm truyền thống miền quê"
+    },
+    "tags": [
+      "dân dã",
+      "khoai hấp",
+      "muối vừng",
+      "dễ làm"
+    ],
+    "emoji": "🥔"
+  },
+  {
+    "id": "dish_44",
+    "name": "Bắp nếp luộc lá dứa hạt sen",
+    "meal_types": [
+      "morning",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 25,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bắp nếp tươi (ngô nếp)",
+        "amount": "2 bắp",
+        "note": "để lại lớp bẹ non bên trong"
+      },
+      {
+        "name": "Lá dứa (lá nếp)",
+        "amount": "3 lá",
+        "note": "rửa sạch bó gọn"
+      },
+      {
+        "name": "Muối hạt",
+        "amount": "1/2 thìa cafe"
+      }
+    ],
+    "steps": [
+      "Lột bớt bẹ già bên ngoài, giữ lại 1 lớp bẹ non và râu ngô bọc bắp.",
+      "Lót lá dứa dưới đáy nồi, xếp bắp lên trên, đổ ngập nước cùng chút muối hạt.",
+      "Luộc bắp lửa vừa trong 20-25 phút đến khi hạt bắp trong veo, căng mọng, dẻo thơm mùi lá dứa.",
+      "Vớt bắp ra ăn nóng, nước luộc bắp dùng uống thanh nhiệt giải khát rất ngọt mát."
+    ],
+    "nutrition": {
+      "protein_g": 5,
+      "fiber_g": 5,
+      "calories_kcal": 210,
+      "highlight": "Giàu chất xơ, vitamin nhóm B, thanh lọc thận và giải nhiệt cơ thể"
+    },
+    "tags": [
+      "dân dã",
+      "bắp luộc",
+      "thanh nhiệt",
+      "nhẹ bụng"
+    ],
+    "emoji": "🌽"
+  },
+  {
+    "id": "dish_45",
+    "name": "Đậu bắp luộc chấm chao ớt gừng",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 8,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Đậu bắp non tươi",
+        "amount": "250g",
+        "note": "rửa sạch cắt nhẹ cuống"
+      },
+      {
+        "name": "Chao trắng hoặc chao môn",
+        "amount": "2 viên"
+      },
+      {
+        "name": "Nước cốt chanh & đường phèn",
+        "amount": "1 thìa cafe"
+      },
+      {
+        "name": "Gừng non băm nhỏ & ớt tươi",
+        "amount": "1 chút xíu"
+      }
+    ],
+    "steps": [
+      "Đun nước sôi bùng với chút muối hạt.",
+      "Cho đậu bắp vào luộc nhanh trong 3-4 phút cho vừa chín tới, giữ được độ giòn ngọt và màu xanh.",
+      "Vớt đậu bắp thả vào tô nước đá lạnh 1 phút rồi xếp ra đĩa ráo nước.",
+      "Tán nhuyễn chao với chút đường phèn, nước cốt chanh, gừng non và ớt lát, chấm đậu bắp giòn ngọt bùi béo."
+    ],
+    "nutrition": {
+      "protein_g": 4,
+      "fiber_g": 6,
+      "calories_kcal": 95,
+      "highlight": "Chất nhầy tự nhiên bảo vệ niêm mạc dạ dày, bôi trơn khớp xương cực tốt"
+    },
+    "tags": [
+      "dễ làm",
+      "bảo vệ dạ dày",
+      "nhanh gọn",
+      "thanh đạm"
+    ],
+    "emoji": "🥬"
+  },
+  {
+    "id": "dish_46",
+    "name": "Bầu xào gừng tươi rắc tiêu thơm",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 10,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bầu non",
+        "amount": "350g",
+        "note": "gọt vỏ cắt lát mỏng vừa ăn"
+      },
+      {
+        "name": "Gừng tươi thái chỉ",
+        "amount": "1 nhánh nhỏ"
+      },
+      {
+        "name": "Dầu mè nguyên chất",
+        "amount": "1 muỗng canh"
+      },
+      {
+        "name": "Hạt nêm nấm chay & tiêu xay",
+        "amount": "vừa đủ"
+      },
+      {
+        "name": "Ngò rí thái nhỏ",
+        "amount": "vài cọng"
+      }
+    ],
+    "steps": [
+      "Bầu non gọt vỏ, rửa sạch, cắt lát mỏng xéo vừa ăn.",
+      "Đun nóng dầu mè trong chảo, cho gừng tươi thái chỉ vào phi dậy mùi thơm ấm.",
+      "Trút bầu vào xào lửa lớn đảo nhanh tay trong 3-4 phút cho bầu vừa chín tới trong veo ngọt nước.",
+      "Nêm chút hạt nêm nấm chay vừa vị thanh nhạt, rắc ngò rí và tiêu xay thơm nồng, tắt bếp dọn ra đĩa."
+    ],
+    "nutrition": {
+      "protein_g": 3,
+      "fiber_g": 4,
+      "calories_kcal": 105,
+      "highlight": "Bầu ngọt tính mát kết hợp gừng ấm giúp cân bằng hàn nhiệt, lợi tiểu mát gan"
+    },
+    "tags": [
+      "món xào",
+      "nhanh gọn",
+      "thanh mát",
+      "nguyên liệu rẻ"
+    ],
+    "emoji": "🥒"
+  },
+  {
+    "id": "dish_47",
+    "name": "Mướp hương xào nấm rơm ngò gai",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 12,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Mướp hương non",
+        "amount": "1 quả to (khoảng 300g)",
+        "note": "gọt vỏ cắt vát"
+      },
+      {
+        "name": "Nấm rơm tươi",
+        "amount": "150g",
+        "note": "cắt gốc ngâm muối chẻ đôi"
+      },
+      {
+        "name": "Ngò gai & ngò rí thái nhỏ",
+        "amount": "vài cọng"
+      },
+      {
+        "name": "Dầu ăn thực vật & dầu mè",
+        "amount": "1 muỗng canh"
+      },
+      {
+        "name": "Hạt nêm nấm chay & tiêu sọ xay",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Phi thơm chút dầu mè với đầu ngò rí giã dập, cho nấm rơm vào xào săn thơm trong 2 phút.",
+      "Cho mướp hương vào đảo đều lửa lớn để mướp giữ được màu xanh và không ra quá nhiều nước.",
+      "Nêm chút hạt nêm nấm chay vừa miệng, xào thêm 2 phút đến khi mướp mềm ngọt tỏa hương thơm ngát.",
+      "Rắc ngò gai, ngò rí và tiêu sọ thơm lừng lên trên, múc ra đĩa dùng nóng với cơm trắng."
+    ],
+    "nutrition": {
+      "protein_g": 6,
+      "fiber_g": 4,
+      "calories_kcal": 130,
+      "highlight": "Mướp hương thanh nhiệt giải khát, nấm rơm ngọt tự nhiên, dễ ăn dễ tiêu"
+    },
+    "tags": [
+      "món xào",
+      "hương thơm",
+      "ngon miệng",
+      "dễ kiếm"
+    ],
+    "emoji": "🍲"
+  },
+  {
+    "id": "dish_48",
+    "name": "Canh mồng tơi nấu mướp hương thanh mát",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 10,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Rau mồng tơi non",
+        "amount": "200g",
+        "note": "nhặt lá rửa sạch"
+      },
+      {
+        "name": "Mướp hương",
+        "amount": "1 quả nhỏ (150g)",
+        "note": "gọt vỏ cắt khoanh xéo"
+      },
+      {
+        "name": "Nước lọc",
+        "amount": "800ml"
+      },
+      {
+        "name": "Muối hầm & hạt nêm nấm chay",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Đun sôi 800ml nước trên bếp cùng chút muối hạt.",
+      "Thả mướp hương vào đun sôi 1 phút cho nước dùng ngọt lịm tự nhiên.",
+      "Cho rau mồng tơi vào nhấn chìm xuống nước, đun sôi bùng lại trong 1-2 phút là rau vừa chín xanh mướt.",
+      "Nêm chút hạt nêm nấm thanh đạm, tắt bếp múc ra tô canh mát lành giải nhiệt ngày hè."
+    ],
+    "nutrition": {
+      "protein_g": 4,
+      "fiber_g": 5,
+      "calories_kcal": 85,
+      "highlight": "Món canh quốc dân mùa hè, cực kỳ nhuận tràng, giải độc, mát gan và thanh ruột"
+    },
+    "tags": [
+      "canh rau",
+      "thanh nhiệt",
+      "nhuận tràng",
+      "rẻ tiền"
+    ],
+    "emoji": "🥣"
+  },
+  {
+    "id": "dish_49",
+    "name": "Đậu hũ chiên sả ớt giòn rụm",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 15,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Đậu hũ trắng tươi",
+        "amount": "3 miếng (khoảng 350g)",
+        "note": "cắt miếng vuông vừa ăn"
+      },
+      {
+        "name": "Sả tươi băm nhuyễn",
+        "amount": "3 nhánh"
+      },
+      {
+        "name": "Ớt sừng băm nhỏ",
+        "amount": "1 quả (ít cay)"
+      },
+      {
+        "name": "Hạt nêm nấm & bột nghệ",
+        "amount": "1/2 thìa cafe"
+      },
+      {
+        "name": "Dầu ăn thực vật",
+        "amount": "đủ chiên"
+      }
+    ],
+    "steps": [
+      "Đậu hũ khứa nhẹ vài đường trên mặt để thấm gia vị.",
+      "Trộn sả băm, ớt băm, chút bột nghệ và hạt nêm nấm chay cho đều.",
+      "Chiên đậu hũ trong chảo dầu nóng đến khi vàng giòn các mặt, gắp ra đĩa.",
+      "Bớt dầu trong chảo, cho sả ớt vào đảo vàng thơm giòn rụm, trút sả ớt phủ đều lên từng miếng đậu hũ."
+    ],
+    "nutrition": {
+      "protein_g": 15,
+      "fiber_g": 4,
+      "calories_kcal": 280,
+      "highlight": "Nguồn đạm đậu nành dồi dào, sả ấm bụng hỗ trợ tiêu hóa, món chay hao cơm bậc nhất"
+    },
+    "tags": [
+      "đậu hũ",
+      "hao cơm",
+      "sả ớt",
+      "dễ làm"
+    ],
+    "emoji": "🥘"
+  },
+  {
+    "id": "dish_50",
+    "name": "Canh bí đao nấu gừng non thanh nhiệt",
+    "meal_types": [
+      "noon",
+      "evening"
+    ],
+    "difficulty": "easy",
+    "cook_time_min": 15,
+    "is_pure_vegan": true,
+    "ingredients": [
+      {
+        "name": "Bí đao non (bí xanh)",
+        "amount": "350g",
+        "note": "gọt vỏ bỏ ruột cắt lát mỏng"
+      },
+      {
+        "name": "Gừng non thái sợi",
+        "amount": "1 nhánh nhỏ"
+      },
+      {
+        "name": "Ngò rí thái nhỏ",
+        "amount": "vài cọng"
+      },
+      {
+        "name": "Nước lọc",
+        "amount": "800ml"
+      },
+      {
+        "name": "Hạt nêm nấm & muối hầm",
+        "amount": "vừa đủ"
+      }
+    ],
+    "steps": [
+      "Đun sôi nước với gừng non thái sợi để nước canh thơm thanh và ấm bụng.",
+      "Thả bí đao thái lát vào nồi nước sôi, nấu lửa vừa trong 5-7 phút đến khi miếng bí trong suốt mềm ngọt.",
+      "Nêm chút muối hầm và hạt nêm nấm vừa khẩu vị thanh nhẹ.",
+      "Múc canh ra tô, rắc ngò rí và chút tiêu xay thưởng thức nóng giúp tiêu độc mát gan."
+    ],
+    "nutrition": {
+      "protein_g": 3,
+      "fiber_g": 4,
+      "calories_kcal": 75,
+      "highlight": "Bí đao lợi tiểu tiêu phù thũng, gừng ấm tỳ vị, thanh lọc cơ thể nhẹ nhàng"
+    },
+    "tags": [
+      "canh rau",
+      "thanh lọc",
+      "nguyên liệu dễ mua",
+      "nhẹ bụng"
+    ],
+    "emoji": "🥣"
+  }
+]

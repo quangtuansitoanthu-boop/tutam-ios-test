@@ -1,0 +1,119 @@
+import { isNativeApp } from './native-platform';
+
+interface NativeScreenWakeLockPlugin {
+  setKeepScreenOn(options: { enabled: boolean }): Promise<void>;
+}
+
+function getNativeWakeLock(): NativeScreenWakeLockPlugin | undefined {
+  if (!isNativeApp()) return undefined;
+  return (globalThis as { Capacitor?: { Plugins?: { ScreenWakeLock?: NativeScreenWakeLockPlugin } } })
+    .Capacitor?.Plugins?.ScreenWakeLock;
+}
+
+export interface WakeLockController {
+  destroy(): Promise<void>;
+  release(): Promise<void>;
+  request(): Promise<boolean>;
+}
+
+export function createWakeLockController(): WakeLockController {
+  let sentinel: WakeLockSentinel | null = null;
+  let nativeActive = false;
+  let destroyed = false;
+  let generation = 0;
+  let pending: Promise<boolean> | null = null;
+
+  async function release(): Promise<void> {
+    generation += 1;
+    pending = null;
+    const current = sentinel;
+    sentinel = null;
+    const hadNative = nativeActive;
+    nativeActive = false;
+    if (hadNative) {
+      try {
+        await getNativeWakeLock()?.setKeepScreenOn({ enabled: false });
+      } catch {
+        // Ignore stale or unsupported native releases.
+      }
+    }
+    if (!current) return;
+    try {
+      await current.release();
+    } catch {
+      // Ignore stale or unsupported releases.
+    }
+  }
+
+  async function request(): Promise<boolean> {
+    if (destroyed) return false;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false;
+    if ((sentinel && !sentinel.released) || nativeActive) return true;
+    if (pending) return pending;
+
+    const hasWebWakeLock = typeof navigator !== 'undefined' && 'wakeLock' in navigator;
+    const nativePlugin = getNativeWakeLock();
+    if (!hasWebWakeLock && !nativePlugin) return false;
+
+    const requestedGeneration = generation;
+    const acquisition = (async () => {
+      if (hasWebWakeLock) {
+        try {
+          const nextSentinel = await navigator.wakeLock.request('screen');
+          if (destroyed || generation !== requestedGeneration ||
+              (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+            try { await nextSentinel.release(); } catch { /* Already released by the platform. */ }
+            return false;
+          }
+          sentinel = nextSentinel;
+          nextSentinel.addEventListener('release', () => {
+            if (sentinel === nextSentinel) sentinel = null;
+          });
+          return true;
+        } catch {
+          // Fall through to native bridge if Web Wake Lock is rejected in WebView.
+        }
+      }
+      if (nativePlugin) {
+        try {
+          await nativePlugin.setKeepScreenOn({ enabled: true });
+          if (destroyed || generation !== requestedGeneration ||
+              (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+            try { await nativePlugin.setKeepScreenOn({ enabled: false }); } catch { /* Ignore */ }
+            return false;
+          }
+          nativeActive = true;
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    })();
+    pending = acquisition;
+    try { return await acquisition; }
+    finally { if (pending === acquisition) pending = null; }
+  }
+
+  function onVisibilityChange(): void {
+    if (document.visibilityState === 'hidden') {
+      void release();
+    }
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onVisibilityChange);
+  }
+
+  return {
+    async destroy() {
+      destroyed = true;
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+      await release();
+    },
+    release,
+    request
+  };
+}
