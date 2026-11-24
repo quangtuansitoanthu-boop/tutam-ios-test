@@ -1333,12 +1333,15 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     @MainActor
     private func deleteEvent(_ title: String, cancelFirst: Bool = false, app: XCUIApplication) {
         editEvent(title, app: app)
-        tap(app.buttons["Xóa ngày lễ"].firstMatch, app: app)
+        let delete = app.buttons["Xóa ngày lễ"].firstMatch
+        revealContentControl(delete, app: app)
+        delete.tap()
         XCTAssertTrue(existsOrWait(app.staticTexts["Xóa lịch cá nhân?"].firstMatch, timeout: 10))
         if cancelFirst {
             tap(app.buttons["Giữ lại"].firstMatch, app: app)
             XCTAssertTrue(app.staticTexts[title].firstMatch.exists, "Cancel deletion must retain the named saved event")
-            tap(app.buttons["Xóa ngày lễ"].firstMatch, app: app)
+            revealContentControl(delete, app: app)
+            delete.tap()
             XCTAssertTrue(existsOrWait(app.staticTexts["Xóa lịch cá nhân?"].firstMatch, timeout: 10))
         }
         tap(app.buttons["Xóa lịch"].firstMatch, app: app)
