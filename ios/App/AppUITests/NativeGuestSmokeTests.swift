@@ -38,8 +38,10 @@ class NativeGuestUITestCase: XCTestCase {
         app.launchArguments = ["-tutam-qa-events", "1", "-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
         app.launch()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30), "Native WKWebView must load")
-        deferStartupNotificationPrompt(app, timeout: 7)
-        XCTAssertTrue(app.links["Cá nhân"].firstMatch.waitForExistence(timeout: 30), "Native app must finish rendering its navigation")
+        deferStartupNotificationPrompt(app, timeout: 15)
+        let personalTab = app.links["Cá nhân"].firstMatch
+        if !personalTab.waitForExistence(timeout: 20) { deferStartupNotificationPrompt(app) }
+        XCTAssertTrue(personalTab.waitForExistence(timeout: 10), "Native app must finish rendering its navigation")
         return app
     }
 
@@ -66,13 +68,18 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
-    func allowExpectedNotificationPermission(_ app: XCUIApplication) {
+    func allowExpectedNotificationPermission(_ app: XCUIApplication, required: Bool = true) {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let expected = NSPredicate(format: "label CONTAINS[cd] %@ AND (label CONTAINS[cd] %@ OR label CONTAINS[cd] %@)", "Tu tập", "notification", "thông báo")
         let system = springboard.alerts.matching(expected).firstMatch
         let local = app.alerts.matching(expected).firstMatch
         // Không cố định owner sau lần chờ đầu: iOS có thể xuất alert SpringBoard trễ hơn cây AX app.
-        waitUntil("Fresh install must expose this app's actual notification authorization alert", timeout: 30) { system.exists || local.exists }
+        if required {
+            waitUntil("Fresh install must expose this app's actual notification authorization alert", timeout: 30) { system.exists || local.exists }
+        } else {
+            let offered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in system.exists || local.exists }, object: NSObject())
+            guard XCTWaiter.wait(for: [offered], timeout: 6) == .completed else { return }
+        }
         let alert = system.exists ? system : local
         let words = ([alert.label] + alert.staticTexts.allElementsBoundByIndex.map { $0.label }).joined(separator: " ").lowercased()
         XCTAssertTrue(words.contains("tu tập") && (words.contains("notification") || words.contains("thông báo")), "Only this app's notification permission may be granted")
@@ -241,7 +248,7 @@ class NativeGuestUITestCase: XCTestCase {
         switch label {
         case "Cá nhân": marker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Cài đặt ứng dụng ")).firstMatch
         case "Kinh sách": marker = app.staticTexts["Kho Kinh Sách"].firstMatch
-        case "Tu tập": marker = app.staticTexts["Chế Độ Tu Tập"].firstMatch
+        case "Tu tập": marker = app.otherElements["Không gian Tu Tập"].firstMatch
         default:
             XCTFail("Missing destination contract for tested navigation tab \(label)")
             return
@@ -441,22 +448,33 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         XCTAssertFalse(app.staticTexts["Không thể tải ảnh. Vui lòng thử lại."].firstMatch.exists)
         tap(saveImage, app: app)
 
-        // Nhận diện owner Files thật; iOS 27 không đặt nút Hủy trong navigation bar của thư mục.
+        // Nhận diện owner Files thật; iOS có thể công bố nút Hủy dưới dạng Other.
         let pickerNavigation = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].firstMatch
         let pickerSave = pickerNavigation.buttons.matching(NSPredicate(format: "label IN %@", ["Lưu", "Save"] as NSArray)).firstMatch
         XCTAssertTrue(pickerSave.waitForExistence(timeout: 20), "PNG export must present the native Files destination picker instead of a blob navigation")
         XCTAssertTrue(pickerNavigation.exists, "The save action must belong to the native Files navigation")
         XCTAssertFalse(saveImage.isEnabled, "The export promise must remain pending while the native picker owns the file")
         evidence("quote-image-native-files-picker", app: app)
-        let cancel = app.buttons.matching(NSPredicate(format: "label IN %@", ["Hủy", "Cancel"] as NSArray)).firstMatch
-        if cancel.exists && cancel.isHittable {
+        let cancelLabels = NSPredicate(format: "label IN %@", ["Hủy", "Cancel"] as NSArray)
+        let viewport = app.frame
+        let header = pickerNavigation.frame
+        let saveFrame = pickerSave.frame
+        let candidates = app.buttons.matching(cancelLabels).allElementsBoundByIndex +
+            app.otherElements.matching(cancelLabels).allElementsBoundByIndex
+        guard let cancel = candidates.first(where: { element in
+            let frame = element.frame
+            return frame.width > 0 && frame.height > 0 && viewport.contains(frame) &&
+                header.contains(frame) && frame.midX < saveFrame.midX && abs(frame.midY - saveFrame.midY) <= 4
+        }) else {
+            evidence("quote-image-files-cancel-not-reachable", app: app)
+            XCTFail("The native Files header must expose a reachable cancellation action")
+            return
+        }
+        if cancel.isHittable {
             cancel.tap()
         } else {
-            // Vuốt đóng sheet native cũng phải hoàn tất callback hủy, không chạm nhãn Other bị che.
-            XCTAssertTrue(pickerNavigation.isHittable)
-            let dragStart = pickerNavigation.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
-            let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
-            dragStart.press(forDuration: 0.1, thenDragTo: dragEnd)
+            app.coordinate(withNormalizedOffset: CGVector(dx: (cancel.frame.midX - viewport.minX) / viewport.width,
+                dy: (cancel.frame.midY - viewport.minY) / viewport.height)).tap()
         }
         waitUntil("Cancel must return to the existing quote dialog and settle its export state") {
             !pickerSave.exists && title.exists && saveImage.exists && saveImage.isEnabled
@@ -946,7 +964,8 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         tap(sound, app: app)
         let send = app.buttons["🔔 Gửi thử thông báo mẫu"].firstMatch
         tap(send, app: app)
-        allowExpectedNotificationPermission(app)
+        // Cả suite dùng cùng bản cài; ca gửi thử trước đó có thể đã xin quyền thành công.
+        allowExpectedNotificationPermission(app, required: false)
         XCTAssertTrue(send.waitForExistence(timeout: 20), "Native test scheduling must finish before opening personal reminders")
     }
 
