@@ -23,10 +23,11 @@ test('the notification bell keeps keyboard focus in its dialog and restores it o
   const panel = page.locator('.notification-popover');
   await bell.press('Enter');
   await expect(panel).toBeFocused();
+  const controls = panel.locator('button:visible:enabled');
   await page.keyboard.press('Shift+Tab');
-  await expect(panel.locator('button:focus')).toHaveCount(1);
+  await expect(controls.last()).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(panel.locator('.close-popover-btn')).toBeFocused();
+  await expect(controls.first()).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(panel).toHaveCount(0);
   await expect(bell).toBeFocused();

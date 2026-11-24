@@ -1,3 +1,5 @@
+import type { ContentRow } from '../contracts/content-updates';
+
 export const DIA_TANG_VIDEO_ALBUM_ID = 'pt_drive_0cbcd85f1caa5411a50fb3edf38156d3';
 
 // Mục lục bản HT. Thích Trí Tịnh trong Kinh sách (tt_1780910773084).
@@ -24,4 +26,23 @@ export function completeDiaTangVideoTrackTitle(albumId: string, title: string): 
   if (!match) return title;
   const [, chapter, part] = match;
   return `PHẨM ${chapter}: ${chapterNames[chapter]}${part ? ` ${part.toUpperCase()}` : ''}`;
+}
+/** Apply only the old labels and crop that the offline album replaces. */
+export function normalizeBundledDiaTangVideoMetadata(row: ContentRow): ContentRow {
+  if (row.id !== DIA_TANG_VIDEO_ALBUM_ID) return row;
+  const bundled = { ...row };
+  const title = 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN';
+  if (bundled.tieu_de === 'VIDEO AI ' + title) bundled.tieu_de = title;
+  if (bundled.dien_gia === 'Vũ Tiến Dũng (Made AI)') bundled.dien_gia = 'Vũ Tiến Dũng';
+  const oldCover = 'covers/kinh-dia-tang-vu-tien-dung.webp#pos=49%25%2024%25';
+  if (typeof bundled.anh_dai_dien === 'string' &&
+    (bundled.anh_dai_dien === oldCover || bundled.anh_dai_dien.endsWith('/' + oldCover))) {
+    bundled.anh_dai_dien = bundled.anh_dai_dien.split('#', 1)[0];
+  }
+  if (Array.isArray(bundled.tracks)) {
+    bundled.tracks = bundled.tracks.map(track => typeof track?.title === 'string'
+      ? { ...track, title: completeDiaTangVideoTrackTitle(row.id, track.title) }
+      : track);
+  }
+  return bundled;
 }

@@ -30,7 +30,7 @@ it('bundles the approved Địa Tạng album shell on repeated sync without fetc
   });
   for (let build = 0; build < 2; build++) {
     await syncOfflineContent({ root, fetcher });
-    const expected = [{ ...row, tieu_de: title, dien_gia: 'Vũ Tiến Dũng', anh_dai_dien: cover,
+    const expected = [{ ...row, bundled_content_version: talk.version, tieu_de: title, dien_gia: 'Vũ Tiến Dũng', anh_dai_dien: cover,
       tracks: [{ ...row.tracks[0], title: 'PHẨM 8: CÁC VUA DIÊM LA KHEN NGỢI (PHẦN 2)' }] }];
     expect(read(root, 'static/offline-data/talks.json')).toEqual(expected);
     expect(read(root, 'src/lib/data/offline-talks.json')).toEqual(expected);
@@ -40,7 +40,7 @@ it('bundles the approved Địa Tạng album shell on repeated sync without fetc
   row.anh_dai_dien = cover + '#pos=50%25%2050%25';
   row.tracks[0].title = 'Phẩm 8: Tên phẩm đã biên tập (Phần 2)';
   await syncOfflineContent({ root, fetcher });
-  expect(read(root, 'static/offline-data/talks.json')).toEqual([row]);
+  expect(read(root, 'static/offline-data/talks.json')).toEqual([{ ...row, bundled_content_version: talk.version }]);
   expect(fetcher).toHaveBeenCalledTimes(3);
 });
 
@@ -80,10 +80,10 @@ it('retains the bundled Niệm Phật Thập Yếu cover across syncs and keeps 
     return json({ items: [{ ...talk, row }], articlesNext: null, talksNext: null, chapterIndexVersion: 1 });
   });
   await syncOfflineContent({ root, fetcher });
-  expect(read(root, 'static/offline-data/talks.json')).toEqual([{ ...row, anh_dai_dien: cover + '#pos=53%25%2014%25' }]);
+  expect(read(root, 'static/offline-data/talks.json')).toEqual([{ ...row, anh_dai_dien: cover + '#pos=53%25%2014%25', bundled_content_version: talk.version }]);
   row.anh_dai_dien = 'https://example.test/new-artwork.webp';
   await syncOfflineContent({ root, fetcher });
-  expect(read(root, 'static/offline-data/talks.json')).toEqual([row]);
+  expect(read(root, 'static/offline-data/talks.json')).toEqual([{ ...row, bundled_content_version: talk.version }]);
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
 

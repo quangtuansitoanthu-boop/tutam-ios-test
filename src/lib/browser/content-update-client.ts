@@ -2,9 +2,11 @@ import { throwIfAborted } from './abort-signal';
 import { collectPdfBookTransitions, isPdfBookTextReady, retirePdfBookTransition, assertPdfTransitionCurrent, type PdfBookTransition, type PdfTransitionContext } from './pdf-book-transition';
 import type { ContentArticlePage, ContentCatalogPage, ContentRow, ContentSize, ContentUpdateItem } from '$lib/contracts/content-updates';
 import { isContentAvailable } from './ios-content-policy';
-import { imageSources, updateItemKey } from '$lib/domain/content-update-model';
+import { contentVersion, imageSources, updateItemKey } from '$lib/domain/content-update-model';
 import { normalizeCoverSrc } from '$lib/domain/cover-url';
+import { normalizeBundledDiaTangVideoMetadata } from '$lib/domain/dia-tang-video-metadata';
 import { parsePositionedImage } from '$lib/domain/positioned-image';
+import { bundledTalkCover } from '$lib/domain/talk-cover-overrides';
 import { isHtmlResponse, resolvePublicUpdateUrl, resolveRemoteUrl } from './native-api';
 import { fetchWithDeadline } from './network-deadline';
 import { saveContentPackage, savedContentItems } from './offline-content-packages';
@@ -20,6 +22,18 @@ export interface ContentUpdatePlan {
 }
 export interface ContentUpdateProgress { completed: number; total: number; title: string; }
 const cover = (item: ContentUpdateItem) => parsePositionedImage(normalizeCoverSrc(item.row[item.kind === 'talk' ? 'anh_dai_dien' : 'anh_url'])).src;
+
+async function hasBundledTalkVersion(base: ContentRow, item: ContentUpdateItem): Promise<boolean> {
+  if (typeof base.bundled_content_version === 'string') return base.bundled_content_version === item.version;
+  const version = await contentVersion(base, 'talk');
+  if (version === item.version) return true;
+  // Older installers lack the original API version. Apply their known local metadata replacements.
+  const cover = item.row.anh_dai_dien;
+  const normalizedCover = typeof cover === 'string' ? bundledTalkCover(item.row.id, cover) : cover;
+  const row = normalizedCover === cover ? item.row : { ...item.row, anh_dai_dien: normalizedCover };
+  const localized = normalizeBundledDiaTangVideoMetadata(row);
+  return localized !== item.row && version === await contentVersion(localized, 'talk');
+}
 
 export class ContentUpdateUnavailableError extends Error {
   constructor() { super('content_update_server_unavailable'); }
@@ -43,7 +57,7 @@ export async function checkContentUpdates(signal: AbortSignal, fetcher: typeof f
   const [saved, bundleModule, talksModule] = await Promise.all([
     savedContentItems(), import('$lib/data/offline-bundled-articles.json'), import('$lib/data/offline-talks.json'),
   ]);
-  const known = new Map(saved.map(item => [updateItemKey(item), item.version]));
+  const known = new Map(saved.map(item => [updateItemKey(item), item]));
   const bundled = new Map((bundleModule.default as ContentRow[]).map(row => [row.id, row]));
   const bundledTalks = new Map((talksModule.default as ContentRow[]).map(row => [row.id, row]));
   const items: ContentUpdateItem[] = [];
@@ -62,16 +76,17 @@ export async function checkContentUpdates(signal: AbortSignal, fetcher: typeof f
         || item.mode !== (['pdf', 'talk'].includes(item.group) ? 'shell' : 'full')
         || (item.kind === 'talk') !== (item.group === 'talk') || !/^[a-f0-9]{64}$/u.test(item.version)) throw new Error('content_update_invalid_item');
       catalog.push(item);
-      if (known.get(updateItemKey(item)) === item.version) continue;
-      if (!known.has(updateItemKey(item))) {
-        const base = item.kind === 'article' ? bundled.get(item.row.id) : bundledTalks.get(item.row.id);
-        if (base) {
-          if (item.kind === 'article' && Date.parse(String(base.updated_at)) >= Date.parse(String(item.row.updated_at))) continue;
-          if (item.kind === 'talk') {
-            const { contentVersion } = await import('$lib/domain/content-update-model');
-            if (await contentVersion(base, 'talk') === item.version) continue;
-          }
-        }
+      const downloaded = known.get(updateItemKey(item));
+      if (downloaded?.version === item.version) continue;
+      if (item.kind === 'article') {
+        const base = bundled.get(item.row.id);
+        const bundledTime = Date.parse(String(base?.updated_at));
+        const downloadedTime = Date.parse(String(downloaded?.row.updated_at)) || 0;
+        // The offline reader also chooses the bundled book when it is newer than the downloaded one.
+        if (bundledTime >= Date.parse(String(item.row.updated_at)) && (!downloaded || bundledTime > downloadedTime)) continue;
+      } else if (!downloaded) {
+        const base = bundledTalks.get(item.row.id);
+        if (base && await hasBundledTalkVersion(base, item)) continue;
       }
       items.push(item);
     }

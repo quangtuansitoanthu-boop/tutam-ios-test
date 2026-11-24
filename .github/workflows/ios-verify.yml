@@ -53,6 +53,8 @@ jobs:
           npm run check
           npx vitest run --config tests/unit/vitest.config.ts tests/unit/audio/native-platform-parity.test.ts tests/unit/audio/native-talk-audio.test.ts tests/unit/audio/native-player-controller.test.ts tests/unit/audio/audio-player-controller.test.ts
           npx vitest run --config tests/unit/vitest.config.ts tests/unit/facebook-limited-token.test.ts tests/unit/facebook-limited-identity.test.ts tests/unit/native-auth-security.test.ts tests/unit/native-login-transport.test.ts
+      - name: Check bundled content update regressions
+        run: npm run test:unit -- tests/unit/content-update-client.test.ts tests/unit/build-content-sync.test.ts tests/unit/content-update-pdf-transition.test.ts
       - name: Build iOS web assets and install native dependencies
         run: |
           if [ -z "${VITE_GOOGLE_IOS_CLIENT_ID:-}" ]; then
