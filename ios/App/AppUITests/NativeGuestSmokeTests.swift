@@ -38,6 +38,7 @@ class NativeGuestUITestCase: XCTestCase {
         app.launchArguments = ["-tutam-qa-events", "1", "-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
         app.launch()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30), "Native WKWebView must load")
+        deferStartupNotificationPrompt(app, timeout: 7)
         XCTAssertTrue(app.links["Cá nhân"].firstMatch.waitForExistence(timeout: 30), "Native app must finish rendering its navigation")
         return app
     }
@@ -46,6 +47,22 @@ class NativeGuestUITestCase: XCTestCase {
     func waitUntil(_ message: String, timeout: TimeInterval = 15, _ condition: @escaping () -> Bool) {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: NSObject())
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: timeout), .completed, message)
+    }
+
+    @MainActor
+    func deferStartupNotificationPrompt(_ app: XCUIApplication, timeout: TimeInterval = 0) {
+        let prompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
+            format: "label IN %@",
+            ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
+        )).firstMatch
+        guard prompt.exists || (timeout > 0 && prompt.waitForExistence(timeout: timeout)) else { return }
+        let later = prompt.buttons.matching(NSPredicate(
+            format: "label IN %@", ["Để sau", "Maybe later"] as NSArray
+        )).firstMatch
+        XCTAssertTrue(later.waitForExistence(timeout: 5) && later.isHittable,
+                      "The app's startup notification dialog must allow users to continue")
+        later.tap()
+        waitUntil("The app's notification dialog must close after choosing later") { !prompt.exists }
     }
 
     @MainActor
@@ -191,6 +208,7 @@ class NativeGuestUITestCase: XCTestCase {
 
     @MainActor
     func navigate(_ label: String, app: XCUIApplication, captureNavigationEvidence: Bool = true) {
+        deferStartupNotificationPrompt(app)
         dismissPracticeSyncNotice(app)
         let navigation = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Điều hướng nhanh", "Quick navigation")).firstMatch
         XCTAssertTrue(navigation.waitForExistence(timeout: 20), "Bottom tab tap must belong to the actual navigation group")
@@ -515,6 +533,7 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         evidence("motion-off", app: app)
         // Một deep link ấm và một deep link lạnh kiểm chứng chính contract native, không dùng cho mọi bước điều hướng.
         app.open(URL(string: "vn.quangtu.tutam:///tu-tap?action=rosary")!)
+        deferStartupNotificationPrompt(app, timeout: 7)
         let startDialog = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Bắt Đầu Lần Hạt?")).firstMatch
         XCTAssertTrue(startDialog.waitForExistence(timeout: 20), "Warm rosary deep link must expose its actual confirmation dialog")
         let start = startDialog.buttons["Bắt đầu 🙏"].firstMatch
@@ -539,6 +558,7 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         XCTAssertEqual(checked(app.switches["Hiệu ứng chuyển động"].firstMatch), false)
         app.terminate()
         app.open(URL(string: "vn.quangtu.tutam:///ca-nhan?tab=settings")!)
+        deferStartupNotificationPrompt(app, timeout: 7)
         XCTAssertTrue(app.switches["Bật thông báo nhắc nhở tu tập"].firstMatch.waitForExistence(timeout: 30))
         openAppearance(app)
         XCTAssertEqual(checked(app.switches["Hiệu ứng chuyển động"].firstMatch), false, "Motion setting must survive native cold deep link")
@@ -588,6 +608,7 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         evidence("copy-before-native-url-open", app: app)
         app.open(URL(string: "vn.quangtu.tutam:///tu-tap/chep-kinh")!)
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 45), "Native WKWebView must load after opening scripture copying URL")
+        deferStartupNotificationPrompt(app, timeout: 7)
         evidence("copy-after-native-url-open", app: app)
         let bookChoiceSwitch = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Kinh Địa Tạng Bồ Tát Bổn Nguyện")).firstMatch
         let bookChoiceButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Kinh Địa Tạng Bồ Tát Bổn Nguyện")).firstMatch
@@ -775,6 +796,7 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         openAppearance(app)
         tap(labelledToggle("Tối", app: app), app: app)
         app.open(URL(string: "vn.quangtu.tutam:///tu-tap?article=tt_1780910773084&chap=3")!)
+        deferStartupNotificationPrompt(app, timeout: 7)
         let practice = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Vào chế độ tu tập")).firstMatch
         tap(practice, app: app)
         tap(app.buttons["Bắt đầu 🙏"].firstMatch, app: app)
@@ -875,6 +897,7 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         evidence("settings-purple-six-choice-grid", app: app)
         app.terminate()
         app.launch()
+        deferStartupNotificationPrompt(app, timeout: 7)
         openSettings(app, captureNavigationEvidence: false)
         openAppearance(app)
         XCTAssertEqual(checked(labelledToggle("Tím nhạt", app: app)), true, "The selected app palette must survive a native relaunch")
@@ -896,6 +919,7 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         evidence("meditation-paused", app: app)
         XCUIDevice.shared.press(.home)
         app.activate()
+        deferStartupNotificationPrompt(app, timeout: 7)
         XCTAssertTrue(resume.waitForExistence(timeout: 15), "Explicit pause must remain after native background/foreground")
         tap(resume, app: app)
         XCTAssertTrue(app.buttons["Tạm dừng"].firstMatch.waitForExistence(timeout: 10))
@@ -942,6 +966,7 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     private func relaunchPersonal(_ app: XCUIApplication, captureNavigationEvidence: Bool = true) {
         app.terminate()
         app.launch()
+        deferStartupNotificationPrompt(app, timeout: 7)
         XCTAssertTrue(existsOrWait(app.links["Cá nhân"].firstMatch, timeout: 30))
         openSettings(app, captureNavigationEvidence: captureNavigationEvidence)
         openPersonal(app)
@@ -1405,6 +1430,7 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         }
         evidence("personal-reminder-system-received", app: springboard)
         app.activate()
+        deferStartupNotificationPrompt(app, timeout: 7)
         openSettings(app)
         openPersonal(app)
         deleteEvent(name, app: app)
