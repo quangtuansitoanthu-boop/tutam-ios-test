@@ -68,6 +68,20 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
+    func openNativeLink(_ url: URL, app: XCUIApplication) {
+        app.open(url)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let titles = ["Open in “Tu tập”?", "Mở trong “Tu tập”?"] as NSArray
+        let prompt = springboard.alerts.matching(NSPredicate(format: "label IN %@", titles)).firstMatch
+        guard prompt.waitForExistence(timeout: 4) else { return }
+        let open = prompt.buttons.matching(NSPredicate(format: "label IN %@", ["Open", "Mở"] as NSArray)).firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5) && open.isHittable,
+                      "The system confirmation must offer its actual Open action for Tu tập")
+        open.tap()
+        waitUntil("The system confirmation for Tu tập must close after choosing Open") { !prompt.exists }
+    }
+
+    @MainActor
     func allowExpectedNotificationPermission(_ app: XCUIApplication, required: Bool = true) {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let expected = NSPredicate(format: "label CONTAINS[cd] %@ AND (label CONTAINS[cd] %@ OR label CONTAINS[cd] %@)", "Tu tập", "notification", "thông báo")
@@ -550,7 +564,7 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         setMotion(false, app: app)
         evidence("motion-off", app: app)
         // Một deep link ấm và một deep link lạnh kiểm chứng chính contract native, không dùng cho mọi bước điều hướng.
-        app.open(URL(string: "vn.quangtu.tutam:///tu-tap?action=rosary")!)
+        openNativeLink(URL(string: "vn.quangtu.tutam:///tu-tap?action=rosary")!, app: app)
         deferStartupNotificationPrompt(app, timeout: 7)
         let startDialog = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Bắt Đầu Lần Hạt?")).firstMatch
         XCTAssertTrue(startDialog.waitForExistence(timeout: 20), "Warm rosary deep link must expose its actual confirmation dialog")
@@ -575,7 +589,7 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         openAppearance(app)
         XCTAssertEqual(checked(app.switches["Hiệu ứng chuyển động"].firstMatch), false)
         app.terminate()
-        app.open(URL(string: "vn.quangtu.tutam:///ca-nhan?tab=settings")!)
+        openNativeLink(URL(string: "vn.quangtu.tutam:///ca-nhan?tab=settings")!, app: app)
         deferStartupNotificationPrompt(app, timeout: 7)
         XCTAssertTrue(app.switches["Bật thông báo nhắc nhở tu tập"].firstMatch.waitForExistence(timeout: 30))
         openAppearance(app)
@@ -624,7 +638,7 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
     func testNativeScriptureCopyingReferenceAndGhost() {
         let app = launchGuest()
         evidence("copy-before-native-url-open", app: app)
-        app.open(URL(string: "vn.quangtu.tutam:///tu-tap/chep-kinh")!)
+        openNativeLink(URL(string: "vn.quangtu.tutam:///tu-tap/chep-kinh")!, app: app)
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 45), "Native WKWebView must load after opening scripture copying URL")
         deferStartupNotificationPrompt(app, timeout: 7)
         evidence("copy-after-native-url-open", app: app)
@@ -813,7 +827,7 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         openSettings(app)
         openAppearance(app)
         tap(labelledToggle("Tối", app: app), app: app)
-        app.open(URL(string: "vn.quangtu.tutam:///tu-tap?article=tt_1780910773084&chap=3")!)
+        openNativeLink(URL(string: "vn.quangtu.tutam:///tu-tap?article=tt_1780910773084&chap=3")!, app: app)
         deferStartupNotificationPrompt(app, timeout: 7)
         let practice = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Vào chế độ tu tập")).firstMatch
         tap(practice, app: app)

@@ -187,34 +187,6 @@ jobs:
         run: |
           cat build/release-evidence/privacy-manifests.txt
           cat build/release-evidence/Podfile.lock
-      - name: Diagnose native URL delivery without XCTest launch
-        continue-on-error: true
-        timeout-minutes: 3
-        run: |
-          set -euo pipefail
-          test "$TUTAM_QA_HOSTS_ISOLATED" = 1
-          simulator="$TUTAM_QA_SIMULATOR"
-          bundle_id=vn.quangtu.tutam
-          app=build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app
-          xcrun simctl install "$simulator" "$app"
-          trap 'xcrun simctl uninstall "$simulator" "$bundle_id"' EXIT
-          xcrun simctl launch "$simulator" "$bundle_id" -tutam-qa-events 1
-          data="$(xcrun simctl get_app_container "$simulator" "$bundle_id" data)"
-          trace="$data/Library/Caches/tutam-qa-events.jsonl"
-          for attempt in {1..20}; do
-            if grep -q '"type":"installed"' "$trace" 2>/dev/null; then break; fi
-            sleep 1
-          done
-          grep -q '"type":"installed"' "$trace"
-          xcrun simctl openurl "$simulator" 'vn.quangtu.tutam:///tu-tap/chep-kinh'
-          reached='"path":"/tu-tap/chep-kinh".*"type":"pathname-change"'
-          for attempt in {1..20}; do
-            if grep -q "$reached" "$trace"; then break; fi
-            sleep 1
-          done
-          cp "$trace" build/release-evidence/direct-openurl-events.jsonl
-          grep -q "$reached" "$trace"
-          echo 'Confirmed a native openurl event reached the copying route in the running app.'
       - name: Run native iOS Simulator UI tests
         timeout-minutes: 45
         run: |
@@ -272,6 +244,48 @@ jobs:
           if [ -d "$result" ]; then
             xcrun xcresulttool export attachments --path "$result" --output-path build/release-evidence/native-ui-attachments
           fi
+      - name: Diagnose native URL delivery after XCTest evidence is saved
+        if: always() && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          simulator="$TUTAM_QA_SIMULATOR"
+          bundle_id=vn.quangtu.tutam
+          app=build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app
+          test -d "$app"
+          if xcrun simctl get_app_container "$simulator" "$bundle_id" data >/dev/null 2>&1; then
+            xcrun simctl uninstall "$simulator" "$bundle_id"
+          fi
+          xcrun simctl install "$simulator" "$app"
+          xcrun simctl launch "$simulator" "$bundle_id" -tutam-qa-events 1
+          data="$(xcrun simctl get_app_container "$simulator" "$bundle_id" data)"
+          trace="$data/Library/Caches/tutam-qa-events.jsonl"
+          copy_trace() {
+            if [ -f "$trace" ]; then cp "$trace" build/release-evidence/direct-openurl-events.jsonl; fi
+          }
+          for attempt in {1..25}; do
+            if grep -q '"type":"installed"' "$trace" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          copy_trace
+          if ! grep -q '"type":"installed"' "$trace"; then
+            echo 'WKWebView startup trace was unavailable before opening the URL.'
+            exit 1
+          fi
+          xcrun simctl openurl "$simulator" 'vn.quangtu.tutam:///tu-tap/chep-kinh'
+          reached='"path":"/tu-tap/chep-kinh".*"type":"pathname-change"'
+          for attempt in {1..20}; do
+            if grep -q "$reached" "$trace"; then break; fi
+            sleep 1
+          done
+          copy_trace
+          if ! grep -q "$reached" "$trace"; then
+            xcrun simctl io "$simulator" screenshot build/release-evidence/direct-openurl-screen.png
+            echo 'The direct openurl probe did not observe the copying route.'
+            exit 1
+          fi
+          echo 'Confirmed a native openurl event reached the copying route in the running app.'
       - name: Shut down the CI simulator before restoring network resolution
         if: always()
         run: |
@@ -303,6 +317,7 @@ jobs:
           name: ios-native-diagnostics-${{ github.run_number }}
           path: |
             build/release-evidence/native-ui-summary.json
+            build/release-evidence/direct-openurl-screen.png
             build/release-evidence/*-events.jsonl
             build/release-evidence/native-ui-attachments/manifest.json
             build/release-evidence/native-ui-attachments/*.txt
