@@ -1625,6 +1625,12 @@ final class NativeTalkPlayerTests: NativeGuestUITestCase {
 
         tap(playAlbum, app: app)
         checkPlaying()
+        let position = app.sliders["Vị trí phát"].firstMatch
+        waitUntil("The offline native transport must actually advance", timeout: 30) {
+            guard let value = position.value as? String else { return false }
+            let numeric = value.replacingOccurrences(of: "%", with: "").replacingOccurrences(of: ",", with: ".")
+            return (Double(numeric.trimmingCharacters(in: .whitespaces)) ?? 0) > 0
+        }
         evidence("talk-mini-player-first-play", app: app)
         swipePlayerAway()
         tap(playAlbum, app: app)
