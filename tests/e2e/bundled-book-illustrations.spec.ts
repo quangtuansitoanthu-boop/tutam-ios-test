@@ -126,6 +126,7 @@ test('previously downloaded illustrations display from cache without a network',
 });
 
 test('Facebook book streams the R2 source and switches a successful download to an offline playable blob', async ({ page }) => {
+  await deferStartupNotification(page);
   const fixture = readFileSync('tests/e2e/fixtures/talk-video.mp4');
   const video = videoManifest.videos[0];
   const source = `${video.src}?v=${video.sha256}`;

@@ -1,0 +1,71 @@
+name: Verify remaining web regressions
+on:
+  push:
+    branches:
+      - codex/web-regression-recheck-20261126-011447
+permissions:
+  contents: read
+jobs:
+  browser:
+    name: Web recheck group ${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            files: english-reader-presentation.spec.ts bundled-book-illustrations.spec.ts
+    env:
+      TUTAM_E2E_LOCAL_ONLY: '1'
+      TUTAM_E2E_DEV_API: '1'
+      TUTAM_E2E_PREBUILT: '1'
+      WRANGLER_SEND_METRICS: 'false'
+      PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/qa-playwright-report.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx --no-install playwright install --with-deps chromium webkit
+      - name: Build the Worker with isolated test bindings
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const test = JSON.parse(fs.readFileSync('tests/e2e/wrangler.sveltekit.jsonc','utf8'));
+          test.$schema = './node_modules/wrangler/config-schema.json';
+          test.main = 'dist-sveltekit/_worker.js';
+          test.assets.directory = './dist-sveltekit';
+          test.d1_databases[0].migrations_dir = 'migrations';
+          fs.writeFileSync('wrangler.sveltekit.jsonc', JSON.stringify(test));
+          if (!fs.existsSync('manifest.json')) fs.copyFileSync('static/manifest.json','manifest.json');
+          JS
+          npm run build
+      - name: Run the shard against fresh loopback D1 and R2
+        run: npx --no-install playwright test ${{ matrix.files }} --config tests/e2e/playwright.config.ts --reporter=dot,json --workers=1
+      - name: Save a compact per-test result
+        if: always()
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const reportPath = '/tmp/qa-playwright-report.json';
+          if(!fs.existsSync(reportPath)) process.exit(0);
+          const report = JSON.parse(fs.readFileSync(reportPath,'utf8'));
+          const rows=[];
+          const visit=s=>{
+            for(const t of s.specs ?? []) for(const r of t.tests) rows.push({ file:t.file, line:t.line, title:t.title, project:r.projectName, status:r.status, outcome:r.results.map(x=>x.status),error:r.results.find(x=>x.error)?.error?.message?.slice(0,1600) });
+            for(const child of s.suites ?? []) visit(child);
+          };
+          for(const suite of report.suites ?? []) visit(suite);
+          fs.writeFileSync('web-results.json', JSON.stringify({stats:report.stats,results:rows}));
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-feature-results-${{ matrix.shard }}
+          path: web-results.json
+          retention-days: 3
