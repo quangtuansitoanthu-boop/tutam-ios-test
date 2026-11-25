@@ -163,7 +163,7 @@
         }
         // Tính từ khung hình đầu tiên của màn tải, để thời gian khởi tạo ứng dụng cũng được tính.
         const shownAt = Number(startup.dataset.shownAt ?? performance.now());
-        const remaining = Math.max(0, shownAt + 1300 - performance.now());
+        const remaining = Math.max(0, shownAt + 1600 - performance.now());
         timer = window.setTimeout(() => {
           startup.classList.add('startup-ready');
           timer = window.setTimeout(() => startup.remove(), 240);

@@ -91,9 +91,10 @@ def measure_startup():
         shown, mounted, fade, removed = [item[key] for key in ("shownAt", "mountedAt", "fadeAt", "removedAt")]
         # The shell publishes data-mounted before its two real paint frames.
         # Busy simulator rendering can add a few frames to event observation.
-        assert fade >= max(shown + 1250, mounted - 35), item
-        assert fade <= max(shown + 1300, mounted) + 500, item
-        assert item["assetAt"] < fade and fade + 185 <= removed <= fade + 520, item
+        assert fade >= max(shown + 1550, mounted - 35), item
+        assert fade <= max(shown + 1600, mounted) + 500, item
+        assert fade - max(item["assetAt"], shown) >= 1200, item
+        assert fade + 185 <= removed <= fade + 520, item
         print(f"Launch {index+1}: illustration {item['imageNumber']:02.0f}, "
               f"art at {item['assetAt'] - shown:.0f} ms, shell at {mounted - shown:.0f} ms, "
               f"fade at {fade - shown:.0f} ms, removed at {removed - shown:.0f} ms")
