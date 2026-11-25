@@ -282,3 +282,23 @@ jobs:
             android/app/build/test-results/testDebugUnitTest/*.xml
           retention-days: 7
           if-no-files-found: error
+
+      - name: Verify the tested debug artifact for public QA
+        run: |
+          set -euo pipefail
+          grep -m1 -F "name='$QA_PACKAGE'" build/android-device-evidence/app-badging.txt
+          grep -Fx 'application-debuggable' build/android-device-evidence/app-badging.txt
+          cd android/app/build/outputs/apk/debug
+          signer=$(find "$CI_SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f | sort | tail -1)
+          "$signer" verify app-debug.apk
+          sha256sum app-debug.apk | tee app-debug.apk.sha256
+      - name: Upload the emulator-tested debug APK and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: TuTap-QA-debug-APK
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/debug/app-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

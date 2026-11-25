@@ -29,12 +29,19 @@
   let missingPermission = $state<NotificationPermissionMissing>('none');
   let wasBlocked = false;
   let readyToPrompt = false;
+  let waitingForEditor = false;
 
   const isAuthenticated = $derived(Boolean(session?.authenticated));
 
   function setVisible(next: boolean): void {
     visible = next;
     onActiveChange?.(next);
+  }
+
+  function isEditingText(): boolean {
+    const active = document.activeElement;
+    return active instanceof HTMLElement &&
+      (active.isContentEditable || active.matches('input:read-write, textarea:read-write'));
   }
 
   async function checkAndPrompt(): Promise<void> {
@@ -69,6 +76,11 @@
       onActiveChange?.(false);
       return;
     }
+    if (isEditingText()) {
+      waitingForEditor = true;
+      return;
+    }
+    waitingForEditor = false;
     status = 'prompt';
     setVisible(true);
   }
@@ -156,6 +168,18 @@
       void checkAndPrompt();
     };
 
+    let focusFrame = 0;
+    const retryAfterEditing = () => {
+      if (!waitingForEditor || focusFrame) return;
+      focusFrame = requestAnimationFrame(() => {
+        focusFrame = 0;
+        if (document.visibilityState === 'hidden' || isEditingText()) return;
+        waitingForEditor = false;
+        void checkAndPrompt();
+      });
+    };
+    document.addEventListener('focusout', retryAfterEditing);
+
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         handleResumeCheck();
@@ -182,6 +206,8 @@
 
     return () => {
       disposed = true;
+      document.removeEventListener('focusout', retryAfterEditing);
+      cancelAnimationFrame(focusFrame);
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       if (appListenerHandle) {

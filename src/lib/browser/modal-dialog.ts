@@ -41,7 +41,7 @@ export function modalDialog(dialog: HTMLDialogElement) {
     if (event.key !== 'Tab' || event.defaultPrevented || topModal() !== dialog) return;
     const controls = [...dialog.querySelectorAll<HTMLElement>(
       'button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]',
-    )].filter((element) => element.getClientRects().length && !element.closest('[inert]'));
+    )].filter((element) => element.tabIndex >= 0 && element.getClientRects().length && !element.closest('[inert]'));
     const first = controls[0];
     const last = controls[controls.length - 1];
     const active = document.activeElement;

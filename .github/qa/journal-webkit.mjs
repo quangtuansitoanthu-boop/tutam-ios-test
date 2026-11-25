@@ -6,13 +6,46 @@ import { execFileSync } from 'node:child_process';
 
 const root = path.resolve('ios/App/App/public');
 const practiceHistory = process.argv.includes('--practice-history');
-const port = practiceHistory ? 8794 : 8793;
+const initialFocus = process.argv.includes('--initial-focus');
+const port = initialFocus ? 8795 : practiceHistory ? 8794 : 8793;
 const origin = 'http://127.0.0.1:'+port;
 const member = { id: 'qa-journal', role: 'user', displayName: 'QA', avatarUrl: '', email: '' };
 let finish;
 const result = new Promise(resolve => { finish = resolve; });
 const posts = [];
 const requests = [];
+
+function exerciseInitialNotificationFocus() {
+  const visible = n => n && n.getClientRects().length > 0;
+  const prompt = () => [...document.querySelectorAll('dialog.notification-modal-card[open]')].find(visible);
+  let permissionChecks = 0;
+  Object.defineProperty(window,'Notification',{configurable:true,value:class {
+    static get permission() { permissionChecks++; return 'default'; }
+  }});
+  const wait = async (name, read) => {
+    for(let i=0;i<400;i++){const v=read();if(v)return v;await new Promise(r=>setTimeout(r,60));}
+    throw Error(name+', permission reads '+permissionChecks+', active '+document.activeElement?.tagName);
+  };
+  async function scenario() {
+    const field = await wait('library search',()=>document.querySelector('.search-input'));
+    field.focus();
+    if(document.activeElement!==field)throw Error('iPhone Safari did not focus the search field');
+    field.value='kinh';
+    field.dispatchEvent(new Event('input',{bubbles:true}));
+    const before=permissionChecks;
+    await wait('automatic permission check while focused',()=>permissionChecks>before);
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    if(prompt() || document.activeElement!==field || field.value!=='kinh')throw Error('startup dialog interrupted input');
+    field.blur();
+    const dialog=await wait('automatic prompt after editing',prompt);
+    if(field.value!=='kinh')throw Error('typed text lost after blur');
+    return {passed:true,permissionChecks,retained:field.value,dialog:dialog.getAttribute('aria-label')};
+  }
+  addEventListener('DOMContentLoaded',()=>{
+    scenario().catch(e=>({passed:false,reason:String(e)})).then(result=>
+      fetch('/__qa-result',{method:'POST',body:JSON.stringify(result)}));
+  },{once:true});
+}
 
 function exercisePracticeHistory() {
   const visible = node => node && node.getClientRects().length > 0;
@@ -180,7 +213,7 @@ const server=createServer(async (req,res)=>{
       res.setHeader('Set-Cookie','quangtu_session=qa-local-fixture; Path=/; HttpOnly; SameSite=Lax');
       res.setHeader('Cache-Control','no-store');
       res.setHeader('Content-Security-Policy',"connect-src 'self'; worker-src 'none'");
-      res.end(bytes.toString().replace('<head>','<head><script>('+(practiceHistory ? exercisePracticeHistory : exercise).toString()+')()</script>'));return;
+      res.end(bytes.toString().replace('<head>','<head><script>('+(initialFocus ? exerciseInitialNotificationFocus : practiceHistory ? exercisePracticeHistory : exercise).toString()+')()</script>'));return;
     }
     res.end(bytes);
   }catch {json({error:'fixture'},500)}
@@ -188,15 +221,15 @@ const server=createServer(async (req,res)=>{
 await new Promise((ok,fail)=>{server.once('error',fail);server.listen(port,'127.0.0.1',ok)});
 let browser;
 try{
- if(process.env.TUTAM_QA_SIMULATOR) execFileSync('xcrun',['simctl','openurl',process.env.TUTAM_QA_SIMULATOR,origin+'/tu-tap']);
+ if(process.env.TUTAM_QA_SIMULATOR) execFileSync('xcrun',['simctl','openurl',process.env.TUTAM_QA_SIMULATOR,origin+(initialFocus?'/kinh-sach':'/tu-tap')]);
  else {
    const playwright=await import('playwright');browser=await playwright[process.env.TUTAM_QA_BROWSER || 'chromium'].launch();
    const page=await browser.newPage({viewport:{width:390,height:844},serviceWorkers:'block'});
-   await page.goto(origin+'/tu-tap');
+   await page.goto(origin+(initialFocus?'/kinh-sach':'/tu-tap'));
  }
  const timer=setTimeout(()=>finish({passed:false,reason:'Fixture timed out',posts,requests:requests.slice(-45)}),115000);let out;
  try{out=await result}finally{clearTimeout(timer)}
  console.log(JSON.stringify(out));
- if(process.env.TUTAM_QA_SIMULATOR)writeFileSync('build/release-evidence/'+(practiceHistory?'practice-history.json':'journal-webkit.json'),JSON.stringify(out));
- if(!out.passed||(practiceHistory ? !out.reloaded : out.posts?.join(',')!=='repentance,good_deed'))process.exitCode=1;
+ if(process.env.TUTAM_QA_SIMULATOR)writeFileSync('build/release-evidence/'+(initialFocus?'initial-focus.json':practiceHistory?'practice-history.json':'journal-webkit.json'),JSON.stringify(out));
+ if(!out.passed||(initialFocus ? !out.permissionChecks : practiceHistory ? !out.reloaded : out.posts?.join(',')!=='repentance,good_deed'))process.exitCode=1;
 }finally{await browser?.close();server.closeAllConnections();server.close();}

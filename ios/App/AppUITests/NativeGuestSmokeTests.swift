@@ -673,6 +673,36 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
     }
 }
 
+final class NativeNotificationTypingTests: NativeGuestUITestCase {
+    @MainActor
+    func testNotificationPromptWaitsUntilUserFinishesTypingAfterResume() {
+        let app = launchGuest()
+        navigate("Kinh sách", app: app)
+        let search = librarySearch(app)
+        search.tap()
+        search.typeText("kinh")
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        let prompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
+            format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
+        )).firstMatch
+        XCTAssertFalse(prompt.waitForExistence(timeout: 3), "An automatic reminder must leave ongoing typing uninterrupted")
+        search.typeText(" sach")
+        XCTAssertEqual(search.value as? String, "kinh sach")
+        evidence("notification-resume-with-real-keyboard", app: app)
+
+        let done = app.toolbars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray)).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 10) && done.isHittable)
+        done.tap()
+        XCTAssertTrue(prompt.waitForExistence(timeout: 15), "After editing ends the pending notification dialog must appear")
+        deferStartupNotificationPrompt(app)
+        XCTAssertEqual(search.value as? String, "kinh sach")
+    }
+}
+
 final class NativeExtendedGuestTests: NativeGuestUITestCase {
     @MainActor
     func testNativeScriptureCopyingReferenceAndGhost() {

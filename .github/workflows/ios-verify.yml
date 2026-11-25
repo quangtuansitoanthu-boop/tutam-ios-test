@@ -18,6 +18,7 @@ on:
           - journal
           - startup
           - startup-webkit
+          - typing
           - reminder-crud
           - library-reader
   push:
@@ -37,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(github.event_name == 'push' && '["guest","extended","reminders","snapshots","audio"]' || inputs.test_suite == 'full' && '["guest","extended","reminders","snapshots"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
+        suite: ${{ fromJSON(github.event_name == 'push' && '["guest","extended","reminders","snapshots","audio","typing"]' || inputs.test_suite == 'full' && '["guest","extended","reminders","snapshots"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     runs-on: macos-15
     timeout-minutes: 70
     env:
@@ -192,7 +193,9 @@ jobs:
           set -euo pipefail
           test "$TUTAM_QA_HOSTS_ISOLATED" = 1
           testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests)
-          if [ "$IOS_TEST_SUITE" = "extended" ]; then
+          if [ "$IOS_TEST_SUITE" = "typing" ]; then
+            testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
+          elif [ "$IOS_TEST_SUITE" = "extended" ]; then
             testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
           elif [ "$IOS_TEST_SUITE" = "reminders" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests)
@@ -265,7 +268,9 @@ jobs:
           set -euo pipefail
           test "$TUTAM_QA_HOSTS_ISOLATED" = 1
           testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests)
-          if [ "$IOS_TEST_SUITE" = "extended" ]; then
+          if [ "$IOS_TEST_SUITE" = "typing" ]; then
+            testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
+          elif [ "$IOS_TEST_SUITE" = "extended" ]; then
             testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
           elif [ "$IOS_TEST_SUITE" = "reminders" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests)
@@ -335,7 +340,7 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'guest':4,'extended':5,'reminders':3,'snapshots':2,'picker':1,'audio':1,'reminder-crud':1,'library-reader':1}.get(suite,3)
+          min_passed={'typing':1,'guest':4,'extended':5,'reminders':3,'snapshots':2,'picker':1,'audio':1,'reminder-crud':1,'library-reader':1}.get(suite,3)
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
           if suite in ('picker', 'audio', 'reminder-crud', 'library-reader'):
             assert data['passedTests'] == 1, 'Expected exactly the requested native regression'
@@ -360,10 +365,14 @@ jobs:
           fi
       - name: Verify 48-hour journal feedback on real simulator WebKit with loopback-only fixtures
         if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'journal') && env.TUTAM_QA_HOSTS_ISOLATED == '1'
-        timeout-minutes: 3
+        timeout-minutes: 6
         run: |
           node .github/qa/journal-webkit.mjs
           node .github/qa/journal-webkit.mjs --practice-history
+      - name: Verify the automatic reminder waits for a focused editor on cold iPhone Safari startup
+        if: always() && env.IOS_TEST_SUITE == 'typing' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        timeout-minutes: 3
+        run: node .github/qa/journal-webkit.mjs --initial-focus
       - name: Verify system URL deliveries from XCTest on the installed native app
         if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'extended') && env.TUTAM_QA_HOSTS_ISOLATED == '1'
         run: python3 .github/qa/ios-native-evidence.py links
@@ -423,6 +432,7 @@ jobs:
             build/release-evidence/native-ui-summary.json
             build/release-evidence/journal-webkit.json
             build/release-evidence/practice-history.json
+            build/release-evidence/initial-focus.json
             build/release-evidence/native-link-receipts.json
             build/release-evidence/native-startup-paint.json
             build/release-evidence/startup-controlled-webkit.json

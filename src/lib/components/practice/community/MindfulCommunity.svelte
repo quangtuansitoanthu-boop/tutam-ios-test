@@ -785,7 +785,7 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font-family: var(--font-reader);
-    font-size: var(--font-size-body);
+    font-size: var(--font-size-input);
     font-weight: 400;
     line-height: 1.75;
     text-align: justify;
