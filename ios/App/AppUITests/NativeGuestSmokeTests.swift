@@ -30,7 +30,7 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
-    func launchGuest() -> XCUIApplication {
+    func launchGuest(retryCancelledPromptTap: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -38,9 +38,9 @@ class NativeGuestUITestCase: XCTestCase {
         app.launchArguments = ["-tutam-qa-events", "1", "-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
         app.launch()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30), "Native WKWebView must load")
-        deferStartupNotificationPrompt(app, timeout: 15)
+        deferStartupNotificationPrompt(app, timeout: 15, retryCancelledTap: retryCancelledPromptTap)
         let personalTab = app.links["Cá nhân"].firstMatch
-        if !personalTab.waitForExistence(timeout: 20) { deferStartupNotificationPrompt(app) }
+        if !personalTab.waitForExistence(timeout: 20) { deferStartupNotificationPrompt(app, retryCancelledTap: retryCancelledPromptTap) }
         XCTAssertTrue(personalTab.waitForExistence(timeout: 10), "Native app must finish rendering its navigation")
         return app
     }
@@ -52,7 +52,7 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
-    func deferStartupNotificationPrompt(_ app: XCUIApplication, timeout: TimeInterval = 0) {
+    func deferStartupNotificationPrompt(_ app: XCUIApplication, timeout: TimeInterval = 0, retryCancelledTap: Bool = false) {
         let prompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
             format: "label IN %@",
             ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
@@ -63,7 +63,24 @@ class NativeGuestUITestCase: XCTestCase {
         )).firstMatch
         XCTAssertTrue(later.waitForExistence(timeout: 5) && later.isHittable,
                       "The app's startup notification dialog must allow users to continue")
+        if retryCancelledTap {
+            var previousFrame: CGRect?
+            waitUntil("Startup prompt must settle inside the foreground app before the playback test") {
+                let frame = later.frame
+                let ready = app.state == .runningForeground && self.insideViewport(later, app: app)
+                    && prompt.frame.contains(frame) && previousFrame == frame
+                previousFrame = frame
+                return ready
+            }
+        }
         later.tap()
+        if retryCancelledTap {
+            let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !prompt.exists }, object: NSObject())
+            if XCTWaiter.wait(for: [dismissed], timeout: 3) == .timedOut && prompt.exists && later.isHittable {
+                evidence("audio-setup-notification-still-visible", app: app)
+                later.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+        }
         waitUntil("The app's notification dialog must close after choosing later") { !prompt.exists }
     }
 
@@ -1580,7 +1597,7 @@ final class NativeSimulatorSnapshotTests: NativeGuestUITestCase {
 final class NativeTalkPlayerTests: NativeGuestUITestCase {
     @MainActor
     func testSameAlbumPlaybackRestoresDismissedMiniPlayer() {
-        let app = launchGuest()
+        let app = launchGuest(retryCancelledPromptTap: true)
         let navigation = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Điều hướng nhanh")).firstMatch
         tap(navigation.links["Pháp thoại"].firstMatch, app: app)
         let album = "GẬY KIM CANG HÉT - TẬP 1"
@@ -1588,6 +1605,8 @@ final class NativeTalkPlayerTests: NativeGuestUITestCase {
         tap(search, app: app)
         search.typeText(album + "\n")
         let playAlbum = app.buttons["Phát album " + album].firstMatch
+        XCTAssertTrue(playAlbum.waitForExistence(timeout: 15))
+        evidence("talk-mini-player-catalog", app: app)
         let expand = app.buttons["Mở rộng trình phát Pháp Thoại"].firstMatch
         let pause = app.buttons["Tạm dừng"].firstMatch
 
@@ -1610,10 +1629,13 @@ final class NativeTalkPlayerTests: NativeGuestUITestCase {
         swipePlayerAway()
         tap(playAlbum, app: app)
         checkPlaying()
+        evidence("talk-mini-player-same-album", app: app)
         swipePlayerAway()
 
         tap(app.buttons["Mở album " + album].firstMatch, app: app)
         let playAll = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Phát tất cả")).firstMatch
+        XCTAssertTrue(playAll.waitForExistence(timeout: 15))
+        evidence("talk-mini-player-album-detail", app: app)
         tap(playAll, app: app)
         checkPlaying()
         tap(pause, app: app)
