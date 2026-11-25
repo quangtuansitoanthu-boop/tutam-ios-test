@@ -64,7 +64,7 @@ async function exercise(mode, moduleUrl) {
     const {observedGate}=await import(moduleUrl);
     if(mode==='slow'){
       for(let i=0;i<300&&!element.dataset.shownAt;i++) await wait(20);
-      await wait(Math.max(0,Number(element.dataset.shownAt)+2850-performance.now()));
+      await wait(Math.max(0,Number(element.dataset.shownAt)+3850-performance.now()));
     }
     data.requestedOwnerAt=performance.now();
     observedGate();
@@ -131,10 +131,10 @@ try {
   if(evidence.length!==3)throw Error('Missing early/delayed WebKit readiness cases');
   for(const [idx,d] of evidence.entries()){
     if(d.error || !['shownAt','scheduledAt','scheduledDelay','fadeAt','removedAt','artAt'].every(k=>Number.isFinite(d[k])))throw Error('Startup did not complete '+JSON.stringify(d));
-    const expected=Math.max(0,2000-(d.scheduledAt-d.shownAt));
-    if(Math.abs(expected-d.scheduledDelay)>10 || d.fadeAt+10<d.scheduledAt+expected || d.fadeAt>d.scheduledAt+expected+250 || d.removedAt-d.fadeAt<205 || d.removedAt-d.fadeAt>400 || d.fadeAt-d.shownAt<1980 || d.fadeAt-d.artAt<1800)throw Error('Actual timer / CSS removal sequence '+JSON.stringify(d));
-    if(idx===0 && (d.mode!=='fast'||d.scheduledDelay<100||d.removedAt-d.shownAt>2460||d.removedAt-d.shownAt<2160))throw Error('Fast ready path '+JSON.stringify(d));
-    if(idx===1 && (d.mode!=='slow'||d.scheduledAt-d.shownAt<2600||d.scheduledDelay>10))throw Error('Delayed gate must use zero extra hold '+JSON.stringify(d));
-    if(idx===2 && (d.mode!=='decode'||d.shownAt-d.requestedOwnerAt<500||d.scheduledDelay<1700))throw Error('Delayed artwork must retain reading time '+JSON.stringify(d));
+    const expected=Math.max(0,3000-(d.scheduledAt-d.shownAt));
+    if(Math.abs(expected-d.scheduledDelay)>10 || d.fadeAt+10<d.scheduledAt+expected || d.fadeAt>d.scheduledAt+expected+250 || d.removedAt-d.fadeAt<205 || d.removedAt-d.fadeAt>400 || d.fadeAt-d.shownAt<2980 || d.fadeAt-d.artAt<2800)throw Error('Actual timer / CSS removal sequence '+JSON.stringify(d));
+    if(idx===0 && (d.mode!=='fast'||d.scheduledDelay<100||d.removedAt-d.shownAt>3460||d.removedAt-d.shownAt<3160))throw Error('Fast ready path '+JSON.stringify(d));
+    if(idx===1 && (d.mode!=='slow'||d.scheduledAt-d.shownAt<3600||d.scheduledDelay>10))throw Error('Delayed gate must use zero extra hold '+JSON.stringify(d));
+    if(idx===2 && (d.mode!=='decode'||d.shownAt-d.requestedOwnerAt<500||d.scheduledDelay<2700))throw Error('Delayed artwork must retain reading time '+JSON.stringify(d));
   }
 } finally { clearTimeout(timeout);await browser?.close();server.closeAllConnections();server.close(); }

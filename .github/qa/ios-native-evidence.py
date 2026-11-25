@@ -101,11 +101,11 @@ def measure_startup():
         shown, mounted, fade, removed = [item[key] for key in ("shownAt", "mountedAt", "fadeAt", "removedAt")]
         # The installed app records real DOM mutations and the exact timer request.
         ready = item["scheduledAt"]
-        expected = max(0, 2000 - (ready - shown))
+        expected = max(0, 3000 - (ready - shown))
         assert abs(item["scheduledDelay"] - expected) <= 12, item
-        assert fade >= max(shown + 1980, ready + expected - 25) and removed >= fade, item
-        assert fade - max(shown, item["assetAt"]) >= 1750, item
-        if ready - shown >= 2000:
+        assert fade >= max(shown + 2980, ready + expected - 25) and removed >= fade, item
+        assert fade - max(shown, item["assetAt"]) >= 2750, item
+        if ready - shown >= 3000:
             assert item["scheduledDelay"] <= 12, item
         print(f"Native timer {index+1}: ready {ready-shown:.0f} ms, requested {item['scheduledDelay']:.0f} ms", flush=True)
         if index:

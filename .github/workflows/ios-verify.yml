@@ -280,7 +280,25 @@ jobs:
           elif [ "$IOS_TEST_SUITE" = "picker" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarPickerWithMotionDisabled)
           fi
-          xcodebuild \
+          allowance=600
+          if [ "$IOS_TEST_SUITE" = 'reminders' ] || [ "$IOS_TEST_SUITE" = 'reminder-crud' ]; then allowance=1200; fi
+          products=build/ios-simulator/Build/Products/Debug-iphonesimulator
+          runner_app="$(find "$products" -maxdepth 1 -name '*UITests-Runner.app' -type d -print -quit)"
+          test -n "$runner_app" && test -d "$products/App.app"
+          runner_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$runner_app/Info.plist")"
+          test "$runner_id" = 'vn.quangtu.tutam.uitests.xctrunner'
+          register_test_bundles() {
+            xcrun simctl install "$TUTAM_QA_SIMULATOR" "$products/App.app" || return 1
+            xcrun simctl install "$TUTAM_QA_SIMULATOR" "$runner_app" || return 1
+            xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam app >/dev/null || return 1
+            xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" "$runner_id" app >/dev/null
+          }
+          if ! register_test_bundles; then
+            sleep 5
+            register_test_bundles
+          fi
+          run_tests() {
+            xcodebuild \
             -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
             -sdk iphonesimulator -destination "platform=iOS Simulator,id=$TUTAM_QA_SIMULATOR" \
             -derivedDataPath build/ios-simulator \
@@ -288,9 +306,24 @@ jobs:
             "${testing_args[@]}" \
             -parallel-testing-enabled NO \
             -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 600 \
-            -maximum-test-execution-time-allowance 600 \
+            -default-test-execution-time-allowance "$allowance" \
+            -maximum-test-execution-time-allowance "$allowance" \
             CODE_SIGNING_ALLOWED=NO test-without-building 2>&1 | tee build/release-evidence/native-ui-test.log
+          }
+          if ! run_tests; then
+            log=build/release-evidence/native-ui-test.log
+            if grep -Eiq 'Failed to install or launch the test runner|unknown to FrontBoard' "$log" && ! grep -Eq "Test Case .+Native[A-Za-z]+Tests .+ started" "$log"; then
+              mkdir -p build/release-evidence/runner-install-retry
+              if [ -d build/release-evidence/NativeGuestSmoke.xcresult ]; then
+                mv build/release-evidence/NativeGuestSmoke.xcresult build/release-evidence/runner-install-retry/
+              fi
+              cp "$log" build/release-evidence/runner-install-retry/native-ui-test.log
+              register_test_bundles
+              run_tests
+            else
+              exit 1
+            fi
+          fi
       - name: Require executed native UI tests with no failures or skips
         if: always() && env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup-webkit' && env.IOS_TEST_SUITE != 'startup'
         run: |

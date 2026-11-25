@@ -165,7 +165,7 @@
         // Tính đủ thời gian đọc từ khi tranh và tiêu đề đã sẵn sàng để vẽ.
         void Promise.resolve(startup.artworkPainted ?? Number(startup.dataset.shownAt ?? performance.now())).then(shownAt => {
           if (!active || !startup.isConnected) return;
-          const remaining = Math.max(0, shownAt + 2000 - performance.now());
+          const remaining = Math.max(0, shownAt + 3000 - performance.now());
           timer = window.setTimeout(() => {
             startup.classList.add('startup-ready');
             timer = window.setTimeout(() => startup.remove(), 240);
