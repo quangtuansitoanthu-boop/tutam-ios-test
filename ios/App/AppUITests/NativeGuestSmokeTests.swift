@@ -279,6 +279,7 @@ class NativeGuestUITestCase: XCTestCase {
         switch label {
         case "Cá nhân": marker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Cài đặt ứng dụng ")).firstMatch
         case "Kinh sách": marker = app.staticTexts["Kho Kinh Sách"].firstMatch
+        case "Pháp thoại": marker = app.searchFields["Tìm kiếm album..."].firstMatch
         case "Tu tập": marker = app.otherElements["Không gian Tu Tập"].firstMatch
         default:
             XCTFail("Missing destination contract for tested navigation tab \(label)")
@@ -1598,8 +1599,7 @@ final class NativeTalkPlayerTests: NativeGuestUITestCase {
     @MainActor
     func testSameAlbumPlaybackRestoresDismissedMiniPlayer() {
         let app = launchGuest(retryCancelledPromptTap: true)
-        let navigation = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Điều hướng nhanh")).firstMatch
-        tap(navigation.links["Pháp thoại"].firstMatch, app: app)
+        navigate("Pháp thoại", app: app)
         let album = "GẬY KIM CANG HÉT - TẬP 1"
         let search = app.searchFields["Tìm kiếm album..."].firstMatch
         tap(search, app: app)
@@ -1638,7 +1638,7 @@ final class NativeTalkPlayerTests: NativeGuestUITestCase {
         evidence("talk-mini-player-album-detail", app: app)
         tap(playAll, app: app)
         checkPlaying()
-        tap(pause, app: app)
+        pause.tap()
         let resume = app.buttons["Phát"].firstMatch
         XCTAssertTrue(resume.waitForExistence(timeout: 15) && resume.isHittable)
         evidence("talk-mini-player-restored-and-paused", app: app)
