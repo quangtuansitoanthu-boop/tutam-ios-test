@@ -5,6 +5,10 @@ import videoManifest from '../../src/lib/data/quang-tu-facebook-videos.json' wit
 import { deferStartupNotification, settleClient } from './runtime-helpers';
 import mobileImages from '../../assets/book-content/mobile-image-variants.json' with { type: 'json' };
 
+test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
+});
+
 test('old book HTML still opens illustrations after mobile asset compression', async ({ page }) => {
   const entry = mobileImages.superseded[0];
   const legacyHtml = `<p>Văn bản sách cũ giữ nguyên.</p><img src="/assets/book-content/converted/${entry.source}" alt="Ảnh sách cũ">`;
@@ -57,7 +61,6 @@ for (const id of ['tt_1781528855960', 'tt_1783429280091_jcrra', 'tt_178152836516
 }
 
 async function openNativeBook(page: Page, loaded = false): Promise<void> {
-  await deferStartupNotification(page);
   await page.route('**/api/**', route => route.abort('failed'));
   if (!loaded) await page.goto('/');
   await expect(page.locator('.daily-dhammapada-card')).toBeVisible();

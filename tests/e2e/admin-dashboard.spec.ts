@@ -202,11 +202,15 @@ test.describe('admin dashboard', () => {
     await settleClient(page);
     await page.getByRole('button', { name: 'Chọn khoảng thời gian. Hiện tại: 28 ngày gần nhất' }).click();
     const narrowMenu = page.getByRole('menu', { name: 'Chọn khoảng thời gian' });
+    // The range sheet slides up from below the viewport on opening.
+    await expect.poll(async () => {
+      const box = await narrowMenu.boundingBox();
+      return box ? box.y + box.height : Infinity;
+    }).toBeLessThanOrEqual(700);
     const narrowMenuBox = await narrowMenu.boundingBox();
     expect(narrowMenuBox).not.toBeNull();
     expect(narrowMenuBox!.x).toBeGreaterThanOrEqual(0);
     expect(narrowMenuBox!.x + narrowMenuBox!.width).toBeLessThanOrEqual(320);
-    expect(narrowMenuBox!.y + narrowMenuBox!.height).toBeLessThanOrEqual(700);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
 
     // Các lựa chọn cuối vẫn tới được bằng bàn phím khi menu phải cuộn.
