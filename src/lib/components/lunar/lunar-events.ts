@@ -8,6 +8,7 @@ export const ABSTINENCE_DAYS_EN: Record<string, { reason: string; harm: string }
 export interface LunarEventNotificationInfo {
   isEvent: boolean;
   isThapTrai: boolean;
+  thapTraiIndex?: number;
   kiengDam: { harm: string; reason: string } | null;
   lunarDay: number;
   lunarMonth: number;
@@ -375,11 +376,13 @@ export function getLunarEventForLunarDay(lunar: LunarDay, monthLength: number, l
     kiengDam = ABSTINENCE_DAYS[key] ?? null;
   }
 
-  const isThapTrai = thapTraiDays.includes(lunar.day);
+  const thapTraiIndex = thapTraiDays.indexOf(lunar.day);
+  const isThapTrai = thapTraiIndex >= 0;
 
   return {
     isEvent: isThapTrai || viaName !== null || kiengDam !== null,
     isThapTrai,
+    thapTraiIndex: isThapTrai ? thapTraiIndex : undefined,
     kiengDam,
     lunarDay: lunar.day,
     lunarMonth: lunar.month,

@@ -130,6 +130,8 @@ const assetManifest = createAssetManifest(buildDir, [
   'index.html', 'offline-bundled-articles.json', 'offline-data/talks.json',
   ...bundledEnglishRituals.map(file => `offline-data/chapters-en/${file}`),
   'images/le-phat/quan-the-am-approved.webp', 'assets/fonts/be-vietnam-pro-regular.ttf',
+  'images/calendar/cu-si-title.webp',
+  ...Array.from({ length: 10 }, (_, index) => `images/calendar/cu-si/${String(index + 1).padStart(2, '0')}.webp`),
   ...['nhac-thien-01.m4a', 'nhac-thien-02.m4a', 'nhac-thien-03.m4a', 'tieng-mo.m4a', 'rosary-tap.m4a',
     ...fs.readdirSync(path.join(rootAssets, 'audio', 'ambient')).filter(file => file.endsWith('.mp3')).map(file => `ambient/${file}`),
   ].map(file => `assets/audio/${file}`),

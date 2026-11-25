@@ -5,6 +5,10 @@ export const DAILY_CALENDAR_ARTWORKS = [
   'incense-lotus', 'rosary-stillness', 'lotus-lanterns', 'zen-garden', 'pagoda-hills',
 ].map(name => `/images/calendar/${name}.webp`);
 
+export const THAP_TRAI_CALENDAR_ARTWORKS = Array.from(
+  { length: 10 }, (_, index) => `/images/calendar/cu-si/${String(index + 1).padStart(2, '0')}.webp`
+);
+
 const traditional = (name: string) => `/images/le-phat/${name}.webp`;
 const additional = (name: string) => `/images/calendar/feasts/${name}.webp`;
 export const FEAST_CALENDAR_ARTWORKS: Record<string, string> = {
@@ -26,9 +30,11 @@ export const FEAST_CALENDAR_ARTWORKS: Record<string, string> = {
 
 export function getCalendarArtwork(date: Date, event: LunarEventNotificationInfo, manualIndex: number | null = null) {
   const feastImage = event.viaKey ? FEAST_CALENDAR_ARTWORKS[event.viaKey] : null;
-  if (feastImage) return { src: feastImage, feast: true };
+  if (feastImage) return { src: feastImage, feast: true, nextIndex: null };
+  const choices = event.isThapTrai ? THAP_TRAI_CALENDAR_ARTWORKS : DAILY_CALENDAR_ARTWORKS;
   // Civil-day index: unaffected by DST or the device time zone offset.
   const day = Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
-  const index = manualIndex ?? ((day % DAILY_CALENDAR_ARTWORKS.length) + DAILY_CALENDAR_ARTWORKS.length) % DAILY_CALENDAR_ARTWORKS.length;
-  return { src: DAILY_CALENDAR_ARTWORKS[index % DAILY_CALENDAR_ARTWORKS.length], feast: false };
+  const selected = manualIndex ?? event.thapTraiIndex ?? day;
+  const index = ((selected % choices.length) + choices.length) % choices.length;
+  return { src: choices[index], feast: false, nextIndex: (index + 1) % choices.length };
 }

@@ -21,17 +21,22 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-native-verification-${{ github.ref }}
+  group: ios-native-verification-${{ github.ref }}-${{ inputs.test_suite }}
   cancel-in-progress: true
 
 jobs:
   ios:
+    name: iOS Simulator (${{ matrix.suite }})
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(inputs.test_suite == 'full' && '["guest","extended","reminders","snapshots"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     runs-on: macos-15
     timeout-minutes: 70
     env:
       TUTAM_BUNDLE_SYNCED: '1'
       VITE_GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
-      IOS_TEST_SUITE: ${{ inputs.test_suite || 'picker' }}
+      IOS_TEST_SUITE: ${{ matrix.suite }}
     steps:
       - uses: actions/checkout@v4
       - name: Apply QA audit source overlay if present
@@ -171,13 +176,12 @@ jobs:
           set -euo pipefail
           test "$TUTAM_QA_HOSTS_ISOLATED" = 1
           testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests)
-          if [ "$IOS_TEST_SUITE" = "full" ]; then
-            testing_args=(
-              -only-testing:AppUITests/NativeGuestSmokeTests
-              -only-testing:AppUITests/NativeExtendedGuestTests
-              -only-testing:AppUITests/NativePersonalReminderTests
-              -only-testing:AppUITests/NativeSimulatorSnapshotTests
-            )
+          if [ "$IOS_TEST_SUITE" = "extended" ]; then
+            testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
+          elif [ "$IOS_TEST_SUITE" = "reminders" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests)
+          elif [ "$IOS_TEST_SUITE" = "snapshots" ]; then
+            testing_args=(-only-testing:AppUITests/NativeSimulatorSnapshotTests)
           elif [ "$IOS_TEST_SUITE" = "audio" ]; then
             testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
           elif [ "$IOS_TEST_SUITE" = "picker" ]; then
@@ -238,13 +242,12 @@ jobs:
           set -euo pipefail
           test "$TUTAM_QA_HOSTS_ISOLATED" = 1
           testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests)
-          if [ "$IOS_TEST_SUITE" = "full" ]; then
-            testing_args=(
-              -only-testing:AppUITests/NativeGuestSmokeTests
-              -only-testing:AppUITests/NativeExtendedGuestTests
-              -only-testing:AppUITests/NativePersonalReminderTests
-              -only-testing:AppUITests/NativeSimulatorSnapshotTests
-            )
+          if [ "$IOS_TEST_SUITE" = "extended" ]; then
+            testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
+          elif [ "$IOS_TEST_SUITE" = "reminders" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests)
+          elif [ "$IOS_TEST_SUITE" = "snapshots" ]; then
+            testing_args=(-only-testing:AppUITests/NativeSimulatorSnapshotTests)
           elif [ "$IOS_TEST_SUITE" = "audio" ]; then
             testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
           elif [ "$IOS_TEST_SUITE" = "picker" ]; then
@@ -272,7 +275,7 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'full':13,'picker':1,'audio':1}.get(suite,3)
+          min_passed={'guest':4,'extended':5,'reminders':3,'snapshots':2,'picker':1,'audio':1}.get(suite,3)
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
           if suite in ('picker', 'audio'):
             assert data['passedTests'] == 1, 'Expected exactly the requested native regression'
@@ -295,6 +298,10 @@ jobs:
           if [ -d "$result" ]; then
             xcrun xcresulttool export attachments --path "$result" --output-path build/release-evidence/native-ui-attachments
           fi
+      - name: Verify 48-hour journal feedback on real simulator WebKit with loopback-only fixtures
+        if: always() && env.IOS_TEST_SUITE == 'guest' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        timeout-minutes: 3
+        run: node .github/qa/journal-webkit.mjs
       - name: Diagnose native URL delivery after XCTest evidence is saved
         if: always() && env.TUTAM_QA_HOSTS_ISOLATED == '1' && env.IOS_TEST_SUITE != 'picker' && env.IOS_TEST_SUITE != 'audio'
         continue-on-error: true
@@ -358,16 +365,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-native-guest-smoke-${{ github.run_number }}
+          name: ios-native-guest-smoke-${{ github.run_number }}-${{ matrix.suite }}
           path: build/release-evidence/
           if-no-files-found: error
       - name: Upload compact diagnostics for inspection
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-native-diagnostics-${{ github.run_number }}
+          name: ios-native-diagnostics-${{ github.run_number }}-${{ matrix.suite }}
           path: |
             build/release-evidence/native-ui-summary.json
+            build/release-evidence/journal-webkit.json
             build/release-evidence/direct-openurl-screen.png
             build/release-evidence/*-events.jsonl
             build/release-evidence/native-ui-attachments/manifest.json

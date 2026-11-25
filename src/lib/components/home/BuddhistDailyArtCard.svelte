@@ -9,7 +9,7 @@
   } from '$lib/components/lunar/lunar-calendar';
   import { formatCanChiEn } from '$lib/components/lunar/lunar-week';
   import { getLunarEvent } from '$lib/components/lunar/lunar-events';
-  import { DAILY_CALENDAR_ARTWORKS, getCalendarArtwork } from '$lib/components/lunar/calendar-artwork';
+  import { getCalendarArtwork } from '$lib/components/lunar/calendar-artwork';
 
   interface Props {
     currentDate?: Date;
@@ -55,15 +55,15 @@
 
   function nextBackground(event: MouseEvent): void {
     event.stopPropagation();
-    if (artwork.feast) return;
+    if (artwork.nextIndex === null) return;
     manualArtDate = dateKey;
-    manualArtIndex = (DAILY_CALENDAR_ARTWORKS.indexOf(currentBgImage) + 1) % DAILY_CALENDAR_ARTWORKS.length;
+    manualArtIndex = artwork.nextIndex;
   }
 </script>
 
 <section class="buddhist-daily-art-card" aria-label={isEn ? 'Daily Buddhist Calendar Card' : 'Thẻ Lịch Phật Giáo Nghệ Thuật'}>
   <div class="art-main">
-    <div class="art-visual" class:art-visual--statue={artwork.feast} aria-hidden="true">
+    <div class="art-visual" class:art-visual--statue={artwork.feast} class:art-visual--thap-trai={lunarEvent.isThapTrai && !artwork.feast} aria-hidden="true">
       {#if failedImage !== currentBgImage}
         {#key currentBgImage}
           <img src={currentBgImage} alt="" class="art-bg-img" loading="lazy" decoding="async" onerror={() => failedImage = currentBgImage} />
@@ -111,6 +111,7 @@
   .art-visual{position:relative;grid-column:2;grid-row:1;min-width:0;margin:12px 12px 12px 0;border-radius:14px;overflow:hidden;background:var(--card)}
   .art-bg-img{display:block;width:100%;height:100%;object-fit:cover;object-position:center;animation:art-reveal var(--motion-enter) var(--ease-standard)}
   .art-visual--statue .art-bg-img{object-fit:contain;object-position:center;padding:0}
+  .art-visual--thap-trai .art-bg-img{aspect-ratio:3/4;object-position:center 75%}
   .art-bg-scrim{display:none}
   .art-left-panel{box-sizing:border-box;position:relative;grid-column:1;grid-row:1;z-index:1;display:flex;flex-direction:column;align-items:flex-start;min-width:0;min-height:286px;margin:12px 0 12px 12px;padding:20px 16px;border:1px solid var(--border);border-radius:16px;background:var(--card);box-shadow:var(--shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
   .art-eyebrow{display:flex;align-items:center;gap:8px;margin:0 0 24px;color:var(--text);font-size: var(--font-size-meta);line-height:1.5;font-weight:600;letter-spacing:.13em;text-transform:uppercase}

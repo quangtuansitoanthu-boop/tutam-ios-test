@@ -1,0 +1,106 @@
+// Exercise the packaged journal in Safari on the iPhone Simulator using loopback fixtures.
+import { createServer } from 'node:http';
+import { readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+const root = path.resolve('ios/App/App/public');
+const origin = 'http://127.0.0.1:8793';
+const member = { id: 'qa-journal', role: 'user', displayName: 'QA', avatarUrl: '', email: '' };
+let finish;
+const result = new Promise(resolve => { finish = resolve; });
+const posts = [];
+
+function exercise() {
+  const wait = async (name, verify) => {
+    for (let i=0;i<180;i++) { const v=verify(); if(v) return v; await new Promise(r=>setTimeout(r,150)); }
+    throw new Error(name);
+  };
+  const visible = el => el && el.getClientRects().length > 0;
+  const select = (selector, parent=document) => [...parent.querySelectorAll(selector)].find(visible);
+  const input = (el, value) => { el.value=value; el.dispatchEvent(new Event('input',{bubbles:true})); };
+  const btn = (parent, label) => [...parent.querySelectorAll('button')].find(el=>visible(el)&&el.textContent.trim()===label&&!el.disabled);
+  const exact = 'Đã gửi bài, vui lòng chờ quản trị viên duyệt trong 48 giờ !';
+  const raw = window.fetch.bind(window);
+  window.fetch = (resource, init) => {
+    const url=new URL(resource instanceof Request ? resource.url : resource,location.href);
+    if(url.pathname.startsWith('/api/')) return raw(location.origin+url.pathname+url.search, init);
+    if(url.origin!==location.origin) return Promise.resolve(new Response('{}',{status:503}));
+    return raw(resource,init);
+  };
+  async function test() {
+    (await wait('journal entry',()=>select('.tt-mode-card--reflection'))).click();
+    const guide=await wait('journal guide or form',()=>select('[data-testid=reflection-guide]')||select('#panel-repentance'));
+    if(guide.matches('[data-testid=reflection-guide]')) (await wait('guide action',()=>btn(guide,'Tôi đã hiểu, Bắt đầu quán chiếu →'))).click();
+    input(await wait('nickname',()=>select('input[aria-label="Biệt danh đồng tu"]')),'Đồng Tu QA');
+    const evidence=[];
+    for(const [id,share] of [['repentance','Gửi cộng đồng sám hối'],['good-deed','Chia sẻ việc lành']]){
+      document.querySelector('#tab-'+id).click();
+      const panel=await wait('active panel '+id,()=>select('#panel-'+id));
+      input(select('textarea',panel),'Hôm nay tôi tập lắng nghe và giữ tâm an lành. '.repeat(6));
+      (await wait('send '+id,()=>btn(panel,share))).click();
+      (await wait('confirm '+id,()=>btn(document,'Đồng ý chia sẻ'))).click();
+      const dlg=await wait('48 hour alert '+id,()=>{const node=select('dialog[data-app-message]');return node?.querySelector('p')?.textContent===exact&&node});
+      const close=btn(dlg,'Đóng'); if(!close)throw Error('missing close');
+      close.click();
+      const card=await wait('compact receipt '+id,()=>select('.journal-pending',panel));
+      const toggle=btn(card,'Chi tiết');
+      if(!toggle||toggle.getAttribute('aria-expanded')!=='false'||select('time',card)||!card.textContent.includes('Đã gửi bài · Chờ duyệt'))throw Error('initial compact state '+id);
+      const height=card.getBoundingClientRect().height;if(height>52)throw Error('oversized card '+height);
+      toggle.click();
+      const deadline=await wait('48h date '+id,()=>{const d=card.querySelectorAll('time');return d.length===2&&Date.parse(d[1].dateTime)-Date.parse(d[0].dateTime)===48*3600000});
+      btn(card,'Thu gọn').click();
+      await wait('collapse '+id,()=>!select('time',card));
+      evidence.push({id,height,deadline});
+    }
+    return {passed:true,evidence,width:innerWidth};
+  }
+  addEventListener('DOMContentLoaded',()=>{test().catch(e=>({passed:false,reason:String(e)})).then(out=>raw('/__qa-result',{method:'POST',body:JSON.stringify(out)}));},{once:true});
+}
+
+const types={'.js':'application/javascript','.json':'application/json','.css':'text/css','.svg':'image/svg+xml','.woff2':'font/woff2','.otf':'font/otf','.ttf':'font/ttf','.webp':'image/webp','.html':'text/html; charset=utf-8'};
+const server=createServer(async (req,res)=>{
+  const url=new URL(req.url,origin), route=url.pathname;
+  const json=(data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
+  try {
+    if(req.method==='POST'){
+      const parts=[];for await(const b of req)parts.push(b);
+      const body=JSON.parse(Buffer.concat(parts).toString()||'{}');
+      if(route==='/__qa-result'){json({ok:true});finish({...body,posts});return}
+      if(route==='/api/practice/mindful-posts'){
+        posts.push(body.kind);const createdAt=new Date().toISOString();
+        json({post:{...body,id:body.clientPostId,isOwn:true,status:'hidden',reviewState:'pending',reviewRevision:1,createdAt,reviewDueAt:new Date(Date.parse(createdAt)+48*3600000).toISOString(),publishedAt:null,reviewReason:null,reactionCount:0,viewerReacted:false},accountLocked:false});return;
+      }
+      json({});return;
+    }
+    if(route==='/api/session'){json({authenticated:true,user:member,csrfToken:'qa-fixture'});return}
+    if(route.startsWith('/api/')){json({items:[],nextCursor:null});return}
+    let file=path.resolve(root,'.'+decodeURIComponent(route));
+    if(file!==root&&!file.startsWith(root+path.sep)){json({},400);return}
+    if(!existsSync(file)||!statSync(file).isFile()){
+      if(path.extname(route)){json({},404);return}file=path.join(root,'index.html');
+    }
+    const bytes=readFileSync(file);
+    res.setHeader('Content-Type',types[path.extname(file)]||'application/octet-stream');
+    if(file===path.join(root,'index.html')){
+      res.setHeader('Content-Security-Policy',"connect-src 'self'; worker-src 'none'");
+      res.end(bytes.toString().replace('<head>','<head><script>('+exercise.toString()+')()</script>'));return;
+    }
+    res.end(bytes);
+  }catch {json({error:'fixture'},500)}
+});
+await new Promise((ok,fail)=>{server.once('error',fail);server.listen(8793,'127.0.0.1',ok)});
+let browser;
+try{
+ if(process.env.TUTAM_QA_SIMULATOR) execFileSync('xcrun',['simctl','openurl',process.env.TUTAM_QA_SIMULATOR,origin+'/tu-tap']);
+ else {
+   const { chromium }=await import('playwright');browser=await chromium.launch();
+   const page=await browser.newPage({viewport:{width:390,height:844},serviceWorkers:'block'});
+   await page.goto(origin+'/tu-tap');
+ }
+ const timer=setTimeout(()=>finish({passed:false,reason:'Fixture timed out',posts}),115000);let out;
+ try{out=await result}finally{clearTimeout(timer)}
+ console.log(JSON.stringify(out));
+ if(process.env.TUTAM_QA_SIMULATOR)writeFileSync('build/release-evidence/journal-webkit.json',JSON.stringify(out));
+ if(!out.passed||out.posts?.join(',')!=='repentance,good_deed')process.exitCode=1;
+}finally{await browser?.close();server.closeAllConnections();server.close();}
