@@ -960,8 +960,7 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
                 let panel = controls.frame
                 guard frame.width >= 44 && frame.height >= 44 && app.frame.contains(frame)
                         && panel.insetBy(dx: -1, dy: -1).contains(frame) else { return false }
-                // A collapsed group contains the handle and the 8 pt flex gap. Its old footprint included Exit.
-                if collapsed && (panel.width > frame.width + 2 || panel.height > frame.height + 12) { return false }
+                if collapsed && controls.buttons.count != 1 { return false }
                 let settled = previousFrame == frame
                 previousFrame = frame
                 return settled
@@ -976,6 +975,11 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
             !increment.exists && !decrement.exists && openControls.exists
         }
         XCTAssertTrue(insideViewport(openControls, app: app) && openControls.isHittable, "Collapsed practice controls must retain a reachable opener")
+        // The accessibility group may extend above the actual 46 pt opener in WebKit.
+        let aboveOpener = openControls.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+            .withOffset(CGVector(dx: 0, dy: -12))
+        aboveOpener.tap()
+        XCTAssertTrue(openControls.exists && !increment.exists, "A tap on the reading surface above the opener must leave the panel collapsed")
         evidence("practice-controls-collapsed-before-reopen", app: app)
         tapFloatingControl(openControls, collapsed: true)
         XCTAssertTrue(increment.waitForExistence(timeout: 15))

@@ -373,6 +373,10 @@ jobs:
         if: always() && env.IOS_TEST_SUITE == 'typing' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
         timeout-minutes: 3
         run: node .github/qa/journal-webkit.mjs --initial-focus
+      - name: Check the collapsed reader control and surrounding touch surface in iPhone Safari
+        if: always() && env.IOS_TEST_SUITE == 'library-reader' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        timeout-minutes: 4
+        run: node .github/qa/reader-hit-test.mjs --practice-history
       - name: Verify system URL deliveries from XCTest on the installed native app
         if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'extended') && env.TUTAM_QA_HOSTS_ISOLATED == '1'
         run: python3 .github/qa/ios-native-evidence.py links
@@ -433,6 +437,7 @@ jobs:
             build/release-evidence/journal-webkit.json
             build/release-evidence/practice-history.json
             build/release-evidence/initial-focus.json
+            build/release-evidence/reader-hit-test.json
             build/release-evidence/native-link-receipts.json
             build/release-evidence/native-startup-paint.json
             build/release-evidence/startup-controlled-webkit.json
