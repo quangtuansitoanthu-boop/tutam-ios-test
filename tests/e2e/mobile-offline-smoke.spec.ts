@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { deferStartupNotification } from './runtime-helpers';
 
 for (const [route, catalog] of [['/phap-thoai', 'talks'], ['/kinh-sach', 'books'], ['/tu-tap', 'practice']] as const) {
   test(`${catalog} search clears from a full touch target and returns focus to the input`, async ({ browser }) => {
@@ -25,6 +26,7 @@ for (const [route, catalog] of [['/phap-thoai', 'talks'], ['/kinh-sach', 'books'
 }
 
 test('bundled native catalog paths and navigation survive unavailable APIs in the browser harness', async ({ page }) => {
+  await deferStartupNotification(page);
   await page.setViewportSize({ width: 390, height: 844 });
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));

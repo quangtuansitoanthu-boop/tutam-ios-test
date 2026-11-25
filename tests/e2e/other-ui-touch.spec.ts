@@ -1,5 +1,7 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 async function expectTouchTargets(controls: Locator) {
   expect(await controls.count()).toBeGreaterThan(0);
@@ -8,9 +10,18 @@ async function expectTouchTargets(controls: Locator) {
     const invalid = [];
     for (const control of await controls.all()) {
       const bounds = await control.boundingBox();
-      if (!bounds || Math.round(bounds.width) < 44 || Math.round(bounds.height) < 44) {
-        invalid.push({ name: await control.textContent(), bounds });
-      }
+      if (bounds && Math.round(bounds.width) >= 44 && Math.round(bounds.height) >= 44) continue;
+      // Compact controls can extend their tappable surface with a pseudo-element.
+      await control.scrollIntoViewIfNeeded();
+      const hasTouchArea = await control.evaluate(element => {
+        const box = element.getBoundingClientRect();
+        const centerX = box.left + box.width / 2;
+        const centerY = box.top + box.height / 2;
+        const offsets = [-21.5, 0, 21.5];
+        return offsets.every(x => offsets.every(y =>
+          element.contains(document.elementFromPoint(centerX + x, centerY + y))));
+      });
+      if (!hasTouchArea) invalid.push({ name: await control.textContent(), bounds });
     }
     return invalid;
   }).toEqual([]);
@@ -62,10 +73,11 @@ for (const width of [320, 375, 1440]) {
 
       await page.goto('/ca-nhan');
       await settleClient(page);
-      await page.getByRole('button', { name: /Cài đặt ứng dụng Giao diện/ }).click();
+      await page.getByRole('button', { name: /Cài đặt ứng dụng/ }).click();
       await expect(page).toHaveURL(/\/ca-nhan\?tab=settings$/);
       await settleClient(page);
-      await expectTouchTargets(page.locator('.cn-subpage-back-btn, .reminder-master-row button, .settings-section > summary'));
+      await expectTouchTargets(page.getByRole('button', { name: 'Quay lại', exact: true }));
+      await expectTouchTargets(page.locator('.reminder-master-row button, .settings-section > summary'));
       for (const id of ['lunar', 'personal', 'daily', 'sound', 'display', 'reading']) {
         const group = page.locator(`#settings-${id}`);
         await group.locator(':scope > summary').click();
@@ -93,7 +105,7 @@ for (const width of [320, 375, 1440]) {
 
       await page.goto('/huong-dan');
       await settleClient(page);
-      await expectTouchTargets(page.locator('.guide-back-btn'));
+      await expectTouchTargets(page.getByRole('button', { name: 'Quay lại', exact: true }));
       await page.getByRole('searchbox').fill('PDF');
       await expect(page.locator('#guide-search-results')).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

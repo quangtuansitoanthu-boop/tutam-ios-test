@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 async function verifyTimingGeometry(page: Page, timing: Locator) {
   const times = timing.locator('input[type="time"]');

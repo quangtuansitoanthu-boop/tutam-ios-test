@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { solarToLunar } from '../../src/lib/components/lunar/lunar-calendar';
+import { deferStartupNotification } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 test('personal event date-only draft survives reopen and calendar tabs preserve the chosen date', async ({ page }) => {
   await page.clock.setFixedTime(new Date(2026, 10, 6, 10));

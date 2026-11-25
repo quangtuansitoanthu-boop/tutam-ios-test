@@ -76,17 +76,21 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await page.goto('/phap-thoai');
     await settleClient(page);
     await dismissFirstRunNotification(page);
+    const opener = page.locator('.pt-card').filter({ hasText: album.tieu_de }).locator('.pt-card-thumb');
+    await expect(opener).toBeVisible();
+    await page.waitForLoadState('networkidle');
     const withSavedPosition = albumId === 'pt_drive_f72e42f4cbb7db4312f96f4a1f28e2b4';
     if (withSavedPosition) {
       await page.evaluate(({ key, id }) => {
         localStorage.setItem(key, JSON.stringify({ albumId: id, trackIndex: 0, pos: 63, savedAt: Date.now() }));
       }, { key: memberStorageKey(`tutam_pt_pos_${albumId}`), id: albumId });
     }
-    await page.clock.install({ time: new Date('2026-11-18T08:00:00Z') });
-    await page.clock.pauseAt(new Date('2026-11-18T08:00:01Z'));
+    const now = Date.now();
+    await page.clock.install({ time: new Date(now) });
+    await page.clock.pauseAt(new Date(now + 1000));
     const extraApiRequests: string[] = [];
     page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/')) extraApiRequests.push(request.url()); });
-    await page.locator('.pt-card').filter({ hasText: album.tieu_de }).locator('.pt-card-thumb').click();
+    await opener.click();
     const notice = page.getByRole('complementary', { name: 'Lưu ý về nội dung' });
     await expect(notice).toBeVisible();
     await expect(notice.locator('em')).toHaveText(noticeText);

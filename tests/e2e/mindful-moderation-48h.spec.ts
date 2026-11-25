@@ -336,7 +336,7 @@ test('[moderation48h] a bell opened after the initial read shows a new submissio
     await page.getByRole('tab', { name: /Xếp hạng/u }).click();
     await expect(moderation).toHaveCount(0);
     await touch(page.locator('.notification-bell-btn'));
-    await page.getByRole('tab', { name: /^Quản trị/u }).click();
+    await page.getByRole('tab', { name: /^Phê duyệt/u }).click();
     const reopenedQueue = page.waitForResponse(pendingQueue);
     await touch(notification);
     expect((await reopenedQueue).ok()).toBe(true);

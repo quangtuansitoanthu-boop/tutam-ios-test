@@ -1,5 +1,7 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 const events = [
   { id: 'layout-birthday', title: 'Sinh nhật mẹ', type: 'gia-dinh', calendarMode: 'solar', solarDay: 20, solarMonth: 11, lunarDay: 1, lunarMonth: 1, frequency: 'yearly', createdAt: '2026-01-01T00:00:00Z' },
@@ -134,17 +136,25 @@ for (const theme of ['light', 'dark'] as const) {
         const titleRow = await item.locator('.personal-item-title-row').boundingBox();
         const date = await item.locator('.personal-item-date').boundingBox();
         const bounds = await item.boundingBox();
-        const remove = await item.getByRole('button').boundingBox();
         expect(Math.abs(date!.x - title!.x), 'Date must align with its own title, not become a separate full-width row').toBeLessThan(2);
         const gapBelowTitleRow = date!.y - (titleRow!.y + titleRow!.height);
         expect(gapBelowTitleRow).toBeGreaterThanOrEqual(0);
         expect(gapBelowTitleRow, 'The date belongs directly below the title and any wrapped badges').toBeLessThanOrEqual(12);
         expect(date!.x + date!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
-        expect(remove!.width).toBeGreaterThanOrEqual(44);
-        expect(remove!.height).toBeGreaterThanOrEqual(44);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await card.screenshot({ path: testInfo.outputPath(`anniversaries-${theme}-${width}.png`) });
+      await card.getByRole('button', { name: 'Thêm ngày lễ cá nhân' }).click();
+      const modal = page.locator('.pem-dialog');
+      for (const event of events) {
+        const remove = modal.getByRole('button', { name: `Xóa ${event.title}`, exact: true });
+        await expect(remove).toBeVisible();
+        const bounds = (await remove.boundingBox())!;
+        expect(bounds.width).toBeGreaterThanOrEqual(44);
+        expect(bounds.height).toBeGreaterThanOrEqual(44);
+      }
+      await page.keyboard.press('Escape');
+      await expect(modal).toHaveCount(0);
     }
   });
 }

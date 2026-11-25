@@ -8,7 +8,7 @@ for (const dark of [false, true]) {
   test(`new practice panels and existing picker remain consistent at 375px, dark=${dark}`, async ({ page }, info) => {
     await page.setViewportSize({ width: 375, height: 844 });
     await page.addInitScript(value => localStorage.setItem('tutam_dark_mode', value ? '1' : '0'), dark);
-    await page.goto('/tu-tap');
+    await page.goto('/tu-tap', { waitUntil: 'domcontentloaded' });
     await settleClient(page);
     await expect(page.locator('nav.tt-upgrade-tabs')).toHaveCount(0);
     await expect(page.locator('.tt-mode-card--mindful')).toHaveCount(0);
@@ -48,9 +48,12 @@ for (const dark of [false, true]) {
     await page.getByRole('combobox', { name: 'Vị Phật / Bồ Tát', exact: true }).click();
     const picker = page.getByRole('dialog', { name: 'Vị Phật / Bồ Tát', exact: true });
     await expect(picker).toBeVisible();
-    const rect = await picker.locator('.rosary-select__panel').boundingBox();
-    expect(rect?.width).toBeLessThanOrEqual(375);
-    expect(rect!.y + rect!.height).toBeLessThanOrEqual(845);
+    const panel = picker.locator('.rosary-select__panel');
+    expect((await panel.boundingBox())!.width).toBeLessThanOrEqual(375);
+    await expect.poll(async () => {
+      const bounds = (await panel.boundingBox())!;
+      return bounds.y + bounds.height;
+    }).toBeLessThanOrEqual(845);
     await page.screenshot({ path: `.artifacts/practice-upgrade-picker-${dark ? 'dark' : 'light'}.png` });
     await picker.getByRole('button', { name: 'Đóng bảng chọn', exact: true }).click();
     expect(pickerRequests).toEqual([]);

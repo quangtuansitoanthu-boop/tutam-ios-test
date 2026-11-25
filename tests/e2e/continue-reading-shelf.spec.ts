@@ -9,6 +9,7 @@ test(`library disclosure keeps search and Top 10 stable without refetching at ${
   if (width === 375 && theme === 'light') await loginAsMember(page);
   await page.goto('/kinh-sach');
   await settleClient(page);
+  await page.getByRole('dialog', { name: 'Thông báo tu tập' }).getByRole('button', { name: 'Để sau', exact: true }).click();
   await expect(page.locator('.articles-grid')).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('.continue-reading')).toHaveAttribute('aria-busy', 'false');
   // Chờ cả session refresh khởi động trước khi đo riêng chi phí tương tác UI.

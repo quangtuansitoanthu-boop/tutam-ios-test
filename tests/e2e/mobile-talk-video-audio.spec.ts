@@ -4,14 +4,14 @@ import { deferStartupNotification } from './runtime-helpers';
 
 const media = readFileSync(new URL('./fixtures/talk-video.mp4', import.meta.url));
 
-async function expectDecodedFrame(viewer: Locator): Promise<void> {
+async function expectDecodedFrame(viewer: Locator, timeout = 5000): Promise<void> {
   // Mirror synchronization writes currentTime, so clock movement alone cannot prove a decoded image.
   await expect.poll(() => viewer.locator('video').evaluate(element => {
     const video = element as HTMLVideoElement;
     const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
     return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0
       && (!quality || quality.totalVideoFrames > 0);
-  })).toBe(true);
+  }), { timeout }).toBe(true);
 }
 
 async function revealHud(viewer: Locator): Promise<void> {
@@ -457,8 +457,13 @@ test('real video album primes a browser-deferred preload before its first frame 
     await expect(gate.viewer).toHaveCount(0);
     await page.locator('.pt-mp-info-touch').click();
     await expect(gate.viewer.locator('video')).toHaveAttribute('preload', 'none');
+    await expectDecodedFrame(gate.viewer, 15_000);
     await expect.poll(() => gate.viewer.locator('video').evaluate(video => (video as HTMLVideoElement).currentTime)).toBeGreaterThanOrEqual(7);
-    await expectDecodedFrame(gate.viewer);
+    await expect.poll(async () => {
+      const audioTime = (await actualGateAudio(page)).time;
+      const videoTime = await gate.viewer.locator('video').evaluate(video => (video as HTMLVideoElement).currentTime);
+      return Math.abs(audioTime - videoTime);
+    }).toBeLessThan(.5);
     await gate.sample('preload-none-mini-reopened-at-owner-position');
   } finally { await gate.finish(); }
 });

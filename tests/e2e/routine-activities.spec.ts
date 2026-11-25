@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { loginAsMember, TEST_MEMBER_ID } from './runtime-helpers';
+import { deferStartupNotification, loginAsMember, TEST_MEMBER_ID } from './runtime-helpers';
 
 const settingsKey = 'quangtu_principal_v1:anonymous:tt_personal_settings_v1';
 const modes = [
@@ -18,6 +18,7 @@ async function startSavedRoutine(page: Page, name: string) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
   await page.addInitScript(() => localStorage.setItem('tutam_locale', 'vi'));
   await page.route('**/api/**', route => route.fulfill({ status: 503 }));
 });

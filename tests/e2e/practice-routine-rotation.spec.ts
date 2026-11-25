@@ -186,13 +186,14 @@ for (const failFirstSave of [false, true]) test(`bowing principal settlement pre
   await page.locator('#lp-bell-select').selectOption('none');
   await page.locator('.lp__action-btn--start').click();
   const counter = page.locator('.lp-fullscreen-counter');
-  await expect(counter).toContainText('0 lạy');
+  const count = counter.locator('[aria-live]');
+  await expect(count).toHaveText('0 / 21 lạy');
   for (let index = 0; index < 5; index++) await counter.click();
-  await expect(counter).toContainText('5 lạy');
+  await expect(count).toHaveText('5 / 21 lạy');
   if (failFirstSave) await page.evaluate(() => { document.documentElement.dataset.failPrincipalBowingSave = '1'; });
   phase = 'b';
   const switchToB = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session');
-  await page.clock.runFor(60_000);
+  await page.clock.fastForward(60_000);
   expect(await (await switchToB).json()).toEqual(accounts.b);
   await page.clock.runFor(32);
   await expect(page.locator('.lp-fullscreen-screen')).not.toBeVisible();
@@ -210,12 +211,12 @@ for (const failFirstSave of [false, true]) test(`bowing principal settlement pre
     await page.locator('#lp-bell-select').selectOption('none');
     await page.locator('.lp__action-btn--start').click();
   }
-  await expect(counter).toContainText('0 lạy');
+  await expect(count).toHaveText('0 / 21 lạy');
   if (failFirstSave) {
     await page.evaluate(() => { delete document.documentElement.dataset.failPrincipalBowingSave; });
     phase = 'returnedA';
     const returnToA = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session');
-    await page.clock.runFor(60_000);
+    await page.clock.fastForward(60_000);
     expect(await (await returnToA).json()).toEqual(accounts.returnedA);
     await page.clock.runFor(32);
     await page.locator('.tt-mode-card--le-phat').click();

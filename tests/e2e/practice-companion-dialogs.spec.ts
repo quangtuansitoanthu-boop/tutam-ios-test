@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { isDataApiPath } from './runtime-helpers';
+import { fixtureEnglishPack } from './helpers/personal-journal-zen';
+import { deferStartupNotification, isDataApiPath } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 test('continue practice remains visible without saved progress and opening it makes no new requests', async ({ page }, info) => {
   await page.setViewportSize({ width: 375, height: 844 });
@@ -50,6 +53,7 @@ for (const locale of ['vi', 'en'] as const) for (const dark of [false, true]) {
         : path === '/api/presence' ? { enabled: false, activeCount: 0 } : [];
       return route.fulfill({ json });
     });
+    if (locale === 'en') await fixtureEnglishPack(page);
 
     await page.goto('/tu-tap', { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-mounted="1"]');
@@ -74,11 +78,13 @@ for (const locale of ['vi', 'en'] as const) for (const dark of [false, true]) {
     expect(routineBox.x).toBeGreaterThanOrEqual(0);
     expect(routineBox.x + routineBox.width).toBeLessThanOrEqual(390);
     expect(routineBox.y + routineBox.height).toBeLessThanOrEqual(812);
-    const close = page.locator('.qts-route-topbar .tt-back-btn');
+    const header = page.locator('.qts-nav');
+    const close = header.locator('.nav-back-circle-btn');
+    await expect(close).toBeVisible();
     const closeBox = (await close.boundingBox())!;
     expect(Number(closeBox.width.toFixed(3))).toBeGreaterThanOrEqual(44);
     expect(Number(closeBox.height.toFixed(3))).toBeGreaterThanOrEqual(44);
-    await expect(page.locator('.qts-route-topbar .tt-topbar-title')).toHaveText(locale === 'vi' ? 'Thời khoá' : 'Routines');
+    await expect(header.locator('.nav-logo')).toBeVisible();
     await expect(routine.getByRole('heading', { name: locale === 'vi' ? 'Thời khóa tu tập' : 'Practice routines' })).toBeVisible();
     await expect(routine.getByRole('button', { name: locale === 'vi' ? 'Buổi tối' : 'Evening', exact: true })).toHaveCount(0);
     await close.click();

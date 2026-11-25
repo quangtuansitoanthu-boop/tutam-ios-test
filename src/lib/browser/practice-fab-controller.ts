@@ -50,7 +50,10 @@ export function createPracticeFabController(
 
   function availableViewport() {
     const nav = bottomNav?.getBoundingClientRect();
-    return { width: window.innerWidth, height: nav && nav.height > 0 ? Math.min(nav.top, window.innerHeight) : window.innerHeight };
+    return {
+      width: window.innerWidth,
+      height: nav && nav.height > 0 ? Math.min(nav.top, window.innerHeight) : window.innerHeight
+    };
   }
 
   function setFitOffset(x: number, y: number): void {
@@ -59,7 +62,7 @@ export function createPracticeFabController(
     element.style.translate = x || y ? `${x}px ${y}px` : '';
   }
 
-  function fitExpandedPanel(): void {
+  function fitToViewport(): void {
     const rect = element.getBoundingClientRect();
     const base = { x: rect.left - fitX, y: rect.top - fitY };
     const next = clampPracticeFabPosition(base, availableViewport(), rect);
@@ -154,7 +157,7 @@ export function createPracticeFabController(
 
   function onResize(): void {
     if (element.classList.contains('panel-open')) {
-      fitExpandedPanel();
+      fitToViewport();
       return;
     }
     const rect = element.getBoundingClientRect();
@@ -166,15 +169,14 @@ export function createPracticeFabController(
   window.addEventListener('pointerup', finishDrag, true);
   window.addEventListener('pointercancel', finishDrag, true);
   element.addEventListener('click', onClick, true);
-  // A panel can grow after the user parked its collapsed button at an edge.
-  // Offset the visible panel without moving the saved anchor.
-  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitExpandedPanel);
+  // Keep the controls above the bottom navigation as the panel or navigation resizes.
+  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitToViewport);
   observer?.observe(element);
   if (bottomNav) observer?.observe(bottomNav);
   window.addEventListener('resize', onResize);
   const initialFrame = initialPosition
     ? requestAnimationFrame(() => {
-      if (element.classList.contains('panel-open')) fitExpandedPanel();
+      if (element.classList.contains('panel-open')) fitToViewport();
       else {
         const clamped = apply(initialPosition);
         if (clamped.x !== initialPosition.x || clamped.y !== initialPosition.y) onSave(clamped);

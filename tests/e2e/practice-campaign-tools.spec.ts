@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { loginAsAdmin, settleClient } from './runtime-helpers';
+import { deferStartupNotification, loginAsAdmin, settleClient } from './runtime-helpers';
 import { principalStorageKey } from '../../src/lib/browser/principal-storage';
 import { PRACTICE_LOG_CHANGED_EVENT } from '../../src/lib/domain/practice/completed-logs';
 
@@ -42,6 +42,8 @@ test('bowing automatically contributes once to joined count and session campaign
 });
 
 test('a completed 108-name round automatically contributes from its own route', async ({ page, baseURL }) => {
+  await page.context().grantPermissions(['notifications'], { origin: baseURL! });
+  await deferStartupNotification(page);
   const setup = await campaigns(page, baseURL!);
   try {
     await page.goto('/tu-tap/chep-danh-hieu');

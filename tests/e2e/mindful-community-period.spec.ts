@@ -69,8 +69,8 @@ test('mobile community periods keep newest posts first and reuse cached pages wi
   expect(typography.lineHeight / typography.size).toBeCloseTo(1.75, 1);
   expect(typography.whiteSpace).toBe('pre-wrap');
   expect(typography.font).toContain('Bookerly');
-  await expect(articles.first().locator('.post-author')).toContainText('Biệt danh cộng đồng');
-  await expect(articles.first().locator('.post-kind')).toHaveText('Phát lồ sám hối');
+  await expect(articles.first().locator('.author-name')).toHaveText('Đồng Tu newest');
+  await expect(articles.first().locator('.post-kind-chip')).toContainText('Phát lồ sám hối');
   await expect(articles.first().locator('time')).toContainText('12:00');
   await mkdir('.artifacts', { recursive: true });
   await page.evaluate(async () => { await document.fonts.ready; });
@@ -93,7 +93,7 @@ test('mobile community periods keep newest posts first and reuse cached pages wi
   await expect(articles).toHaveCount(3);
   expect(reads).toHaveLength(3);
 
-  await community.getByRole('button', { name: 'Tùy hỷ thiện lành', exact: true }).click();
+  await community.getByRole('button', { name: /Tùy hỷ thiện lành$/u }).click();
   await expect(selectedPeriod).toHaveText('Tất cả');
   await expect(articles.first()).toContainText('good_deed: newest');
   await expect.poll(() => reads.length).toBe(4);

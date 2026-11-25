@@ -230,8 +230,8 @@ test('personal routines open directly and never expose an unsaved UUID', async (
   const dialog = page.getByRole('region', { name: 'Thời khóa tu tập', exact: true });
   const requests = contentRequests(page);
   const rows = dialog.locator('.saved-routine');
-  await expect(dialog.locator('.routine-header')).toHaveText('Tạo thời khóa mới');
-  await expect(rows).toHaveCount(0);
+  const defaultNames = ['Thời Khóa Sáng', 'Thời Khóa Tối'];
+  await expect(rows.locator('.routine-name strong')).toHaveText(defaultNames);
   await dialog.getByRole('button', { name: 'Tạo thời khóa mới', exact: true }).click();
   const draft = page.getByRole('dialog', { name: 'Tạo thời khóa mới', exact: true });
   const routineName = draft.getByRole('textbox', { name: 'Tên thời khóa', exact: true });
@@ -248,12 +248,12 @@ test('personal routines open directly and never expose an unsaved UUID', async (
   await draft.getByRole('textbox', { name: 'Lời hồi hướng riêng', exact: true }).fill('Nguyện đem công đức này hướng về khắp tất cả.');
   await expect(save).toBeDisabled();
   await expect(draft.getByText('Thêm ít nhất hai bước hành trì.')).toBeVisible();
-  await expect(rows).toHaveCount(0);
+  await expect(rows.locator('.routine-name strong')).toHaveText(defaultNames);
   await draft.getByRole('combobox', { name: 'Thêm bước', exact: true }).click();
   await page.getByRole('dialog', { name: 'Thêm bước', exact: true }).getByRole('button', { name: 'Thiền định', exact: true }).click();
   await save.click();
   await expect(status).toHaveText('Đã lưu thời khóa trên thiết bị.');
-  await expect(rows).toHaveCount(1);
+  await expect(rows).toHaveCount(defaultNames.length + 1);
   await expect(rows.getByRole('button', { name, exact: true })).toBeVisible();
   await dialog.getByRole('button', { name: 'Tạo thời khóa mới', exact: true }).click();
   await expect(routineName).toHaveValue('Thời khoá sáng');
@@ -272,9 +272,9 @@ test('personal routines open directly and never expose an unsaved UUID', async (
   await expect(remove).toBeFocused();
   await remove.click();
   await confirm.getByRole('button', { name: 'Xóa', exact: true }).click();
-  await expect(rows).toHaveCount(0);
+  await expect(rows.locator('.routine-name strong')).toHaveText(defaultNames);
   await page.reload();
-  await expect(dialog.locator('.routine-header')).toHaveText('Tạo thời khóa mới');
+  await expect(rows.locator('.routine-name strong')).toHaveText(defaultNames);
   expect(requests).toEqual([]);
 });
 
@@ -295,16 +295,19 @@ test('undeployed community is reported clearly without automatic retry requests'
 });
 
 async function openPersonal(page: Page) {
-  if (await page.getByRole('textbox', { name: 'Biệt danh đồng tu', exact: true }).isVisible()) return;
-  const journalTab = page.getByRole('button', { name: 'Sổ quán chiếu', exact: true });
-  if (await journalTab.isVisible()) await journalTab.click();
-  else {
-    await openHub(page);
-    await page.getByRole('button', { name: 'Quán chiếu việc thiện ác trong ngày', exact: true }).click();
+  const nickname = page.getByRole('textbox', { name: 'Biệt danh đồng tu', exact: true });
+  if (!await nickname.isVisible()) {
+    const journalTab = page.getByRole('button', { name: 'Sổ quán chiếu', exact: true });
+    if (await journalTab.isVisible()) await journalTab.click();
+    else {
+      await openHub(page);
+      await page.getByRole('button', { name: 'Quán chiếu việc thiện ác trong ngày', exact: true }).click();
+    }
   }
+  await expect(nickname).toBeVisible();
   const guide = page.getByTestId('reflection-guide');
   if (await guide.isVisible()) await guide.getByRole('button', { name: 'Tôi đã hiểu, Bắt đầu quán chiếu →', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Biệt danh đồng tu', exact: true })).toBeVisible();
+  await expect(guide).toBeHidden();
 }
 
 async function openHub(page: Page) {

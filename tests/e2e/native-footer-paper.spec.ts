@@ -127,9 +127,18 @@ for (const [theme, swatch, paper, background, ink] of [
     }
     await expect(session.locator('.ttp-header-title')).toHaveCSS('color', ink);
     await expect(settings).toBeVisible();
-    await expect(settings).toHaveCSS('color', ink);
+    // The mobile settings action uses the paper's on-gold foreground.
+    const settingsInk = paper === 'cream' || paper === 'dark' ? 'rgb(36, 24, 12)' : 'rgb(255, 255, 255)';
+    await expect(settings).toHaveCSS('color', settingsInk);
     await expect(page.locator('.qts-bottom-nav')).toHaveCSS('background-color', background);
     await expect(page.locator('html')).toHaveAttribute('data-theme', paper === 'dark' ? 'dark' : 'light');
+    await page.setViewportSize({ width: 1024, height: 814 });
+    const desktopLabel = session.locator('.ttp-rbar-label').first();
+    const desktopSpeed = session.locator('.ttp-reader-bar select').first();
+    await expect(desktopLabel).toBeVisible();
+    await expect(desktopLabel).toHaveCSS('color', ink);
+    await expect(desktopSpeed).toBeVisible();
+    await expect(desktopSpeed).toHaveCSS('color', ink);
   });
 }
 

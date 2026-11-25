@@ -124,6 +124,8 @@ for (const platform of ['android', 'ios']) for (const width of [375, 1440]) {
 
 for (const platform of ['android', 'ios']) {
   test(`six app palettes persist, follow Auto and update the ${platform} bars without API calls`, async ({ page }, info) => {
+    // Exercise both viewports and cold-start persistence across three navigations.
+    test.slow();
     await page.addInitScript(platform => {
       localStorage.setItem('tutam_locale', 'vi');
       if (localStorage.getItem('tutam_dark_mode') === null) localStorage.setItem('tutam_dark_mode', '0');

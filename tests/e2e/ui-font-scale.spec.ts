@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { deferStartupNotification } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 for (const width of [375, 1440]) {
   for (const dark of [false, true]) {
@@ -50,8 +53,10 @@ for (const width of [375, 1440]) {
       await page.reload();
       await page.locator('#settings-display > summary').click();
       await expect(row.locator('output')).toHaveText('120%');
-      await decrease.click(); await decrease.click(); await decrease.click();
-      await expect(row.locator('output')).toHaveText('90%');
+      for (const size of ['110%', '100%', '90%', '80%']) {
+        await decrease.click();
+        await expect(row.locator('output')).toHaveText(size);
+      }
       await expect(decrease).toBeDisabled();
       await row.getByRole('button', { name:'Mặc định', exact:true }).click();
       await expect(row.locator('output')).toHaveText('100%');

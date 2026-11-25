@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 test('cold practice subpage Back returns to the hub without reloading the document', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 844 });
-  await page.goto('/tu-tap/an-chay');
+  await page.goto('/tu-tap/an-chay', { waitUntil: 'domcontentloaded' });
   await settleClient(page);
   await page.evaluate(() => {
     Object.defineProperty(window.history, 'length', { configurable: true, get: () => 1 });
@@ -20,7 +20,7 @@ test('cold practice subpage Back returns to the hub without reloading the docume
 });
 
 test('practice header Back keeps an active tool callback ahead of route fallback', async ({ page }) => {
-  await page.goto('/tu-tap');
+  await page.goto('/tu-tap', { waitUntil: 'domcontentloaded' });
   await settleClient(page);
   await page.evaluate(() => {
     Object.defineProperty(window.history, 'length', { configurable: true, get: () => 1 });
@@ -39,7 +39,7 @@ test('practice header Back keeps an active tool callback ahead of route fallback
 });
 
 test('practice header Back preserves existing browser history navigation', async ({ page }) => {
-  await page.goto('/tu-tap/an-chay');
+  await page.goto('/tu-tap/an-chay', { waitUntil: 'domcontentloaded' });
   await settleClient(page);
   await page.evaluate(() => {
     (window as Window & { practiceBackDocumentMarker?: boolean }).practiceBackDocumentMarker = true;

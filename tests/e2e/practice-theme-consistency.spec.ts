@@ -19,7 +19,7 @@ test(`closed practice controls cannot intercept taps, keyboard focus or accessib
     const url = new URL(route.request().url());
     return url.origin !== origin || url.pathname.startsWith('/api/') ? route.abort('blockedbyclient') : route.continue();
   });
-  await page.goto('/tu-tap?article=tt_1780910773084');
+  await page.goto('/tu-tap?article=tt_1780910773084', { waitUntil: 'domcontentloaded' });
   await settleClient(page);
   await page.locator('.tt-preview__toc-list > button').first().click();
   await page.locator('.tt-reader-practice-btn').click();
@@ -89,7 +89,7 @@ test(`scripture preview and navigation follow the same theme with saved ${savedB
   const lightColors: Record<string, string> = { cream: 'rgb(244, 236, 216)', gray: 'rgb(232, 232, 232)', white: 'rgb(255, 255, 255)', purple: 'rgb(238, 230, 250)' };
   const lightColor = lightColors[lightBackground];
   await page.route('**/api/**', route => route.abort('failed'));
-  await page.goto('/tu-tap?article=tt_1780910773084');
+  await page.goto('/tu-tap?article=tt_1780910773084', { waitUntil: 'domcontentloaded' });
   await settleClient(page);
   const preview = page.locator('.tt-preview');
   await expect(preview).toBeVisible();
@@ -130,7 +130,7 @@ for (const savedBackground of ['dark', 'cream', 'gray', 'white', 'purple']) {
       localStorage.setItem('tutam_read_bg_dark', 'cream');
     }, { background: savedBackground });
     await page.route('**/api/**', route => route.abort('failed'));
-    await page.goto('/tu-tap?article=tt_1780910773084');
+    await page.goto('/tu-tap?article=tt_1780910773084', { waitUntil: 'domcontentloaded' });
   await settleClient(page);
     const preview = page.locator('.tt-preview');
     const toggle = page.locator('.qts-nav .nav-theme-btn');
