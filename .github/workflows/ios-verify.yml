@@ -12,6 +12,7 @@ on:
           - smoke
           - full
           - picker
+          - audio
   push:
     branches:
       - 'codex/qa-*'
@@ -164,6 +165,8 @@ jobs:
               -only-testing:AppUITests/NativePersonalReminderTests
               -only-testing:AppUITests/NativeSimulatorSnapshotTests
             )
+          elif [ "$IOS_TEST_SUITE" = "audio" ]; then
+            testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
           elif [ "$IOS_TEST_SUITE" = "picker" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarPickerWithMotionDisabled)
           fi
@@ -173,6 +176,30 @@ jobs:
             -derivedDataPath build/ios-simulator \
             "${testing_args[@]}" \
             CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: Prepare an offline Phap thoai track for the audio test
+        if: env.IOS_TEST_SUITE == 'audio'
+        run: |
+          set -euo pipefail
+          app=build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app
+          xcrun simctl install "$TUTAM_QA_SIMULATOR" "$app"
+          container=$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam data)
+          node --input-type=module - "$app/public" "$container" <<'JS'
+          import { createHash } from 'node:crypto';
+          import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { NATIVE_BACKEND_ORIGINS } from './src/lib/browser/native-backend-origin.ts';
+          const [assets, container] = process.argv.slice(2);
+          const albums = JSON.parse(readFileSync(join(assets, 'offline-data/talks.json'), 'utf8'));
+          const album = albums.find(item => item.id === 'pt_drive_9332ba09c8672ac69faf1ed7fca0a8b9');
+          if (!album || !album.tracks[0].url.startsWith('/api/audio/drive/')) throw new Error('Missing fixture album');
+          const cache = join(container, 'Library/Application Support/DharmaAudio');
+          mkdirSync(cache, { recursive: true });
+          for (const origin of NATIVE_BACKEND_ORIGINS) {
+            const key = new URL(album.tracks[0].url, origin).href;
+            const hash = createHash('sha256').update(key).digest('hex');
+            copyFileSync(join(assets, 'assets/audio/nhac-thien-01.m4a'), join(cache, hash + '.audio'));
+          }
+          JS
       - name: Verify packaged Google privacy manifests
         run: |
           app='build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app'
@@ -203,6 +230,8 @@ jobs:
               -only-testing:AppUITests/NativePersonalReminderTests
               -only-testing:AppUITests/NativeSimulatorSnapshotTests
             )
+          elif [ "$IOS_TEST_SUITE" = "audio" ]; then
+            testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
           elif [ "$IOS_TEST_SUITE" = "picker" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarPickerWithMotionDisabled)
           fi
@@ -228,10 +257,10 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'full':13,'picker':1}.get(suite,3)
+          min_passed={'full':13,'picker':1,'audio':1}.get(suite,3)
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
-          if suite=='picker':
-            assert data['passedTests'] == 1, 'Expected exactly the native lunar-date regression'
+          if suite in ('picker', 'audio'):
+            assert data['passedTests'] == 1, 'Expected exactly the requested native regression'
           assert data['failedTests'] == 0, 'Native UI test failures'
           assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'
           print(f'Verified native UI test execution ({suite}):',data['passedTests'],'passed, 0 failed, 0 skipped')
@@ -252,7 +281,7 @@ jobs:
             xcrun xcresulttool export attachments --path "$result" --output-path build/release-evidence/native-ui-attachments
           fi
       - name: Diagnose native URL delivery after XCTest evidence is saved
-        if: always() && env.TUTAM_QA_HOSTS_ISOLATED == '1' && env.IOS_TEST_SUITE != 'picker'
+        if: always() && env.TUTAM_QA_HOSTS_ISOLATED == '1' && env.IOS_TEST_SUITE != 'picker' && env.IOS_TEST_SUITE != 'audio'
         continue-on-error: true
         timeout-minutes: 3
         run: |

@@ -376,8 +376,15 @@
     }
   }
 
+  function revealCurrentPlayer(album: TalkAlbum): void {
+    if ($audioPlayer.album?.id === album.id) {
+      window.dispatchEvent(new Event('quangtu:show-audio-player'));
+    }
+  }
+
   async function play(album: TalkAlbum, trackIndex = 0, resumeSeconds = 0, dismissPrompt = true): Promise<void> {
     if (dismissPrompt) clearResumePrompt();
+    revealCurrentPlayer(album);
     if (album.tracks[trackIndex]?.media_type === 'video') videoExpanded = album.tracks[trackIndex]?.aspect_ratio !== '16:9';
     const player = await getAudioPlayer();
     await player.playTrack(mapped(album), trackIndex, resumeSeconds);
@@ -385,6 +392,7 @@
 
   async function playAll(album: TalkAlbum): Promise<void> {
     clearResumePrompt();
+    revealCurrentPlayer(album);
     await (await getAudioPlayer()).playAll(mapped(album));
   }
 
@@ -804,8 +812,8 @@
     };
 
     const handleDialogKeyboard = (event: KeyboardEvent) => {
-      if (offlineConfirmation) return;
-      if (loginModalOpen) return;
+      if (offlineConfirmation || loginModalOpen || event.defaultPrevented) return;
+      if (event.target instanceof Element && event.target.closest('dialog[open]')) return;
       if (event.key === 'Escape' && selected) {
         event.preventDefault();
         if (videoIsFull) videoExpanded = false;
@@ -1448,11 +1456,8 @@
   }
   @media(max-width:768px){
     .album-overlay{
-      bottom:calc(56px + max(env(safe-area-inset-bottom, 0px), 6px));
+      bottom:max(var(--audio-player-top, 0px), calc(56px + max(env(safe-area-inset-bottom, 0px), 6px)));
       overflow:hidden;
-    }
-    :global(.qts-shell--audio-active) .album-overlay{
-      bottom:calc(114px + max(env(safe-area-inset-bottom, 0px), 6px));
     }
     .album-dialog{
       height:100%;
@@ -1462,12 +1467,9 @@
       padding-bottom:24px;
     }
   }
-  :global([data-native-app='true']) .album-overlay{
-    bottom:calc(56px + max(env(safe-area-inset-bottom, 0px), 6px));
+  :global(:is([data-native-app='true'], [data-narrow-screen='true'])) .album-overlay{
+    bottom:max(var(--audio-player-top, 0px), calc(56px + max(env(safe-area-inset-bottom, 0px), 6px)));
     overflow:hidden;
-  }
-  :global([data-native-app='true'] .qts-shell--audio-active) .album-overlay{
-    bottom:calc(114px + max(env(safe-area-inset-bottom, 0px), 6px));
   }
   :global([data-native-app='true']) .album-dialog{
     height:100%;
@@ -1476,13 +1478,6 @@
   :global([data-native-app='true']) .pt-as-track-list-wrap,
   :global([data-narrow-screen='true']) .pt-as-track-list-wrap{
     padding-bottom:var(--space-page);
-  }
-  :global([data-narrow-screen='true']) .album-overlay{
-    bottom:calc(56px + max(env(safe-area-inset-bottom, 0px), 6px));
-    overflow:hidden;
-  }
-  :global([data-narrow-screen='true'] .qts-shell--audio-active) .album-overlay{
-    bottom:calc(114px + max(env(safe-area-inset-bottom, 0px), 6px));
   }
   :global([data-narrow-screen='true']) .album-dialog{
     height:100%;

@@ -1576,3 +1576,49 @@ final class NativeSimulatorSnapshotTests: NativeGuestUITestCase {
         evidence("vegetarian-offline-recipe", app: app)
     }
 }
+
+final class NativeTalkPlayerTests: NativeGuestUITestCase {
+    @MainActor
+    func testSameAlbumPlaybackRestoresDismissedMiniPlayer() {
+        let app = launchGuest()
+        let navigation = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Điều hướng nhanh")).firstMatch
+        tap(navigation.links["Pháp thoại"].firstMatch, app: app)
+        let album = "GẬY KIM CANG HÉT - TẬP 1"
+        let search = app.searchFields["Tìm kiếm album..."].firstMatch
+        tap(search, app: app)
+        search.typeText(album + "\n")
+        let playAlbum = app.buttons["Phát album " + album].firstMatch
+        let expand = app.buttons["Mở rộng trình phát Pháp Thoại"].firstMatch
+        let pause = app.buttons["Tạm dừng"].firstMatch
+
+        func checkPlaying() {
+            waitUntil("An explicit play command must show the floating player and its pause control", timeout: 25) {
+                self.insideViewport(expand, app: app) && self.insideViewport(pause, app: app)
+            }
+        }
+
+        func swipePlayerAway() {
+            let start = expand.coordinate(withNormalizedOffset: CGVector(dx: 0.20, dy: 0.50))
+            let end = start.withOffset(CGVector(dx: app.frame.width * 0.52, dy: 0))
+            start.press(forDuration: 0.08, thenDragTo: end)
+            waitUntil("Swiping the mini-player away must hide its controls") { !expand.exists }
+        }
+
+        tap(playAlbum, app: app)
+        checkPlaying()
+        evidence("talk-mini-player-first-play", app: app)
+        swipePlayerAway()
+        tap(playAlbum, app: app)
+        checkPlaying()
+        swipePlayerAway()
+
+        tap(app.buttons["Mở album " + album].firstMatch, app: app)
+        let playAll = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Phát tất cả")).firstMatch
+        tap(playAll, app: app)
+        checkPlaying()
+        tap(pause, app: app)
+        let resume = app.buttons["Phát"].firstMatch
+        XCTAssertTrue(resume.waitForExistence(timeout: 15) && resume.isHittable)
+        evidence("talk-mini-player-restored-and-paused", app: app)
+    }
+}

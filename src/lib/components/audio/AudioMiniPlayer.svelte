@@ -216,6 +216,10 @@
   });
 
   onMount(() => {
+    const showPlayer = () => {
+      audioBannerHidden = false;
+      miniBarMinimized = false;
+    };
     const outsidePointer = (event: PointerEvent) => {
       if (speedSheetOpen && !mobileSpeedWrap?.contains(event.target as Node)) closeSpeedMenu();
       if (
@@ -233,9 +237,11 @@
         else if (mobileExpanded) mobileExpanded = false;
       }
     };
+    window.addEventListener('quangtu:show-audio-player', showPlayer);
     document.addEventListener('pointerdown', outsidePointer);
     document.addEventListener('keydown', escape);
     return () => {
+      window.removeEventListener('quangtu:show-audio-player', showPlayer);
       document.removeEventListener('pointerdown', outsidePointer);
       document.removeEventListener('keydown', escape);
       if (expandHintTimer) {
