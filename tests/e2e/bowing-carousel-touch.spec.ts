@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 
 for (const width of [320, 375]) {
   test(`Buddha selection arrows keep 44px touch targets at ${width}px`, async ({ page }, testInfo) => {
+    await deferStartupNotification(page);
     await page.setViewportSize({ width, height: 844 });
     await page.route('**/api/**', route => route.abort('failed'));
     await page.goto('/tu-tap?action=le-phat');

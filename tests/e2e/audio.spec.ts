@@ -463,6 +463,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
 
     await page.goto('/phap-thoai');
     await settleClient(page);
+    await dismissFirstRunNotification(page);
 
     const saveResumePosition = () => page.evaluate((position) => {
       localStorage.setItem(position.key, JSON.stringify(position.value));
@@ -757,6 +758,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await loginAsMember(page);
     await page.goto('/phap-thoai');
     await settleClient(page);
+    await dismissFirstRunNotification(page);
     const album = page.locator('article').filter({ hasText: 'Pháp thoại kiểm thử E2E' });
     await album.getByRole('button', { name: /^Phát album / }).click();
 
@@ -780,9 +782,13 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await expect(progress).toHaveValue('30');
     if (await detail.isVisible()) await detail.getByRole('button',{name:'Thu nhỏ trình phát',exact:true}).click();
 
-    await page.locator('#main-content').focus();
+    const main = page.locator('#main-content');
+    await main.focus();
+    await expect(main).toBeFocused();
     await page.keyboard.press('Space');
     await expect(player.getByRole('button', { name: 'Tạm dừng' })).toBeVisible();
+    await expect(player.getByRole('status')).toHaveText('Âm thanh đang bật');
+    await expect(main).toBeFocused();
     await page.keyboard.press('m');
     await expect(player.getByRole('status')).toHaveText('Âm thanh đang tắt');
     if ((page.viewportSize()?.width ?? 0) > 480) {

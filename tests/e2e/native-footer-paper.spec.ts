@@ -62,20 +62,20 @@ for (const [paper, theme, background, ink] of [
     await expect(footer).toHaveCSS('background-color', background);
     await expect(footer.locator('.qts-bottom-nav__item').first()).toHaveCSS('color', ink);
     await expect(footer.locator('[aria-current="page"]')).toHaveCSS('color', ink);
-    const palettes = await footer.evaluate((element, dark) => {
-      const active = element.querySelector('[aria-current="page"]')!;
-      const icon = active.querySelector('.qts-bottom-nav__icon')!;
+    const active = footer.locator('[aria-current="page"]');
+    const palette = await active.evaluate((active, dark) => {
       const style = getComputedStyle(active);
       const probe = document.createElement('span');
       probe.style.color = style.getPropertyValue(dark ? '--tab-color-dark' : '--tab-color');
       probe.style.backgroundColor = style.getPropertyValue(dark ? '--tab-bg-dark' : '--tab-bg');
       active.append(probe);
       const expected = getComputedStyle(probe);
-      const result = { icon: getComputedStyle(icon).color, pill: getComputedStyle(icon).backgroundColor, expectedIcon: expected.color, expectedPill: expected.backgroundColor };
+      const result = { icon: expected.color, pill: expected.backgroundColor };
       probe.remove(); return result;
     }, paper === 'dark');
-    expect(palettes.icon).toBe(palettes.expectedIcon);
-    expect(palettes.pill).toBe(palettes.expectedPill);
+    const icon = active.locator('.qts-bottom-nav__icon');
+    await expect(icon).toHaveCSS('color', palette.icon);
+    await expect(icon).toHaveCSS('background-color', palette.pill);
     await page.locator('[data-footer-paper-fixture]').evaluate(element => element.remove());
     await expect(footer).toHaveCSS('background-color', before.background);
     await expect(footer.locator('[aria-current="page"]')).toHaveCSS('color', before.active);
