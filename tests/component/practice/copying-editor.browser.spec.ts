@@ -232,9 +232,13 @@ it('keeps real glyph geometry aligned with the full reference at every font, wra
         { text: ' Con thành tâm đảnh lễ, cúi xin chư Phật từ bi chứng giám. '.repeat(12), bold: false, align: 'left', line: 1 }];
       const glyphs = (root: HTMLElement, maximum: number) => {
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), rects: DOMRect[] = [];
+        const range = document.createRange();
         let node: Node | null;
-        while ((node = walker.nextNode()) && rects.length < maximum) for (let i = 0; i < (node.textContent?.length ?? 0) && rects.length < maximum; i++) {
-          const range = document.createRange(); range.setStart(node, i); range.setEnd(node, i + 1); rects.push(range.getBoundingClientRect());
+        while ((node = walker.nextNode()) && rects.length < maximum) {
+          const length = Math.min(node.textContent?.length ?? 0, maximum - rects.length);
+          for (let i = 0; i < length; i++) {
+            range.setStart(node, i); range.setEnd(node, i + 1); rects.push(range.getBoundingClientRect());
+          }
         }
         return rects;
       };

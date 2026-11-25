@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { afterNavigate } from '$app/navigation';
   import { page as routePage } from '$app/state';
   import { fetchWithSessionRefresh } from '$lib/browser/session-csrf';
@@ -43,13 +44,11 @@
   let thanhTinhParticipants = $state<ThanhTinhParticipantAdminRow[]>(untrack(() => initialThanhTinhParticipants));
   let fivePreceptsParticipants = $state<ParticipationRow[]>([]);
   let eightPreceptsParticipants = $state<ParticipationRow[]>([]);
-  let practiceTab = $state<'thanh-tinh' | 'five-precepts' | 'eight-precepts'>('thanh-tinh');
-
-  // Lazy loading flags: chỉ nạp D1 khi người dùng thật sự bấm xem tab đó
-  let thanhLoaded = $state(false);
-  let fiveLoaded = $state(false);
-  let eightLoaded = $state(false);
-  let loadingTab = $state(false);
+  type PracticeTab = 'thanh-tinh' | 'five-precepts' | 'eight-precepts';
+  let practiceTab = $state<PracticeTab>('thanh-tinh');
+  const loadedTabs = new SvelteSet<PracticeTab>();
+  const tabRequests = new SvelteMap<PracticeTab, AbortController>();
+  const loadingTab = $derived(tabRequests.has(practiceTab));
 
   let busy = $state(false);
   let refreshError = $state('');
@@ -76,71 +75,45 @@
   });
 
   // Tối ưu D1: Chuyển tab chỉ nạp D1 đúng 1 lần (Lazy Load), các lần sau lấy từ cache in-memory
-  async function ensureTabData(tab: 'thanh-tinh' | 'five-precepts' | 'eight-precepts'): Promise<void> {
+  async function ensureTabData(tab: PracticeTab): Promise<void> {
     practiceTab = tab;
-    if (tab === 'thanh-tinh' && !thanhLoaded && thanhTinhParticipants.length === 0) {
-      await refreshThanhTinh();
-    } else if (tab === 'five-precepts' && !fiveLoaded) {
-      await refreshFivePrecepts();
-    } else if (tab === 'eight-precepts' && !eightLoaded) {
-      await refreshEightPrecepts();
+    if (loadedTabs.has(tab) || (tab === 'thanh-tinh' && thanhTinhParticipants.length)) return;
+    await refreshParticipants(tab);
+  }
+
+  async function refreshParticipants(tab: PracticeTab): Promise<void> {
+    if (tabRequests.has(tab)) return;
+    const request = new AbortController();
+    tabRequests.set(tab, request);
+    const url = tab === 'thanh-tinh'
+      ? '/api/admin/thanh-tinh/participants'
+      : `/api/admin/practice-participation?module=${tab === 'five-precepts' ? 'five' : 'eight'}&period=all&limit=50`;
+    try {
+      const response = await fetchWithSessionRefresh(url, {
+        headers: { accept: 'application/json' }, signal: request.signal,
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (request.signal.aborted) return;
+      if (tab === 'thanh-tinh') {
+        if (!Array.isArray(data)) return;
+        thanhTinhParticipants = data;
+      } else {
+        if (!Array.isArray(data?.rows)) return;
+        if (tab === 'five-precepts') fivePreceptsParticipants = data.rows;
+        else eightPreceptsParticipants = data.rows;
+      }
+      loadedTabs.add(tab);
+    } catch {
+      // Giữ dữ liệu cũ để người dùng có thể thử lại.
+    } finally {
+      if (tabRequests.get(tab) === request) tabRequests.delete(tab);
     }
   }
 
-  async function refreshThanhTinh(): Promise<void> {
-    if (loadingTab) return;
-    loadingTab = true;
-    try {
-      const res = await fetchWithSessionRefresh('/api/admin/thanh-tinh/participants', {
-        headers: { accept: 'application/json' },
-      });
-      if (res.ok) {
-        thanhTinhParticipants = (await res.json().catch(() => [])) as ThanhTinhParticipantAdminRow[];
-        thanhLoaded = true;
-      }
-    } catch {
-      // Giữ nguyên dữ liệu cũ
-    } finally {
-      loadingTab = false;
-    }
-  }
-
-  async function refreshFivePrecepts(): Promise<void> {
-    if (loadingTab) return;
-    loadingTab = true;
-    try {
-      const res = await fetchWithSessionRefresh('/api/admin/practice-participation?module=five&period=all&limit=50', {
-        headers: { accept: 'application/json' },
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({ rows: [] })) as { rows?: ParticipationRow[] };
-        fivePreceptsParticipants = data.rows ?? [];
-        fiveLoaded = true;
-      }
-    } catch {
-      // Giữ nguyên dữ liệu cũ
-    } finally {
-      loadingTab = false;
-    }
-  }
-
-  async function refreshEightPrecepts(): Promise<void> {
-    if (loadingTab) return;
-    loadingTab = true;
-    try {
-      const res = await fetchWithSessionRefresh('/api/admin/practice-participation?module=eight&period=all&limit=50', {
-        headers: { accept: 'application/json' },
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({ rows: [] })) as { rows?: ParticipationRow[] };
-        eightPreceptsParticipants = data.rows ?? [];
-        eightLoaded = true;
-      }
-    } catch {
-      // Giữ nguyên dữ liệu cũ
-    } finally {
-      loadingTab = false;
-    }
+  function cancelTabRequests(): void {
+    for (const request of tabRequests.values()) request.abort();
+    tabRequests.clear();
   }
 
   // Tối ưu D1: Nút làm mới tổng thể ở đầu trang chỉ làm mới cộng đồng và tab đang mở
@@ -154,7 +127,7 @@
       const [communityResponse] = await Promise.all([
         fetchWithSessionRefresh(`/api/admin/community?period=${community.period}`, { headers: { accept: 'application/json' }, signal: nextController.signal }),
         activeSection === 'practice'
-          ? (practiceTab === 'thanh-tinh' ? refreshThanhTinh() : practiceTab === 'five-precepts' ? refreshFivePrecepts() : refreshEightPrecepts())
+          ? refreshParticipants(practiceTab)
           : activeSection === 'moderation' ? moderationQueue?.refreshVisibleQueue() : undefined,
       ]);
       if (communityResponse.status === 401 || communityResponse.status === 403) {
@@ -202,12 +175,14 @@
       if (!session?.authenticated || session.user?.role !== 'admin') leaveAdmin();
     };
     window.addEventListener(SESSION_CHANGE_EVENT, sessionChanged);
-    return () => { disposed = true; stopPolling(); controller?.abort(); window.removeEventListener(SESSION_CHANGE_EVENT, sessionChanged); };
+    return () => { disposed = true; stopPolling(); controller?.abort(); cancelTabRequests(); window.removeEventListener(SESSION_CHANGE_EVENT, sessionChanged); };
   });
 
   function leaveAdmin(): void {
     if (disposed) return;
     controller?.abort();
+    cancelTabRequests();
+    loadedTabs.clear();
     community = {
       ...community,
       online: { members: 0, guests: 0, internal: 0, total: 0, visitors: [] },
@@ -333,7 +308,7 @@
           onclick={() => void ensureTabData('five-precepts')}
         >
           <span>📿 Giữ Ngũ giới</span>
-          {#if fiveLoaded}
+          {#if loadedTabs.has('five-precepts')}
             <small>({numberFormat.format(fivePreceptsParticipants.length)})</small>
           {:else}
             <small>(Xem)</small>
@@ -348,7 +323,7 @@
           onclick={() => void ensureTabData('eight-precepts')}
         >
           <span>🌸 Bát quan trai</span>
-          {#if eightLoaded}
+          {#if loadedTabs.has('eight-precepts')}
             <small>({numberFormat.format(eightPreceptsParticipants.length)})</small>
           {:else}
             <small>(Xem)</small>
@@ -359,19 +334,19 @@
       {#if practiceTab === 'thanh-tinh'}
         <ThanhTinhParticipantsTable
           participants={thanhTinhParticipants}
-          onRefresh={refreshThanhTinh}
+          onRefresh={() => void refreshParticipants('thanh-tinh')}
           busy={loadingTab}
         />
       {:else if practiceTab === 'five-precepts'}
         <FivePreceptsParticipantsTable
           participants={fivePreceptsParticipants}
-          onRefresh={refreshFivePrecepts}
+          onRefresh={() => void refreshParticipants('five-precepts')}
           busy={loadingTab}
         />
       {:else}
         <EightPreceptsParticipantsTable
           participants={eightPreceptsParticipants}
-          onRefresh={refreshEightPrecepts}
+          onRefresh={() => void refreshParticipants('eight-precepts')}
           busy={loadingTab}
         />
       {/if}

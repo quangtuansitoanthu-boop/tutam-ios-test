@@ -708,7 +708,10 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         XCTAssertEqual(referenceContainsUniqueWord(reference, label: "GIỚI"), false, "The later word must start outside the reference viewport")
         evidence("copy-ghost-keyboard-before-typing", app: app)
 
-        editor.typeText("TINH KHAU NGHIEP CHON NGON Tu ri tu ri, ma ha tu ri tu tu ri, ta ba ha (3 lan). TINH TAM NGHIEP CHAN NGON An ta pha ba pha, truat da ta pha, dat ma ta pha, ba pha truat do ham (3 lan). TINH PHAP GIOI")
+        editor.typeText("TI")
+        editor.typeText(XCUIKeyboardKey.delete.rawValue)
+        editor.typeText("INH KHAU NGHIEP CHON NGON\n")
+        editor.typeText("Tu ri tu ri, ma ha tu ri tu tu ri, ta ba ha. TINH TAM NGHIEP CHAN NGON An ta pha ba pha, truat da ta pha, dat ma ta pha, ba pha truat do ham. TINH PHAP GIOI")
         let typed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         typed.name = "copy-ghost-keyboard-immediately-after-typing"
         typed.lifetime = .keepAlways
@@ -741,8 +744,12 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         plainEditor.lifetime = .keepAlways
         add(plainEditor)
         let settledEditor = app.textViews["Tự gõ bản chép của bạn"].firstMatch
-        waitUntil("The editor must retain the typed text after dismissing the keyboard", timeout: 20) {
-            (settledEditor.value as? String)?.range(of: "GIOI", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        waitUntil("The editor must retain the corrected Vietnamese heading and follow the reference across lines", timeout: 20) {
+            guard let text = settledEditor.value as? String else { return false }
+            let words = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            return words.contains("TỊNH KHẨU NGHIỆP CHƠN NGÔN")
+                && words.contains("GIỚI")
+                && !words.contains("(3 lần)")
         }
         evidence("copy-ghost-text-retained-after-keyboard", app: app)
     }

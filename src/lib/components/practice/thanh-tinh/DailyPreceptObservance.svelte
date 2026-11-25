@@ -6,7 +6,7 @@
   import { getPreceptPracticeCopy, getDailyPreceptPracticeCopy, getPreceptCompletionCopy } from '$lib/i18n/precept-practice-ui';
   import { FIVE_PRECEPTS, TEN_PRECEPTS } from '$lib/content/precept-practice-content';
   import type { DailySession, DayAnswers } from '$lib/domain/practice/precept-companion';
-  import { saveDailySession } from '$lib/browser/precept-companion-storage';
+  import { getDailySessionConduct, saveDailySession } from '$lib/browser/precept-companion-storage';
   import { createBrowserId } from '$lib/browser/random-id';
   import PracticeConfirmDialog from '../dialog/PracticeConfirmDialog.svelte';
   import PreceptCompletion from './PreceptCompletion.svelte';
@@ -41,7 +41,10 @@
   const adminPrincipal = $derived(getAdminPrincipal(now));
   const adminTesting = $derived(adminReleasePrincipal !== null && adminReleasePrincipal === adminPrincipal);
   const missing = $derived(requiredItems.filter(item => !answers[item.id]));
-  const unmet = $derived(uniqueItems.filter(item => answers[item.id] !== 'kept'));
+  // Older completed sessions kept a separate conduct confirmation.
+  const resultConduct = $derived(answers.conduct ?? (session?.status === 'ended' && session.conductConfirmation
+    ? getDailySessionConduct(session).answer : undefined));
+  const unmet = $derived(uniqueItems.filter(item => (item.id === 'conduct' ? resultConduct : answers[item.id]) !== 'kept'));
   const resultComplete = $derived(unmet.length === 0);
   const canReflect = $derived(elapsed || adminTesting);
   const remaining = $derived(session ? Math.max(0, Math.ceil((Date.parse(session.endsAt) - now) / 1000)) : 0);

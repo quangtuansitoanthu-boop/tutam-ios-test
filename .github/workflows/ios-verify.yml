@@ -77,7 +77,7 @@ jobs:
         if: env.IOS_TEST_SUITE == 'guest'
         run: |
           npm run test:unit -- tests/unit/styles/home-daily-reminders.test.ts
-          npm run test:copying-editor -- tests/component/home/content-update-transition.browser.spec.ts
+          npm run test:copying-editor -- tests/component/home/content-update-transition.browser.spec.ts tests/component/admin-community-tabs.browser.spec.ts
       - name: Select the same bundled media fixture for all QA simulator builds
         run: |
           node --input-type=module <<'JS'

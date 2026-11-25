@@ -339,6 +339,7 @@ async function downloadAlbum(
     trackCount: album.tracks.length,
     downloadedAt: Date.now(), visibility: album.visibility, ownerId, trackUrls: album.tracks.map(track => track.url),
   };
+  throwIfAborted(options.signal);
   assertDownloadAccess(access);
   await putOfflineAlbum(record, access);
 }
@@ -352,6 +353,7 @@ export function downloadAlbumForOffline(
   options: DownloadOptions
 ): Promise<void> {
   try {
+    throwIfAborted(options.signal);
     assertAlbumDownloadAllowed(album.title, album.id);
   } catch (error) {
     return Promise.reject(error);
