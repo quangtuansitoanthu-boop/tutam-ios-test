@@ -151,16 +151,33 @@
   onMount(() => watchVeganWeekPreload());
 
   onMount(() => {
+    let timer: number | undefined;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        void import('$lib/browser/native-startup-screen').then(module => module.finishNativeStartup()).catch(() => {});
+        const startup = document.getElementById('app-startup');
+        if (!startup) return;
+        if (document.documentElement.dataset.nativeApp !== 'true') {
+          startup.remove();
+          return;
+        }
+        // Tính từ khung hình đầu tiên của màn tải, để thời gian khởi tạo ứng dụng cũng được tính.
+        const shownAt = Number(startup.dataset.shownAt ?? performance.now());
+        const remaining = Math.max(0, shownAt + 1300 - performance.now());
+        timer = window.setTimeout(() => {
+          startup.classList.add('startup-ready');
+          timer = window.setTimeout(() => startup.remove(), 240);
+        }, remaining);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  });
+
+  onMount(() => {
     mounted = true;
-    // Dismiss after the first app paint; no network request or artificial startup delay.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      void import('$lib/browser/native-startup-screen').then(module => module.finishNativeStartup()).catch(() => {});
-      const startup = document.getElementById('app-startup');
-      if (startup) {
-        startup.classList.add('startup-ready');
-        window.setTimeout(() => startup.remove(), 240);
-      }
-    }));
     const native = isNativeApp();
     const disposePerformance = initializeInteractionPerformance(native);
     const disposeUiMotion = initializeUiMotion();

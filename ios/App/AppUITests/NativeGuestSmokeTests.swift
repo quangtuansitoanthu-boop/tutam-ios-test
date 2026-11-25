@@ -30,7 +30,7 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
-    func launchGuest(retryCancelledPromptTap: Bool = false) -> XCUIApplication {
+    func launchGuest(retryBlankWebView: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -38,7 +38,7 @@ class NativeGuestUITestCase: XCTestCase {
         app.launchArguments = ["-tutam-qa-events", "1", "-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
         app.launch()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30), "Native WKWebView must load")
-        if retryCancelledPromptTap {
+        if retryBlankWebView {
             let startupPrompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
                 format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
             )).firstMatch
@@ -55,9 +55,9 @@ class NativeGuestUITestCase: XCTestCase {
                                "The simulator WebView must reach startup UI before testing playback")
             }
         }
-        deferStartupNotificationPrompt(app, timeout: 15, retryCancelledTap: retryCancelledPromptTap)
+        deferStartupNotificationPrompt(app, timeout: 15)
         let personalTab = app.links["Cá nhân"].firstMatch
-        if !personalTab.waitForExistence(timeout: 20) { deferStartupNotificationPrompt(app, retryCancelledTap: retryCancelledPromptTap) }
+        if !personalTab.waitForExistence(timeout: 20) { deferStartupNotificationPrompt(app) }
         XCTAssertTrue(personalTab.waitForExistence(timeout: 10), "Native app must finish rendering its navigation")
         return app
     }
@@ -69,7 +69,7 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
-    func deferStartupNotificationPrompt(_ app: XCUIApplication, timeout: TimeInterval = 0, retryCancelledTap: Bool = false) {
+    func deferStartupNotificationPrompt(_ app: XCUIApplication, timeout: TimeInterval = 0) {
         let prompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
             format: "label IN %@",
             ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
@@ -80,23 +80,20 @@ class NativeGuestUITestCase: XCTestCase {
         )).firstMatch
         XCTAssertTrue(later.waitForExistence(timeout: 5) && later.isHittable,
                       "The app's startup notification dialog must allow users to continue")
-        if retryCancelledTap {
-            var previousFrame: CGRect?
-            waitUntil("Startup prompt must settle inside the foreground app before the playback test") {
-                let frame = later.frame
-                let ready = app.state == .runningForeground && self.insideViewport(later, app: app)
-                    && prompt.frame.contains(frame) && previousFrame == frame
-                previousFrame = frame
-                return ready
-            }
+        var previousFrame: CGRect?
+        waitUntil("The Later button must settle inside the foreground notification dialog") {
+            let frame = later.frame
+            let ready = app.state == .runningForeground && self.insideViewport(later, app: app)
+                && prompt.frame.contains(frame) && previousFrame == frame
+            previousFrame = frame
+            return ready
         }
         later.tap()
-        if retryCancelledTap {
-            let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !prompt.exists }, object: NSObject())
-            if XCTWaiter.wait(for: [dismissed], timeout: 3) == .timedOut && prompt.exists && later.isHittable {
-                evidence("audio-setup-notification-still-visible", app: app)
-                later.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            }
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !prompt.exists }, object: NSObject())
+        if XCTWaiter.wait(for: [dismissed], timeout: 3) == .timedOut && prompt.exists && later.isHittable {
+            // WebKit can cancel the first touch before it generates a click.
+            evidence("startup-notification-still-visible", app: app)
+            later.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         }
         waitUntil("The app's notification dialog must close after choosing later") { !prompt.exists }
     }
@@ -758,6 +755,30 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
     private func selectPracticePaper(_ label: String, app: XCUIApplication) {
         let toolbar = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Tùy chỉnh chế độ tu tập")).firstMatch
         XCTAssertTrue(toolbar.waitForExistence(timeout: 15), "Practice must expose its actual customization toolbar")
+        let display = toolbar.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Tùy chỉnh")).firstMatch
+        if display.exists {
+            // On phones the swatches live in the display sheet. The trigger may extend past the toolbar's right edge.
+            let viewport = app.frame
+            let target = display.frame.intersection(toolbar.frame).intersection(viewport)
+            guard target.width >= 44 && target.height >= 44 && display.isHittable else {
+                XCTFail("The practice display settings trigger must be reachable in the toolbar")
+                return
+            }
+            app.coordinate(withNormalizedOffset: CGVector(dx: (target.midX - viewport.minX) / viewport.width,
+                dy: (target.midY - viewport.minY) / viewport.height)).tap()
+            let sheet = app.otherElements.matching(NSPredicate(
+                format: "label BEGINSWITH %@ AND (label ENDSWITH %@ OR label ENDSWITH %@)",
+                "Tùy chỉnh hiển thị & hành trì", "hộp thoại web", "web dialog"
+            )).firstMatch
+            XCTAssertTrue(sheet.waitForExistence(timeout: 10), "The practice display settings sheet must open")
+            let toggle = sheet.switches[label].firstMatch
+            let paper = toggle.exists ? toggle : sheet.buttons[label].firstMatch
+            tap(paper, app: app)
+            waitUntil("The named practice paper must be selected in the settings sheet") { self.checked(paper) == true }
+            tap(sheet.buttons["Đóng bảng chọn"].firstMatch, app: app)
+            waitUntil("Closing display settings must return to the active practice") { !sheet.exists && toolbar.exists }
+            return
+        }
         let initialPaper = labelledToggle(label, app: app)
         // WebKit may clamp offscreen-left AX frames to the toolbar's left edge.
         // Use that geometry only to prioritize a direction, then search both ways.
@@ -1195,25 +1216,14 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     }
 
     @MainActor
-    private func replaceName(_ text: String, app: XCUIApplication, editing: Bool = false) {
+    private func replaceName(_ text: String, app: XCUIApplication) {
         let field = app.textFields["Tên ngày lễ *"].firstMatch
-        if editing {
-            // WK AX's inferred tap point can land outside the input after scrolling.
-            revealContentControl(field, app: app)
-            let bounds = field.frame
-            let viewport = app.frame
-            guard bounds.width > 0 && bounds.height > 0 && viewport.contains(bounds) && field.isHittable else {
-                evidence("invalid-personal-title-first-gesture-geometry", app: app)
-                XCTFail("The real title field must be visible before its single edit tap")
-                return
-            }
-            app.coordinate(withNormalizedOffset: CGVector(dx: (bounds.midX - viewport.minX) / viewport.width,
-                dy: (bounds.midY - viewport.minY) / viewport.height)).tap()
-        } else {
-            tap(field, app: app)
-        }
+        // WebKit can report the input as hittable while it is behind the fixed header.
+        revealContentControl(field, app: app)
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(existsOrWait(app.keyboards.firstMatch, timeout: 10),
+                      "Tapping the visible title field must open the native keyboard before typing")
         if let existing = field.value as? String, !existing.isEmpty, existing != (field.placeholderValue ?? "") {
-            XCTAssertTrue(existsOrWait(app.keyboards.firstMatch, timeout: 10), "Editing an existing title requires the actual keyboard")
             let bounds = field.frame
             let viewport = app.frame
             let keyboard = app.keyboards.firstMatch.frame
@@ -1412,7 +1422,7 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         addEvent(lunar, solar: false, day: 15, month: 7, app: app)
         addEvent(solar, solar: true, day: 7, month: 11, app: app)
         editEvent(solar, app: app)
-        replaceName(edited, app: app, editing: true)
+        replaceName(edited, app: app)
         saveEvent(edited, app: app)
         relaunchPersonal(app, captureNavigationEvidence: false)
         editEvent(lunar, app: app)
@@ -1610,7 +1620,7 @@ final class NativeSimulatorSnapshotTests: NativeGuestUITestCase {
 final class NativeTalkPlayerTests: NativeGuestUITestCase {
     @MainActor
     func testSameAlbumPlaybackRestoresDismissedMiniPlayer() {
-        let app = launchGuest(retryCancelledPromptTap: true)
+        let app = launchGuest(retryBlankWebView: true)
         navigate("Pháp thoại", app: app)
         let album = "GẬY KIM CANG HÉT - TẬP 1"
         let search = app.searchFields["Tìm kiếm album..."].firstMatch

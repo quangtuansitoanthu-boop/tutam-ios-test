@@ -309,6 +309,39 @@ class TuTapBridgeViewController: CAPBridgeViewController {
             if (handler) handler.postMessage(body);
             else console.info('[TutamQA]', body);
           };
+          const startupOrigin = performance.now();
+          let startupCover = null;
+          let mountedAt = null;
+          let shownAt = null;
+          let assetAt = null;
+          let fadeAt = null;
+          let imageNumber = null;
+          const sampleStartup = () => {
+            const time = performance.now();
+            const screen = document.getElementById('app-startup');
+            if (mountedAt === null && document.querySelector('.qt-master-layout[data-mounted="1"]')) mountedAt = time;
+            if (screen) {
+              startupCover = screen;
+              if (screen.dataset.shownAt) shownAt = Number(screen.dataset.shownAt);
+              if (fadeAt === null && screen.classList.contains('startup-ready')) fadeAt = time;
+              if (assetAt === null) {
+                const bg = screen.querySelector('[data-startup-bg]');
+                const title = screen.querySelector('[data-startup-title]');
+                const text = screen.querySelector('[data-startup-loading]');
+                const spinner = screen.querySelector('.startup-spinner');
+                if (bg?.naturalWidth && title?.naturalWidth && text?.getBoundingClientRect().height && spinner?.getBoundingClientRect().width &&
+                    bg.getBoundingClientRect().width && title.getBoundingClientRect().width && getComputedStyle(screen).opacity > 0) {
+                  imageNumber = Number(new URL(bg.currentSrc).pathname.split('/').pop().split('.')[0]);
+                  assetAt = time;
+                }
+              }
+            } else if (startupCover && !startupCover.isConnected) {
+              log({type:'startup-paint', shownAt, assetAt, mountedAt, fadeAt, removedAt:time, imageNumber, viewport:innerWidth});
+              return;
+            }
+            if (time - startupOrigin < 18000) requestAnimationFrame(sampleStartup);
+          };
+          requestAnimationFrame(sampleStartup);
           const context = () => ({ path: location.pathname, readyState: document.readyState, time: performance.now(), activeTag: document.activeElement?.tagName || null, activeSelect: document.activeElement instanceof HTMLSelectElement });
           const describe = (event) => {
             const origin = event.target instanceof Element ? event.target : event.target?.parentElement;

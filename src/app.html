@@ -166,6 +166,10 @@
         document.querySelector('[data-startup-bg]').src = startupSrc;
         document.querySelector('[data-startup-title]').src = '/images/calendar/cu-si-title.webp';
         try { if (localStorage.getItem('tutam_locale') === 'en') document.querySelector('[data-startup-loading]').textContent = 'Loading app...'; } catch (e) {}
+        requestAnimationFrame(function () {
+          var cover = document.getElementById('app-startup');
+          if (cover) cover.dataset.shownAt = String(performance.now());
+        });
       }
       // A recoverable startup error must never leave a permanent cover over the app.
       window.setTimeout(function() { var screen = document.getElementById('app-startup'); if (screen) screen.remove(); }, 15000);
