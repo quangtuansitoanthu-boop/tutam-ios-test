@@ -310,13 +310,17 @@ class TuTapBridgeViewController: CAPBridgeViewController {
             else console.info('[TutamQA]', body);
           };
           const startupOrigin = performance.now();
-          let startupCover = null;
-          let mountedAt = null;
-          let shownAt = null;
-          let assetAt = null;
-          let fadeAt = null;
-          let imageNumber = null;
-          const sampleStartup = () => {
+          let startupCover = null, shownAt = null, assetAt = null, mountedAt = null, fadeAt = null, scheduledAt = null, scheduledDelay = null, imageNumber = null, finished = false;
+          const nativeSetTimeout = window.setTimeout;
+          const observeTimer = function (action, delay, ...args) {
+            if (typeof action === 'function' && Function.prototype.toString.call(action).includes('startup-ready')) {
+              scheduledAt = performance.now();
+              scheduledDelay = delay;
+            }
+            return Reflect.apply(nativeSetTimeout, this, [action, delay, ...args]);
+          };
+          window.setTimeout = observeTimer;
+          const inspect = () => {
             const time = performance.now();
             const screen = document.getElementById('app-startup');
             if (mountedAt === null && document.querySelector('.qt-master-layout[data-mounted="1"]')) mountedAt = time;
@@ -324,24 +328,30 @@ class TuTapBridgeViewController: CAPBridgeViewController {
               startupCover = screen;
               if (screen.dataset.shownAt) shownAt = Number(screen.dataset.shownAt);
               if (fadeAt === null && screen.classList.contains('startup-ready')) fadeAt = time;
-              if (assetAt === null) {
-                const bg = screen.querySelector('[data-startup-bg]');
-                const title = screen.querySelector('[data-startup-title]');
-                const text = screen.querySelector('[data-startup-loading]');
-                const spinner = screen.querySelector('.startup-spinner');
-                if (bg?.naturalWidth && title?.naturalWidth && text?.getBoundingClientRect().height && spinner?.getBoundingClientRect().width &&
-                    bg.getBoundingClientRect().width && title.getBoundingClientRect().width && getComputedStyle(screen).opacity > 0) {
-                  imageNumber = Number(new URL(bg.currentSrc).pathname.split('/').pop().split('.')[0]);
-                  assetAt = time;
-                }
-              }
-            } else if (startupCover && !startupCover.isConnected) {
-              log({type:'startup-paint', shownAt, assetAt, mountedAt, fadeAt, removedAt:time, imageNumber, viewport:innerWidth});
-              return;
+            } else if (startupCover && !startupCover.isConnected && !finished) {
+              finished = true;
+              if (fadeAt === null && startupCover.classList.contains('startup-ready')) fadeAt = time;
+              mutations.disconnect();
+              if (window.setTimeout === observeTimer) window.setTimeout = nativeSetTimeout;
+              log({type:'startup-paint', shownAt, assetAt, mountedAt, scheduledAt, scheduledDelay, fadeAt, removedAt:time, imageNumber, viewport:innerWidth});
             }
-            if (time - startupOrigin < 18000) requestAnimationFrame(sampleStartup);
           };
-          requestAnimationFrame(sampleStartup);
+          const mutations = new MutationObserver(inspect);
+          mutations.observe(document, {subtree:true,childList:true,attributes:true,attributeFilter:['class','data-shown-at','data-mounted']});
+          const sampleArtwork = () => {
+            inspect();
+            if (!finished && assetAt === null && startupCover) {
+              const bg = startupCover.querySelector('[data-startup-bg]'), title = startupCover.querySelector('[data-startup-title]');
+              const text = startupCover.querySelector('[data-startup-loading]'), spinner = startupCover.querySelector('.startup-spinner');
+              if (bg?.naturalWidth && title?.naturalWidth && text?.getBoundingClientRect().height && spinner?.getBoundingClientRect().width &&
+                  bg.getBoundingClientRect().width && title.getBoundingClientRect().width && getComputedStyle(startupCover).opacity > 0) {
+                imageNumber = Number(new URL(bg.currentSrc).pathname.split('/').pop().split('.')[0]);
+                assetAt = performance.now();
+              }
+            }
+            if (!finished && assetAt === null && performance.now()-startupOrigin < 18000) requestAnimationFrame(sampleArtwork);
+          };
+          requestAnimationFrame(sampleArtwork);
           const context = () => ({ path: location.pathname, readyState: document.readyState, time: performance.now(), activeTag: document.activeElement?.tagName || null, activeSelect: document.activeElement instanceof HTMLSelectElement });
           const describe = (event) => {
             const origin = event.target instanceof Element ? event.target : event.target?.parentElement;

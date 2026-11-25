@@ -17,6 +17,7 @@ on:
           - audio
           - journal
           - startup
+          - startup-webkit
           - reminder-crud
           - library-reader
   push:
@@ -45,19 +46,10 @@ jobs:
       IOS_TEST_SUITE: ${{ matrix.suite }}
     steps:
       - uses: actions/checkout@v4
-      - name: Verify complete app source trees match the tested native revision
-        if: env.IOS_TEST_SUITE == 'startup'
+      - name: Record the tested app source, assets and native build inputs
         run: |
-          test "$(git rev-parse HEAD:src)" = e86e27d9f74ee1e426473c78ee464f8becf9bccb
-          test "$(git rev-parse HEAD:static)" = c2eed162cb7f811665f0b638e128caea3fee7836
-          test "$(git rev-parse HEAD:ios)" = baa460ef2bcc276059216d8f30563d3e93ad8ce3
-          test "$(git rev-parse HEAD:android)" = 134a01e1a3741bd4248ba237c540b57571084f0f
-          test "$(git rev-parse HEAD:scripts)" = 1a5472daba258813dc09cdac618a264cc3ed3bb3
-          test "$(git rev-parse HEAD:package.json)" = 6d5f26704e863fd582d9f9f0aac9652ab93a37d9
-          test "$(git rev-parse HEAD:package-lock.json)" = b0fcfb52e018c17ef43d233e7adf799aeb351072
-          test "$(git rev-parse HEAD:capacitor.config.ts)" = cac3a1667813803da2959e74cffb1b0c87adf011
-          test "$(git rev-parse HEAD:svelte.config.js)" = e36505b28a98a741d5894177045b3a58e056e263
-          test "$(git rev-parse HEAD:vite.config.ts)" = eca437efce36af6b4c20468c92ee895466aea593
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git ls-tree HEAD -- src static ios android scripts package.json package-lock.json capacitor.config.ts svelte.config.js vite.config.ts
       - name: Apply QA audit source overlay if present
         run: |
           if [ -f .github/qa-audit-overlay.tar.gz ]; then
@@ -195,7 +187,7 @@ jobs:
           fi
           xcrun simctl bootstatus "$simulator_id" -b
       - name: Build iOS app, native plugins and UI tests once for the selected simulator
-        if: env.IOS_TEST_SUITE != 'journal'
+        if: env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup-webkit'
         run: |
           set -euo pipefail
           test "$TUTAM_QA_HOSTS_ISOLATED" = 1
@@ -248,7 +240,7 @@ jobs:
           if [ -f "$trace" ]; then cp "$trace" build/release-evidence/audio-prewarm-events.jsonl; fi
           xcrun simctl terminate "$TUTAM_QA_SIMULATOR" "$id"
       - name: Verify packaged Google privacy manifests
-        if: env.IOS_TEST_SUITE != 'journal'
+        if: env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup-webkit'
         run: |
           app='build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app'
           for bundle in GoogleSignIn.bundle GTMAppAuth_Privacy.bundle GTMSessionFetcher_Core_Privacy.bundle AppAuthCore_Privacy.bundle; do
@@ -262,12 +254,12 @@ jobs:
           grep -q 'GoogleSignIn (7.1.0)' ios/App/Podfile.lock
           cp ios/App/Podfile.lock build/release-evidence/Podfile.lock
       - name: Log release verification evidence
-        if: env.IOS_TEST_SUITE != 'journal'
+        if: env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup-webkit'
         run: |
           cat build/release-evidence/privacy-manifests.txt
           cat build/release-evidence/Podfile.lock
       - name: Run native iOS Simulator UI tests
-        if: env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup'
+        if: env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup-webkit' && env.IOS_TEST_SUITE != 'startup'
         timeout-minutes: 45
         run: |
           set -euo pipefail
@@ -300,7 +292,7 @@ jobs:
             -maximum-test-execution-time-allowance 600 \
             CODE_SIGNING_ALLOWED=NO test-without-building 2>&1 | tee build/release-evidence/native-ui-test.log
       - name: Require executed native UI tests with no failures or skips
-        if: always() && env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup'
+        if: always() && env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup-webkit' && env.IOS_TEST_SUITE != 'startup'
         run: |
           set -euo pipefail
           result=build/release-evidence/NativeGuestSmoke.xcresult
@@ -341,16 +333,28 @@ jobs:
         if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'extended') && env.TUTAM_QA_HOSTS_ISOLATED == '1'
         run: python3 .github/qa/ios-native-evidence.py links
       - name: Run exact bundled timing owner with fast and slow readiness in iPhone Safari
-        if: always() && env.IOS_TEST_SUITE == 'startup' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        if: always() && env.IOS_TEST_SUITE == 'startup-webkit' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        timeout-minutes: 9
         run: node .github/qa/startup-controlled-webkit.mjs
-      - name: Measure three real cold-process artwork launches in Capacitor WKWebView
-        if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'startup') && env.TUTAM_QA_HOSTS_ISOLATED == '1'
-        timeout-minutes: 4
+      - name: Install and warm the native simulator before independent startup measurements
+        if: env.IOS_TEST_SUITE == 'startup' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        timeout-minutes: 10
         run: |
-          if [ "$IOS_TEST_SUITE" = 'startup' ]; then
-            xcrun simctl install "$TUTAM_QA_SIMULATOR" build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app
-          fi
-          python3 .github/qa/ios-native-evidence.py startup
+          set -euo pipefail
+          device="$TUTAM_QA_SIMULATOR"
+          xcrun simctl install "$device" build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app
+          xcrun simctl launch "$device" vn.quangtu.tutam -tutam-qa-events 1
+          data="$(xcrun simctl get_app_container "$device" vn.quangtu.tutam data)"
+          trace="$data/Library/Caches/tutam-qa-events.jsonl"
+          for attempt in {1..100}; do
+            if grep -q '"phase":"listener-ready"' "$trace" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          grep -q '"phase":"listener-ready"' "$trace"
+      - name: Measure three real cold-process artwork launches in Capacitor WKWebView
+        if: always() && env.IOS_TEST_SUITE == 'startup' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        timeout-minutes: 12
+        run: python3 -u .github/qa/ios-native-evidence.py startup
       - name: Shut down the CI simulator before restoring network resolution
         if: always()
         run: |

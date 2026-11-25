@@ -163,12 +163,23 @@
         }
         var startupSrc = '/images/calendar/cu-si/' + String(backgroundIndex + 1).padStart(2, '0') + '.webp';
         document.querySelector('[data-startup-blur]').src = startupSrc;
-        document.querySelector('[data-startup-bg]').src = startupSrc;
-        document.querySelector('[data-startup-title]').src = '/images/calendar/cu-si-title.webp';
+        var painting = document.querySelector('[data-startup-bg]');
+        var title = document.querySelector('[data-startup-title]');
+        painting.src = startupSrc;
+        title.src = '/images/calendar/cu-si-title.webp';
         try { if (localStorage.getItem('tutam_locale') === 'en') document.querySelector('[data-startup-loading]').textContent = 'Loading app...'; } catch (e) {}
-        requestAnimationFrame(function () {
-          var cover = document.getElementById('app-startup');
-          if (cover) cover.dataset.shownAt = String(performance.now());
+        var cover = document.getElementById('app-startup');
+        cover.artworkPainted = Promise.all([painting, title].map(function (image) {
+          if (image.decode) return image.decode().catch(function () {});
+          if (!image.complete) return new Promise(function (resolve) { image.onload = image.onerror = resolve; });
+        })).then(function () {
+          return new Promise(function (resolve) {
+            requestAnimationFrame(function () {
+              var shownAt = performance.now();
+              cover.dataset.shownAt = String(shownAt);
+              resolve(shownAt);
+            });
+          });
         });
       }
       // A recoverable startup error must never leave a permanent cover over the app.

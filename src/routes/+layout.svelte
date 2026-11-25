@@ -152,25 +152,29 @@
 
   onMount(() => {
     let timer: number | undefined;
+    let active = true;
     let frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => {
         void import('$lib/browser/native-startup-screen').then(module => module.finishNativeStartup()).catch(() => {});
-        const startup = document.getElementById('app-startup');
+        const startup = document.getElementById('app-startup') as (HTMLElement & { artworkPainted?: Promise<number> }) | null;
         if (!startup) return;
         if (document.documentElement.dataset.nativeApp !== 'true') {
           startup.remove();
           return;
         }
-        // Tính từ khung hình đầu tiên của màn tải, để thời gian khởi tạo ứng dụng cũng được tính.
-        const shownAt = Number(startup.dataset.shownAt ?? performance.now());
-        const remaining = Math.max(0, shownAt + 1600 - performance.now());
-        timer = window.setTimeout(() => {
-          startup.classList.add('startup-ready');
-          timer = window.setTimeout(() => startup.remove(), 240);
-        }, remaining);
+        // Tính đủ thời gian đọc từ khi tranh và tiêu đề đã sẵn sàng để vẽ.
+        void Promise.resolve(startup.artworkPainted ?? Number(startup.dataset.shownAt ?? performance.now())).then(shownAt => {
+          if (!active || !startup.isConnected) return;
+          const remaining = Math.max(0, shownAt + 2000 - performance.now());
+          timer = window.setTimeout(() => {
+            startup.classList.add('startup-ready');
+            timer = window.setTimeout(() => startup.remove(), 240);
+          }, remaining);
+        });
       });
     });
     return () => {
+      active = false;
       cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
