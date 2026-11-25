@@ -81,24 +81,29 @@ def measure_startup():
     directory = simctl("get_app_container", simulator, bundle, "data", capture_output=True, check=True).stdout.strip()
     trace = Path(directory) / "Library/Caches/tutam-qa-events.jsonl"
     results = []
-    for index in range(2):
-        item = read_launch(trace, index)
-        results.append(item)
+    for index in range(3):
+        results.append(read_launch(trace, index))
         (output / "native-startup-paint.json").write_text(json.dumps(results))
+    for index, item in enumerate(results):
         for key in ("shownAt", "assetAt", "mountedAt", "fadeAt", "removedAt", "imageNumber", "viewport"):
             assert isinstance(item.get(key), (int, float)) and math.isfinite(item[key]), (key, item)
         assert 1 <= item["imageNumber"] <= 10 and item["viewport"] > 300, item
         shown, mounted, fade, removed = [item[key] for key in ("shownAt", "mountedAt", "fadeAt", "removedAt")]
-        # The shell publishes data-mounted before its two real paint frames.
-        # Busy simulator rendering can add a few frames to event observation.
+        # Native rAF sees rendered frames, not the exact moment a timer updates the DOM.
+        # Verify first and last rendered states here; inspect exact scheduled/fade/removal
+        # timings separately in Simulator WebKit using the unchanged packaged callback.
         assert fade >= max(shown + 1550, mounted - 35), item
-        assert fade <= max(shown + 1600, mounted) + 500, item
-        assert fade - max(item["assetAt"], shown) >= 1200, item
-        assert fade + 185 <= removed <= fade + 520, item
-        print(f"Launch {index+1}: illustration {item['imageNumber']:02.0f}, "
+        assert fade - max(item["assetAt"], shown) >= 1200 and fade <= removed, item
+        if mounted - shown < 1000:
+            assert 1680 <= removed - shown <= 2100, item
+        else:
+            # A second full hold after genuine slow mounting would exceed this bound.
+            assert fade - mounted < 1450, item
+        if index:
+            assert item["imageNumber"] == results[index-1]["imageNumber"] % 10 + 1, results
+        print(f"Native launch {index+1}: illustration {item['imageNumber']:02.0f}, "
               f"art at {item['assetAt'] - shown:.0f} ms, shell at {mounted - shown:.0f} ms, "
-              f"fade at {fade - shown:.0f} ms, removed at {removed - shown:.0f} ms")
-    assert results[1]["imageNumber"] == results[0]["imageNumber"] % 10 + 1, results
+              f"fade first sampled at {fade - shown:.0f} ms, removed at {removed - shown:.0f} ms")
 
 
 if sys.argv[1] == "links":

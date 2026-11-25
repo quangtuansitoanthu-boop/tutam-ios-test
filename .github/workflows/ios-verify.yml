@@ -16,6 +16,7 @@ on:
           - picker
           - audio
           - journal
+          - startup
   push:
     branches:
       - 'codex/qa-*'
@@ -42,6 +43,19 @@ jobs:
       IOS_TEST_SUITE: ${{ matrix.suite }}
     steps:
       - uses: actions/checkout@v4
+      - name: Verify complete app source trees match the tested native revision
+        if: env.IOS_TEST_SUITE == 'startup'
+        run: |
+          test "$(git rev-parse HEAD:src)" = e86e27d9f74ee1e426473c78ee464f8becf9bccb
+          test "$(git rev-parse HEAD:static)" = c2eed162cb7f811665f0b638e128caea3fee7836
+          test "$(git rev-parse HEAD:ios)" = baa460ef2bcc276059216d8f30563d3e93ad8ce3
+          test "$(git rev-parse HEAD:android)" = 134a01e1a3741bd4248ba237c540b57571084f0f
+          test "$(git rev-parse HEAD:scripts)" = 1a5472daba258813dc09cdac618a264cc3ed3bb3
+          test "$(git rev-parse HEAD:package.json)" = 6d5f26704e863fd582d9f9f0aac9652ab93a37d9
+          test "$(git rev-parse HEAD:package-lock.json)" = b0fcfb52e018c17ef43d233e7adf799aeb351072
+          test "$(git rev-parse HEAD:capacitor.config.ts)" = cac3a1667813803da2959e74cffb1b0c87adf011
+          test "$(git rev-parse HEAD:svelte.config.js)" = e36505b28a98a741d5894177045b3a58e056e263
+          test "$(git rev-parse HEAD:vite.config.ts)" = eca437efce36af6b4c20468c92ee895466aea593
       - name: Apply QA audit source overlay if present
         run: |
           if [ -f .github/qa-audit-overlay.tar.gz ]; then
@@ -247,7 +261,7 @@ jobs:
           cat build/release-evidence/privacy-manifests.txt
           cat build/release-evidence/Podfile.lock
       - name: Run native iOS Simulator UI tests
-        if: env.IOS_TEST_SUITE != 'journal'
+        if: env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup'
         timeout-minutes: 45
         run: |
           set -euo pipefail
@@ -276,7 +290,7 @@ jobs:
             -maximum-test-execution-time-allowance 600 \
             CODE_SIGNING_ALLOWED=NO test-without-building 2>&1 | tee build/release-evidence/native-ui-test.log
       - name: Require executed native UI tests with no failures or skips
-        if: always() && env.IOS_TEST_SUITE != 'journal'
+        if: always() && env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup'
         run: |
           set -euo pipefail
           result=build/release-evidence/NativeGuestSmoke.xcresult
@@ -316,10 +330,17 @@ jobs:
       - name: Verify system URL deliveries from XCTest on the installed native app
         if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'extended') && env.TUTAM_QA_HOSTS_ISOLATED == '1'
         run: python3 .github/qa/ios-native-evidence.py links
-      - name: Measure two real cold-process artwork launches in Capacitor WKWebView
-        if: always() && env.IOS_TEST_SUITE == 'guest' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
-        timeout-minutes: 3
-        run: python3 .github/qa/ios-native-evidence.py startup
+      - name: Run exact bundled timing owner with fast and slow readiness in iPhone Safari
+        if: always() && env.IOS_TEST_SUITE == 'startup' && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        run: node .github/qa/startup-controlled-webkit.mjs
+      - name: Measure three real cold-process artwork launches in Capacitor WKWebView
+        if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'startup') && env.TUTAM_QA_HOSTS_ISOLATED == '1'
+        timeout-minutes: 4
+        run: |
+          if [ "$IOS_TEST_SUITE" = 'startup' ]; then
+            xcrun simctl install "$TUTAM_QA_SIMULATOR" build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app
+          fi
+          python3 .github/qa/ios-native-evidence.py startup
       - name: Shut down the CI simulator before restoring network resolution
         if: always()
         run: |
@@ -354,6 +375,7 @@ jobs:
             build/release-evidence/journal-webkit.json
             build/release-evidence/native-link-receipts.json
             build/release-evidence/native-startup-paint.json
+            build/release-evidence/startup-controlled-webkit.json
             build/release-evidence/*-events.jsonl
             build/release-evidence/native-ui-attachments/manifest.json
             build/release-evidence/native-ui-attachments/*.txt
