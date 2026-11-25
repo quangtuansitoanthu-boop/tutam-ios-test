@@ -12,6 +12,8 @@ const title = 'Album ba phần kiểm thử liên tục';
 const track = (i: number) => `/__audio-continuity/part-${i}.wav`;
 
 test.beforeEach(async ({ page }) => {
+  const reminder = page.getByRole('dialog', { name: 'Thông báo tu tập' });
+  await page.addLocatorHandler(reminder, () => reminder.getByRole('button', { name: 'Để sau' }).click());
   test.setTimeout(60_000);
   await page.addInitScript(() => {
     const events = { playing: [] as string[], ended: [] as string[] };

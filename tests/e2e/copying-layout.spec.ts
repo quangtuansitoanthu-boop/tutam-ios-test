@@ -334,10 +334,14 @@ test('ghost input without keyup follows the committed caret and backward correct
   const editor = editorFor(page);
   await editor.click();
   // Touch keyboards may deliver beforeinput without a physical keyup event.
-  for (const expected of ['T', 'TỊ', 'TỊN', 'TỊNH', 'TỊNH ', 'TỊNH K']) {
-    await editor.evaluate(node => node.dispatchEvent(new InputEvent('beforeinput', {
-      inputType: 'insertText', data: 'x', bubbles: true, cancelable: true
-    })));
+  const typeWithoutKeyup = (data: string) => editor.evaluate((node, key) => node.dispatchEvent(new InputEvent('beforeinput', {
+    inputType: 'insertText', data: key, bubbles: true, cancelable: true,
+  })), data);
+  for (let index = 0; index < 6; index++) await typeWithoutKeyup('x');
+  await expect(editor).toHaveText('');
+  await expect(page.getByRole('status').filter({ hasText: 'Cần gõ:' })).toContainText('TỊNH');
+  for (const [key, expected] of [['t', 'T'], ['i', 'TỊ'], ['n', 'TỊN'], ['h', 'TỊNH'], [' ', 'TỊNH '], ['k', 'TỊNH K']]) {
+    await typeWithoutKeyup(key);
     await expect(editor).toHaveText(expected);
   }
   const activeWord = page.locator('#copy-source-text .source-word--current');
@@ -347,6 +351,30 @@ test('ghost input without keyup follows the committed caret and backward correct
   await editor.press('End');
   await expect(activeWord).toHaveText('KHẨU');
   await expect.poll(() => localText(page)).toBe('TỊNH K');
+  expect(requests).toEqual([]);
+});
+
+test('ghost copying keeps typed optional notes through reload and resumes with the next canonical letter', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/practice/copying') requests.push(request.method()); });
+  await open(page);
+  const toggle = page.getByRole('button', { name: 'Chữ mờ', exact: true });
+  await toggle.click();
+  const editor = editorFor(page);
+  await editor.focus();
+  await editor.pressSequentially('tinh (3 lần) ');
+  const first = 'TỊNH (3 lần) ';
+  await expect(editor).toHaveText(first, { useInnerText: false });
+  await expect(editor.locator('em')).toHaveText('(3 lần)');
+  await expect.poll(() => localText(page)).toBe(first);
+  await page.reload();
+  await beginScriptureCopying(page);
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(editor.locator('em')).toHaveText('(3 lần)');
+  await editor.press('Control+End');
+  await editor.press('k');
+  await expect.poll(() => localText(page)).toBe(first + 'K');
+  await expect(editor).toHaveText(first + 'K');
   expect(requests).toEqual([]);
 });
 
@@ -392,13 +420,14 @@ test('ghost text tracing preserves reference visibility and synchronizes font ch
   // Verify font change synchronizes to ghost layer
   await page.locator('.editor-tools-trigger').click();
   const display = page.locator('.compact-editor-display');
-  await display.getByRole('combobox', { name: 'Phông chữ', exact: true }).selectOption('mali');
+  await display.getByRole('button', { name: 'Phông chữ: Bookerly', exact: true }).click();
+  await page.getByRole('listbox', { name: 'Danh sách phông chữ' }).getByRole('option', { name: 'Mali (viết tay)', exact: true }).click();
   await expect(ghostLayer).toHaveCSS('font-family', /CopyMali/);
 
-  // Type keys: automatically advances canonical scripture letters
+  // Trace the heading with unaccented letters, then compare the actual ink and ghost glyphs.
   const editor = page.locator('#copy-text');
   await editor.click();
-  await editor.pressSequentially('abc');
+  await editor.pressSequentially('tin');
   await expect(editor).toHaveText(/^TỊN/);
   await page.evaluate(() => document.fonts.ready);
   const glyphDisplacement = () => page.evaluate(() => {
@@ -476,4 +505,50 @@ test('review keeps both actions visible while ten issues scroll on a phone', asy
   await dialog.getByRole('button', { name: 'Về chỗ cần sửa', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(editorFor(page)).toBeFocused();
+});
+
+test('reference highlights and scrolls along typed IME words after switching from ghost mode to normal text', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page);
+  const ghostBtn = page.getByRole('button', { name: 'Chữ mờ', exact: true });
+  await ghostBtn.click();
+  await expect(ghostBtn).toHaveAttribute('aria-pressed', 'true');
+
+  const editor = editorFor(page);
+  await editor.click();
+  await editor.pressSequentially('TỊNH KHẨU NGHIỆP CHƠN NGÔN');
+  await expect(editor).toHaveText('TỊNH KHẨU NGHIỆP CHƠN NGÔN');
+
+  // Switch from Chữ mờ to normal text (Chữ thường)
+  await ghostBtn.click();
+  await expect(ghostBtn).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.rich-copy-ghost')).toHaveCount(0);
+
+  // Type subsequent words continuously in IME composition mode (without idle gaps resetting composing=false)
+  const words = normalizeCopyText(book.chapters[0].blocks[0]).split(' ').slice(5, 72);
+  await editor.evaluate((node, additions) => {
+    node.focus();
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    const chunk = ' ' + additions.join(' ');
+    const targetNode = node.querySelector('span')?.lastChild ?? node;
+    if (targetNode.nodeType === 3) (targetNode as Text).appendData(chunk);
+    else targetNode.appendChild(document.createTextNode(chunk));
+    const endRange = document.createRange();
+    endRange.selectNodeContents(node);
+    endRange.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(endRange);
+    node.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: chunk, bubbles: true }));
+  }, words);
+
+  const source = page.locator('#copy-source-text');
+  const lastWord = words.at(-1)!;
+  await expect(source.locator('.source-word--current')).toContainText(new RegExp(lastWord, 'i'));
+  await expect.poll(() => source.evaluate(node => node.scrollTop)).toBeGreaterThan(20);
 });

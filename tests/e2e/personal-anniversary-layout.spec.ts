@@ -18,7 +18,7 @@ for (const [year, lunarDay] of [[2026, 2], [2027, 13]]) {
     await modal.getByRole('button', { name: 'Dương lịch', exact: true }).click();
     await modal.locator('#pem-solar-day').selectOption('10');
     await modal.locator('#pem-solar-month').selectOption('11');
-    await expect(modal.locator('.conversion-pill')).toContainText(`Âm lịch tự quy đổi theo năm ${year}:`);
+    await expect(modal.locator('.conversion-pill')).toContainText(`Âm lịch năm ${year}:`);
     await expect(modal.locator('.conversion-pill')).toContainText(`${lunarDay <= 10 ? 'Mồng' : 'Ngày'} ${lunarDay} Tháng 10`);
     await page.goto('/ca-nhan?tab=settings');
     await settleClient(page);
@@ -28,7 +28,7 @@ for (const [year, lunarDay] of [[2026, 2], [2027, 13]]) {
     await editor.getByRole('button', { name: 'Dương lịch', exact: true }).click();
     await editor.locator('.personal-select-sm').nth(0).selectOption('10');
     await editor.locator('.personal-select-sm').nth(1).selectOption('11');
-    await expect(editor.locator('.personal-conversion-badge')).toContainText(`Âm lịch tự quy đổi theo năm ${year}:`);
+    await expect(editor.locator('.personal-conversion-badge')).toContainText(`Âm lịch năm ${year}:`);
     await expect(editor.locator('.personal-conversion-badge')).toContainText(`Ngày ${lunarDay} Tháng 10`);
   });
 }

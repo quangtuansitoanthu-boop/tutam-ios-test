@@ -55,23 +55,6 @@ function markUrlConsumed(key: string, path: string): void {
   } catch {}
 }
 
-function qaLinkPhase(phase: 'listener-ready' | 'warm-received' | 'launch-received' | 'launch-empty' | 'navigating' | 'navigated' | 'navigate-error' | 'listener-error', path?: string): void {
-  try {
-    const handler = (window as Window & { webkit?: { messageHandlers?: { tutamQAEvents?: { postMessage: (detail: string) => void } } } }).webkit?.messageHandlers?.tutamQAEvents;
-    if (!handler) return;
-    let target = 'none';
-    if (path) {
-      const url = new URL(path, 'https://quangtu.vn');
-      if (url.pathname === '/tu-tap/chep-kinh') target = 'copy';
-      else if (url.pathname === '/tu-tap' && url.searchParams.get('action') === 'rosary') target = 'rosary';
-      else if (url.pathname === '/tu-tap' && url.searchParams.has('article') && url.searchParams.has('chap')) target = 'chapter';
-      else if (url.pathname === '/ca-nhan' && url.searchParams.get('tab') === 'settings') target = 'settings';
-      else target = 'other';
-    }
-    handler.postMessage(JSON.stringify({ type: 'native-link', phase, target }));
-  } catch {}
-}
-
 export function startNativeAppLinks(navigate: (path: string) => Promise<unknown> | void, beforeNavigate?: () => Promise<void>): () => void {
   if (!isNativeApp()) return () => {};
   let disposed = false;
@@ -116,9 +99,7 @@ export function startNativeAppLinks(navigate: (path: string) => Promise<unknown>
         catch { console.warn('Không thể cập nhật timer native trước khi điều hướng.'); }
       }
       if (disposed || generation !== navigationGeneration || !canNavigate()) return;
-      qaLinkPhase('navigating', path);
       await navigate(path);
-      qaLinkPhase('navigated', path);
       if (disposed || generation !== navigationGeneration || typeof window === 'undefined') return;
       const target = new URL(path, 'https://quangtu.vn');
       if (isPracticeWidgetTarget(target)
@@ -127,7 +108,6 @@ export function startNativeAppLinks(navigate: (path: string) => Promise<unknown>
         window.dispatchEvent(new CustomEvent(PRACTICE_WIDGET_OPEN_EVENT, { detail: { path } }));
       }
     } catch {
-      qaLinkPhase('navigate-error', path);
       console.warn('Không thể mở trang từ liên kết native.');
     } finally {
       if (generation === navigationGeneration) pendingPath = null;
@@ -142,15 +122,12 @@ export function startNativeAppLinks(navigate: (path: string) => Promise<unknown>
         const target = resolveNativeAppPath(url);
         if (!target) return;
         receivedWarmUrl = true;
-        qaLinkPhase('warm-received', target);
         markUrlConsumed(WARM_CONSUMED_KEY, target);
         void open(target);
       });
       if (disposed) { await handle.remove(); return; }
       appHandle = handle;
-      qaLinkPhase('listener-ready');
       const launch = resolveNativeAppPath((await App.getLaunchUrl())?.url);
-      qaLinkPhase(launch ? 'launch-received' : 'launch-empty', launch ?? undefined);
       if (!disposed && launch) {
         const shouldOpen = !receivedWarmUrl && !isLaunchUrlConsumed(launch);
         // Lưu riêng URL khởi động vì liên kết kế tiếp khi app đang mở sẽ ghi đè khóa của nó.
@@ -158,7 +135,6 @@ export function startNativeAppLinks(navigate: (path: string) => Promise<unknown>
         if (shouldOpen) await open(launch);
       }
     } catch {
-      qaLinkPhase('listener-error');
       console.warn('Không thể đăng ký liên kết native.');
     }
   })();

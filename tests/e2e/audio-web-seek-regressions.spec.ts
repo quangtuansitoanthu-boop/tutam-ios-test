@@ -34,6 +34,11 @@ test('Pháp thoại seeks a full-200 MP3 while paused and reuses one Blob for la
   });
   const player = await openPlayer(page);
   expect(fullFetches).toBe(0);
+  const volume = player.getByRole('slider', { name: 'Âm lượng' });
+  if (await volume.isVisible()) {
+    await volume.fill('0.35');
+    await expect.poll(() => page.evaluate(() => (window as any).__talkSeekAudio.volume)).toBe(0.35);
+  }
   await player.getByRole('button', { name: 'Tạm dừng', exact: true }).click();
   await player.getByRole('slider', { name: 'Vị trí phát' }).fill('900');
   await expect.poll(() => page.evaluate(() => (window as any).__talkSeekAudio.currentTime)).toBe(900);

@@ -2,6 +2,7 @@ import { expect, test, type Page, type Request } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { loginAsMember, settleClient, TEST_MEMBER_ID } from './runtime-helpers';
 import { useLocalMindfulPostResponses } from './helpers/mindful-local-response';
+import { closeReflectionSubmissionNotice, reflectionSubmissionNotice } from './helpers/reflection-submission-notice';
 import { changePersonalSyncState, initialPersonalSyncState, PERSONAL_SYNC_INTERVAL_MS } from '../../src/lib/domain/practice/personal-sync-policy';
 
 const prefix = `quangtu_principal_v1:${TEST_MEMBER_ID}:`;
@@ -104,9 +105,10 @@ test('both private journal share actions require confirmation and cancel sends n
   await page.getByRole('textbox', { name: 'Biệt danh đồng tu', exact: true }).fill('Đồng Tu Xác Nhận');
   const requests = contentRequests(page);
   for (const item of [
-    { label: 'Nhìn lại lỗi lầm & sám hối', share: 'Gửi cộng đồng sám hối' },
-    { label: 'Việc thiện lành đã làm', share: 'Chia sẻ việc lành' },
+    { tab: 'repentance', label: 'Nhìn lại lỗi lầm & sám hối', share: 'Gửi cộng đồng sám hối' },
+    { tab: 'good-deed', label: 'Việc thiện lành đã làm', share: 'Chia sẻ việc lành' },
   ]) {
+    await page.locator(`#tab-${item.tab}`).click();
     requests.length = 0;
     const content = publicReflection(`Nội dung kiểm tra ${item.share}`);
     await page.getByRole('textbox', { name: item.label, exact: true }).fill(content);
@@ -117,6 +119,7 @@ test('both private journal share actions require confirmation and cancel sends n
     expect(requests).toEqual([]);
     await confirmation.getByRole('button', { name: 'Hủy', exact: true }).click();
     await expect(confirmation).toHaveCount(0);
+    await expect(reflectionSubmissionNotice(page)).toHaveCount(0);
     await expect(page.getByRole('textbox', { name: item.label, exact: true })).toHaveValue(content);
     expect(requests).toEqual([]);
     await share.click();
@@ -126,7 +129,10 @@ test('both private journal share actions require confirmation and cancel sends n
     await confirmation.getByRole('button', { name: 'Đồng ý chia sẻ', exact: true }).click();
     expect((await response).ok()).toBe(true);
     await expect(confirmation).toHaveCount(0);
-    await expect(page.locator('.reflection-review-notice[data-review-state="pending"]').first()).toContainText('Đã gửi bài · Đang chờ xét duyệt');
+    await closeReflectionSubmissionNotice(page);
+    const receipt = page.locator(`#panel-${item.tab} .reflection-review-notice[data-review-state="pending"]`);
+    await expect(receipt).toContainText('Đã gửi bài · Chờ duyệt');
+    await expect(receipt.getByRole('button', { name: 'Chi tiết' })).toHaveAttribute('aria-expanded', 'false');
     expect(requests).toEqual([{ method: 'POST', path: communityPath }]);
   }
 });
@@ -189,13 +195,17 @@ test.describe('iOS reflection sharing', () => {
     };
     await confirm('Gửi cộng đồng sám hối');
     await expect(page.getByText('Tính năng chia sẻ hiện chưa sẵn sàng. Vui lòng thử lại sau. Nội dung trên máy vẫn được giữ nguyên.', { exact: true })).toBeVisible();
+    await expect(reflectionSubmissionNotice(page)).toHaveCount(0);
     await expect(repentance).toHaveValue(text);
     expect(await page.evaluate(key => localStorage.getItem(key), `${prefix}tt_personal_reflections_v1`)).toContain(text);
     await confirm('Gửi cộng đồng sám hối');
-    await expect(page.locator('.share-status[role="status"]')).toHaveText('Đã gửi bài · Đang chờ xét duyệt');
+    await closeReflectionSubmissionNotice(page);
+    await expect(page.locator('#panel-repentance .reflection-review-notice')).toContainText('Đã gửi bài · Chờ duyệt');
+    await page.locator('#tab-good-deed').click();
     await page.getByRole('textbox', { name: 'Việc thiện lành đã làm', exact: true }).fill(publicReflection('Việc lành iOS'));
     await confirm('Chia sẻ việc lành');
-    await expect(page.locator('.share-status[role="status"]')).toHaveText('Đã gửi bài · Đang chờ xét duyệt');
+    await closeReflectionSubmissionNotice(page);
+    await expect(page.locator('#panel-good-deed .reflection-review-notice')).toContainText('Đã gửi bài · Chờ duyệt');
     const attempts = await page.evaluate(() => (window as unknown as { mindfulNativeAttempts: {
       url: string; method: string; headers: Record<string, string>; data: { kind: string; clientPostId: string };
     }[] }).mindfulNativeAttempts);
@@ -389,6 +399,9 @@ test('new mobile cards share the companion grid and private reflection saves wit
 });
 
 test('sharing and template reaction each send one mutation without a feed refetch', async ({ page, baseURL }) => {
+  await page.addLocatorHandler(page.getByRole('dialog', { name: 'Thông báo tu tập', exact: true }), async dialog => {
+    await dialog.getByRole('button', { name: 'Để sau', exact: true }).click();
+  });
   const readLocal = await useLocalMindfulPostResponses(page, baseURL!);
   await loginAsMember(page);
   await page.setViewportSize({ width: 375, height: 844 });
@@ -400,7 +413,9 @@ test('sharing and template reaction each send one mutation without a feed refetc
   const privateGood = 'Đoạn việc thiện này không được gửi cùng bài sám hối.';
   await page.getByRole('textbox', { name: 'Biệt danh đồng tu', exact: true }).fill(nickname);
   await page.getByRole('textbox', { name: 'Nhìn lại lỗi lầm & sám hối', exact: true }).fill(content);
+  await page.locator('#tab-good-deed').click();
   await page.getByRole('textbox', { name: 'Việc thiện lành đã làm', exact: true }).fill(privateGood);
+  await page.locator('#tab-repentance').click();
   const requests = contentRequests(page);
   await page.getByRole('button', { name: 'Gửi cộng đồng sám hối', exact: true }).click();
   const confirmation = page.getByRole('dialog', { name: 'Xác nhận chia sẻ', exact: true });
@@ -418,7 +433,8 @@ test('sharing and template reaction each send one mutation without a feed refetc
   expect(response.request().postData()).not.toContain(privateGood);
   const { post } = payload;
   expect(post).toMatchObject({ status: 'hidden', reviewState: 'pending', reviewRevision: 1, publishedAt: null });
-  await expect(page.getByRole('status').filter({ hasText: 'Đã gửi bài · Đang chờ xét duyệt' })).toBeVisible();
+  await closeReflectionSubmissionNotice(page);
+  await expect(page.locator('#panel-repentance .reflection-review-notice')).toContainText('Đã gửi bài · Chờ duyệt');
   expect(requests).toEqual([{ method: 'POST', path: communityPath }]);
   const pendingPublic = await page.request.get(`${communityPath}?kind=repentance`);
   expect(pendingPublic.ok()).toBe(true);
@@ -453,7 +469,7 @@ test('sharing and template reaction each send one mutation without a feed refetc
   await reaction.getByRole('button', { name: 'Gửi', exact: true }).click();
   expect((await reacted).ok()).toBe(true);
   await expect(article.getByRole('button', { name: 'Đã gửi lời cầu nguyện', exact: true })).toBeDisabled();
-  await expect(article.getByRole('button', { name: 'Lời cầu nguyện · 1', exact: true })).toBeVisible();
+  await expect(article.getByRole('button', { name: '1 Lời cầu nguyện', exact: true })).toBeVisible();
   expect(requests).toHaveLength(1);
   expect(requests[0]).toMatchObject({ method: 'POST' });
   expect(requests[0].path).toMatch(/\/reactions$/u);

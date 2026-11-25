@@ -214,12 +214,13 @@ test('[moderation48h] cold and repeated warm notification links reopen the mindf
       expect(manualUrl.hash).toBe('#review');
     }
     await touchModeration(page.locator('.notification-bell-btn'));
+    await page.getByRole('tab', { name: /^Quản trị/u }).click();
     await touchModeration(page.locator('.notification-item').filter({ hasText: notification.title }));
     await expect(page).toHaveURL(new URL(notification.link, page.url()).href);
     await expect(mindful.getByRole('button', { name: 'Quán chiếu thiện ác', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(mindful.getByText('Không còn bài chờ duyệt', { exact: true })).toBeVisible();
   }
-  expect(queues).toEqual(['mindful', 'comments']);
+  expect(queues).toEqual(['mindful', 'comments', 'mindful', 'mindful']);
   expect(documents).toEqual([]);
   expect(writes).toEqual([]);
   await expect(page.locator('dialog[open]')).toHaveCount(0);
@@ -239,7 +240,7 @@ for (const width of [375, 1440]) for (const theme of ['light', 'dark'] as const)
     page.on('pageerror', error => errors.push(error.message));
     await loginAsAdmin(page);
     const postKind = width === 375 && theme === 'dark' ? 'repentance' : width === 1440 && theme === 'light' ? 'good_deed' : undefined;
-    const label = postKind === 'repentance' ? 'Sám hối' : postKind === 'good_deed' ? 'Tùy hỷ công đức' : 'Tất cả';
+    const label = postKind === 'repentance' ? 'Sám hối' : postKind === 'good_deed' ? 'Làm việc thiện' : 'Tất cả';
     const submittedAt = new Date().toISOString();
     const reads: URL[] = [];
     let complete = false;
@@ -302,7 +303,7 @@ for (const width of [375, 1440]) for (const theme of ['light', 'dark'] as const)
     expect(reads.at(-1)!.searchParams.get('postKind')).toBe(postKind ?? null);
     const approveAll = moderation.getByRole('button', { name: /^Duyệt tất cả\s*\(99\+\)$/u });
     await touchModeration(approveAll);
-    const dialog = page.getByRole('dialog', { name: 'Duyệt tất cả bài đang chờ?', exact: true });
+    const dialog = page.getByRole('dialog', { name: 'Duyệt tất cả quán chiếu đang chờ?', exact: true });
     await expect(dialog).toBeVisible();
     expect(preparations).toHaveLength(1);
     await expect(dialog).toContainText('gồm cả các trang kết quả khác');

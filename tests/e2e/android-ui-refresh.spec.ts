@@ -52,6 +52,14 @@ test('feast portraits are date-specific while ordinary days use scenery and just
   expect(await page.locator('.global-presence-pill').evaluate(el=>parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(13);
 });
 
+test('Thập Trai calendar artwork rotates within the lay practitioner collection', async ({ page }) => {
+  await page.goto('/?calendarDate=2026-02-24');
+  const calendar = page.locator('.buddhist-daily-art-card');
+  await expect(calendar.locator('img')).toHaveAttribute('src', '/images/calendar/cu-si/02.webp');
+  await calendar.locator('.art-shuffle-btn').click();
+  await expect(calendar.locator('img')).toHaveAttribute('src', '/images/calendar/cu-si/03.webp');
+});
+
 test('calendar artwork changes and remains readable at narrow widths in both themes', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 });
   await page.goto('/');

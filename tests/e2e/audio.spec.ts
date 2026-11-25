@@ -295,6 +295,50 @@ test.describe('Pháp Thoại public and download contracts', () => {
     }
   });
 
+  test('reveals the dismissed player when the listener plays the same album again', async ({ page }) => {
+    await loginAsMember(page);
+    // Keep playback active while the listener swipes and returns to the same track.
+    await page.route('**/assets/audio/tieng-mo.m4a', route =>
+      route.fulfill({ path: 'assets/audio/nhac-thien-01.m4a', contentType: 'audio/mp4' }));
+    await page.goto('/phap-thoai');
+    await settleClient(page);
+    const card = page.locator('.pt-card').filter({ hasText: 'Pháp thoại kiểm thử E2E' });
+    await card.locator('.pt-card-thumb').click();
+    const album = page.locator('.album-dialog');
+    const track = album.getByRole('button', { name: 'Phát Tiếng mõ kiểm thử', exact: true });
+    const bar = page.getByRole('region', { name: 'Trình phát Pháp Thoại' });
+    const albumBottom = () => album.evaluate(node => node.getBoundingClientRect().bottom);
+    const initialBottom = await albumBottom();
+    await track.click();
+
+    for (const play of [track, album.locator('.pt-as-play-all-btn')]) {
+      await expect(bar.getByRole('button', { name: 'Tạm dừng' })).toBeVisible();
+      if (page.viewportSize()!.width <= 768) {
+        await expect.poll(async () => (await albumBottom()) - (await bar.boundingBox())!.y).toBeLessThanOrEqual(1);
+      }
+      const hint = bar.locator('.pt-mp-swipe-hint');
+      const bounds = (await hint.boundingBox())!;
+      const y = bounds.y + bounds.height / 2;
+      await page.mouse.move(bounds.x + bounds.width * 0.25, y);
+      await page.mouse.down();
+      await page.mouse.move(bounds.x + bounds.width * 0.65, y, { steps: 8 });
+      await page.mouse.up();
+      await expect(bar).toHaveCount(0);
+      if (page.viewportSize()!.width <= 768) await expect.poll(albumBottom).toBeCloseTo(initialBottom, 0);
+      await expect(album.locator('.pt-as-track-item.active')).toHaveCount(1);
+      await play.click();
+    }
+    await expect(bar.getByRole('button', { name: 'Tạm dừng' })).toBeVisible();
+    await bar.getByRole('button', { name: 'Tạm dừng' }).click();
+    await expect(bar.getByRole('button', { name: 'Phát', exact: true })).toBeVisible();
+    await bar.getByRole('button', { name: 'Mở rộng trình phát Pháp Thoại' }).click();
+    const expanded = page.getByRole('dialog', { name: 'Chi tiết trình phát Pháp Thoại' });
+    await expect(expanded).toBeVisible();
+    await expanded.press('Escape');
+    await expect(expanded).toHaveCount(0);
+    await expect(album).toBeVisible();
+  });
+
   test('keeps playback mounted through browser Back navigation', async ({ page }) => {
     await loginAsMember(page);
     await page.goto('/');
@@ -641,6 +685,10 @@ test.describe('Pháp Thoại public and download contracts', () => {
 
   test('member can browse and start playback', async ({ page }) => {
     await loginAsMember(page);
+    const reminder = page.getByRole('dialog', { name: 'Thông báo tu tập' });
+    await page.addLocatorHandler(reminder, () => reminder.getByRole('button', { name: 'Để sau' }).click());
+    await page.route('**/assets/branding/tu-tap-logo.png', route =>
+      route.fulfill({ path: 'assets/branding/tu-tap-logo.png', contentType: 'image/png' }));
     await page.goto('/phap-thoai');
     await settleClient(page);
 
