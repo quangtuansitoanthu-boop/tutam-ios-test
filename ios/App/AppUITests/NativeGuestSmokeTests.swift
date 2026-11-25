@@ -1374,17 +1374,24 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     private func deleteEvent(_ title: String, cancelFirst: Bool = false, app: XCUIApplication) {
         editEvent(title, app: app)
         let delete = app.buttons["Xóa ngày lễ"].firstMatch
-        revealContentControl(delete, app: app)
-        delete.tap()
-        XCTAssertTrue(existsOrWait(app.staticTexts["Xóa lịch cá nhân?"].firstMatch, timeout: 10))
-        if cancelFirst {
-            tap(app.buttons["Giữ lại"].firstMatch, app: app)
-            XCTAssertTrue(app.staticTexts[title].firstMatch.exists, "Cancel deletion must retain the named saved event")
+        let dialog = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Xóa lịch cá nhân?,")).firstMatch
+        let namedEvent = dialog.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "“\(title)”")).firstMatch
+        for action in (cancelFirst ? ["Giữ lại", "Xóa lịch"] : ["Xóa lịch"]) {
             revealContentControl(delete, app: app)
             delete.tap()
-            XCTAssertTrue(existsOrWait(app.staticTexts["Xóa lịch cá nhân?"].firstMatch, timeout: 10))
+            XCTAssertTrue(namedEvent.waitForExistence(timeout: 10), "The confirmation must name the event being changed")
+            let button = dialog.buttons[action].firstMatch
+            XCTAssertTrue(button.isHittable)
+            button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            let closed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !dialog.exists }, object: NSObject())
+            if XCTWaiter.wait(for: [closed], timeout: 3) == .timedOut && namedEvent.exists && button.isHittable {
+                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+            waitPersonalUntil("The named delete confirmation must close after choosing \(action)") { !dialog.exists }
+            if action == "Giữ lại" {
+                XCTAssertTrue(app.staticTexts[title].firstMatch.exists, "Cancel deletion must retain the named saved event")
+            }
         }
-        tap(app.buttons["Xóa lịch"].firstMatch, app: app)
         waitPersonalUntil("Confirmed deletion must remove only the named QA event") { !app.staticTexts[title].firstMatch.exists }
     }
 
@@ -1453,7 +1460,11 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         tap(app.buttons["Hủy"].firstMatch, app: app)
         waitPersonalUntil("Cancel timing changes must restore the saved setting") { self.checked(before) == true }
         deleteEvent(edited, cancelFirst: true, app: app)
-        XCTAssertTrue(app.staticTexts[lunar].firstMatch.exists, "Deleting solar event must preserve the other lunar event")
+        relaunchPersonal(app, captureNavigationEvidence: false)
+        editEvent(lunar, app: app)
+        XCTAssertEqual(namedControl("Ngày Âm lịch:", app: app).value as? String, "15")
+        XCTAssertEqual(namedControl("Tháng Âm lịch:", app: app).value as? String, "Tháng 7")
+        XCTAssertFalse(app.staticTexts[edited].firstMatch.exists, "The solar event must stay deleted after relaunch")
         deleteEvent(lunar, app: app)
         relaunchPersonal(app, captureNavigationEvidence: false)
         XCTAssertFalse(app.staticTexts[edited].firstMatch.exists)

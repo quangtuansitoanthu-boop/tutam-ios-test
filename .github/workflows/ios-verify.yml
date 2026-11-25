@@ -17,6 +17,8 @@ on:
           - audio
           - journal
           - startup
+          - reminder-crud
+          - library-reader
   push:
     branches:
       - 'codex/qa-*'
@@ -206,6 +208,10 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeSimulatorSnapshotTests)
           elif [ "$IOS_TEST_SUITE" = "audio" ]; then
             testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
+          elif [ "$IOS_TEST_SUITE" = "reminder-crud" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarSolarCrudInvalidDateCancelAndPersistence)
+          elif [ "$IOS_TEST_SUITE" = "library-reader" ]; then
+            testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests/testOfflineLibrarySearchChapterReadingAndLargeTextRotation)
           elif [ "$IOS_TEST_SUITE" = "picker" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarPickerWithMotionDisabled)
           fi
@@ -275,6 +281,10 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeSimulatorSnapshotTests)
           elif [ "$IOS_TEST_SUITE" = "audio" ]; then
             testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
+          elif [ "$IOS_TEST_SUITE" = "reminder-crud" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarSolarCrudInvalidDateCancelAndPersistence)
+          elif [ "$IOS_TEST_SUITE" = "library-reader" ]; then
+            testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests/testOfflineLibrarySearchChapterReadingAndLargeTextRotation)
           elif [ "$IOS_TEST_SUITE" = "picker" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarPickerWithMotionDisabled)
           fi
@@ -300,9 +310,9 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'guest':4,'extended':5,'reminders':3,'snapshots':2,'picker':1,'audio':1}.get(suite,3)
+          min_passed={'guest':4,'extended':5,'reminders':3,'snapshots':2,'picker':1,'audio':1,'reminder-crud':1,'library-reader':1}.get(suite,3)
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
-          if suite in ('picker', 'audio'):
+          if suite in ('picker', 'audio', 'reminder-crud', 'library-reader'):
             assert data['passedTests'] == 1, 'Expected exactly the requested native regression'
           assert data['failedTests'] == 0, 'Native UI test failures'
           assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'
