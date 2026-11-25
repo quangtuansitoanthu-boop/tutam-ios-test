@@ -54,3 +54,26 @@ it.each(['input', 'textarea', 'contenteditable'])('preserves focused %s during t
   expect(document.querySelector('.notification-modal-card')).not.toBeNull();
   expect(permissions.read).toHaveBeenCalledTimes(2);
 });
+
+it.each(['pointerup', 'pointercancel'])('waits for %s before presenting after a pointer leaves the editor', async endEvent => {
+  const editor = document.createElement('input');
+  const done = document.createElement('button');
+  document.body.append(editor, done);
+  editor.focus();
+  await vi.advanceTimersByTimeAsync(1800);
+  await vi.dynamicImportSettled();
+  // jsdom lacks PointerEvent but dispatches its event types through the DOM normally.
+  const pointer = (type: string) => Object.assign(new Event(type, { bubbles: true }), { pointerId: 11, isPrimary: true });
+  done.dispatchEvent(pointer('pointerdown'));
+  done.focus();
+  await vi.advanceTimersByTimeAsync(150);
+  flushSync();
+  expect(document.querySelector('.notification-modal-card')).toBeNull();
+  expect(permissions.read).toHaveBeenCalledTimes(1);
+  done.dispatchEvent(pointer(endEvent));
+  expect(document.querySelector('.notification-modal-card')).toBeNull();
+  await vi.advanceTimersByTimeAsync(32);
+  flushSync();
+  expect(document.querySelector('.notification-modal-card')).not.toBeNull();
+  expect(permissions.read).toHaveBeenCalledTimes(2);
+});

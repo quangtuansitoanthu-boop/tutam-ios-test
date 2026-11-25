@@ -799,6 +799,10 @@ test.describe("reader and books admin", () => {
     const pending = new Promise<void>(resolve => { release = resolve; });
     let pdfRequested = false;
     await page.route(url => url.pathname.endsWith('/assets/pdfs/bai-viet-mau-gieo-nhan-lanh.pdf'), async route => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
       pdfRequested = true;
       await pending;
       await route.continue();
@@ -819,8 +823,8 @@ test.describe("reader and books admin", () => {
       await expect(ebookReader.locator(".toc-count")).toBeVisible();
     } finally {
       release();
-      await page.unrouteAll({ behavior: 'wait' });
     }
+    await page.unrouteAll({ behavior: 'wait' });
     await expect(ebookReader).toBeVisible();
     await expect(pdfReader).toHaveCount(0);
     expect(pageErrors).toEqual([]);

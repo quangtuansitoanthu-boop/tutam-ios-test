@@ -67,3 +67,29 @@ jobs:
           name: web-feature-results-${{ matrix.shard }}
           path: web-results.json
           retention-days: 3
+
+  startup-input:
+    name: Mounted startup editing and pointer regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Run the delayed-permission input regressions
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const cfg = JSON.parse(fs.readFileSync('tests/e2e/wrangler.sveltekit.jsonc','utf8'));
+          cfg.main='dist-sveltekit/_worker.js';
+          cfg.assets.directory='./dist-sveltekit';
+          cfg.d1_databases[0].migrations_dir='migrations';
+          fs.writeFileSync('wrangler.sveltekit.jsonc',JSON.stringify(cfg));
+          JS
+          npx --no-install svelte-kit sync
+          npm run test:copying-editor -- tests/component/notifications/startup-editing.browser.spec.ts

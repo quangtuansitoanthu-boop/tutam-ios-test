@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { deferStartupNotification, loginAsMember, TEST_MEMBER_ID } from './runtime-helpers';
+import { deferStartupNotification, loginAsMember, settleClient, TEST_MEMBER_ID } from './runtime-helpers';
 
 const settingsKey = 'quangtu_principal_v1:anonymous:tt_personal_settings_v1';
 const modes = [
@@ -58,6 +58,7 @@ for (const width of [375, 1100]) {
     await page.setViewportSize({ width, height: 844 });
     await page.addInitScript(dark => localStorage.setItem('tutam_dark_mode', dark ? '1' : '0'), width === 375);
     await page.goto('/tu-tap');
+    await settleClient(page);
     const catalogNames = page.locator('.tt-practice-groups .tt-mode-title');
     await expect(catalogNames).toHaveText(modes);
     const editor = await openEditor(page);
