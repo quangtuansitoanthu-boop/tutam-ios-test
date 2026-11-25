@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - 'codex/qa-*'
+      - 'codex/android-ci-*'
 
 permissions:
   contents: read
@@ -48,8 +49,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/android-device-evidence
+          cat > "$RUNNER_TEMP/tutam-qa.init.gradle" <<'GRADLE'
+          gradle.beforeProject { project ->
+              if (project.path == ':app') {
+                  project.pluginManager.withPlugin('com.android.application') {
+                      project.android.buildTypes.getByName('debug').applicationIdSuffix = '.securityqa'
+                  }
+              }
+          }
+          GRADLE
           bash android/gradlew -p android --no-daemon -Dorg.gradle.jvmargs=-Xmx4096m \
-            -PqaApplicationIdSuffix=.securityqa \
+            --init-script "$RUNNER_TEMP/tutam-qa.init.gradle" \
             :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Verify Android JVM test results
         run: |
