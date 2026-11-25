@@ -196,6 +196,25 @@ jobs:
           cd build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app/public
           node -e "const album=require('./offline-data/talks.json').find(row=>row.id==='pt_drive_9332ba09c8672ac69faf1ed7fca0a8b9'); require('node:assert/strict').equal(album.tracks[0].url,'/assets/audio/nhac-thien-01.m4a')"
           afinfo assets/audio/nhac-thien-01.m4a
+      - name: Warm the simulator WebView before starting the audio test
+        if: env.IOS_TEST_SUITE == 'audio'
+        run: |
+          set -euo pipefail
+          app=build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app
+          id=vn.quangtu.tutam
+          xcrun simctl install "$TUTAM_QA_SIMULATOR" "$app"
+          xcrun simctl launch "$TUTAM_QA_SIMULATOR" "$id" -tutam-qa-events 1
+          data="$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" "$id" data)"
+          trace="$data/Library/Caches/tutam-qa-events.jsonl"
+          for attempt in {1..120}; do
+            if grep -q '"type":"installed"' "$trace" 2>/dev/null && grep -q '"phase":"didFinish"' "$trace"; then
+              echo "WKWebView completed navigation after ${attempt}s."
+              break
+            fi
+            sleep 1
+          done
+          if [ -f "$trace" ]; then cp "$trace" build/release-evidence/audio-prewarm-events.jsonl; fi
+          xcrun simctl terminate "$TUTAM_QA_SIMULATOR" "$id"
       - name: Verify packaged Google privacy manifests
         run: |
           app='build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app'

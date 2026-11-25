@@ -38,6 +38,23 @@ class NativeGuestUITestCase: XCTestCase {
         app.launchArguments = ["-tutam-qa-events", "1", "-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
         app.launch()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30), "Native WKWebView must load")
+        if retryCancelledPromptTap {
+            let startupPrompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
+                format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
+            )).firstMatch
+            let visible = NSPredicate { _, _ in app.links["Cá nhân"].firstMatch.exists || startupPrompt.exists }
+            let ready = XCTNSPredicateExpectation(predicate: visible, object: NSObject())
+            if XCTWaiter.wait(for: [ready], timeout: 120) != .completed {
+                evidence("audio-setup-before-relaunch", app: app)
+                XCTAssertFalse(app.webViews.firstMatch.buttons.firstMatch.exists,
+                               "A rendered page with unexpected controls must remain visible for diagnosis")
+                app.terminate()
+                app.launch()
+                let retried = XCTNSPredicateExpectation(predicate: visible, object: NSObject())
+                XCTAssertEqual(XCTWaiter.wait(for: [retried], timeout: 120), .completed,
+                               "The simulator WebView must reach startup UI before testing playback")
+            }
+        }
         deferStartupNotificationPrompt(app, timeout: 15, retryCancelledTap: retryCancelledPromptTap)
         let personalTab = app.links["Cá nhân"].firstMatch
         if !personalTab.waitForExistence(timeout: 20) { deferStartupNotificationPrompt(app, retryCancelledTap: retryCancelledPromptTap) }
