@@ -694,11 +694,18 @@ final class NativeNotificationTypingTests: NativeGuestUITestCase {
         XCTAssertEqual(search.value as? String, "kinh sach")
         evidence("notification-resume-with-real-keyboard", app: app)
 
-        let done = app.toolbars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray)).firstMatch
-        XCTAssertTrue(done.waitForExistence(timeout: 10) && done.isHittable)
-        done.tap()
+        let filter = app.buttons["Lọc"].firstMatch
+        XCTAssertTrue(filter.waitForExistence(timeout: 10) && filter.isHittable)
+        filter.press(forDuration: 0.15)
+        if keyboard.exists && !prompt.exists {
+            let done = app.toolbars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray)).firstMatch
+            XCTAssertTrue(done.waitForExistence(timeout: 5) && done.isHittable)
+            done.tap()
+        }
         XCTAssertTrue(prompt.waitForExistence(timeout: 15), "After editing ends the pending notification dialog must appear")
         deferStartupNotificationPrompt(app)
+        let categories = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Lọc theo danh mục")).firstMatch
+        XCTAssertTrue(categories.waitForExistence(timeout: 10), "The held Filter tap must open the category control")
         XCTAssertEqual(search.value as? String, "kinh sach")
     }
 }

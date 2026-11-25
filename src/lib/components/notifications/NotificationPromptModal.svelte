@@ -30,6 +30,7 @@
   let wasBlocked = false;
   let readyToPrompt = false;
   let waitingForEditor = false;
+  let editorPointer: number | null = null;
 
   const isAuthenticated = $derived(Boolean(session?.authenticated));
 
@@ -76,7 +77,7 @@
       onActiveChange?.(false);
       return;
     }
-    if (isEditingText()) {
+    if (editorPointer !== null || isEditingText()) {
       waitingForEditor = true;
       return;
     }
@@ -170,14 +171,28 @@
 
     let focusFrame = 0;
     const retryAfterEditing = () => {
-      if (!waitingForEditor || focusFrame) return;
+      if (!waitingForEditor || editorPointer !== null || focusFrame) return;
       focusFrame = requestAnimationFrame(() => {
         focusFrame = 0;
-        if (document.visibilityState === 'hidden' || isEditingText()) return;
+        if (document.visibilityState === 'hidden' || editorPointer !== null || isEditingText()) return;
         waitingForEditor = false;
         void checkAndPrompt();
       });
     };
+    // Buttons take focus on pointerdown, before their click has had a chance to run.
+    const startEditorPointer = (event: PointerEvent) => {
+      if (event.isPrimary && isEditingText()) editorPointer = event.pointerId;
+    };
+    const endEditorPointer = (event: PointerEvent) => {
+      if (event.pointerId !== editorPointer) return;
+      editorPointer = null;
+      retryAfterEditing();
+    };
+    const forgetEditorPointer = () => { editorPointer = null; };
+    window.addEventListener('pointerdown', startEditorPointer, true);
+    window.addEventListener('pointerup', endEditorPointer, true);
+    window.addEventListener('pointercancel', endEditorPointer, true);
+    window.addEventListener('blur', forgetEditorPointer);
     document.addEventListener('focusout', retryAfterEditing);
 
     const onVisibilityChange = () => {
@@ -206,6 +221,10 @@
 
     return () => {
       disposed = true;
+      window.removeEventListener('pointerdown', startEditorPointer, true);
+      window.removeEventListener('pointerup', endEditorPointer, true);
+      window.removeEventListener('pointercancel', endEditorPointer, true);
+      window.removeEventListener('blur', forgetEditorPointer);
       document.removeEventListener('focusout', retryAfterEditing);
       cancelAnimationFrame(focusFrame);
       clearTimeout(timer);

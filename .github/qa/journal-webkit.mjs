@@ -36,10 +36,19 @@ function exerciseInitialNotificationFocus() {
     await wait('automatic permission check while focused',()=>permissionChecks>before);
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
     if(prompt() || document.activeElement!==field || field.value!=='kinh')throw Error('startup dialog interrupted input');
-    field.blur();
+    const filter=document.querySelector('button[aria-controls="library-options"]');
+    if(!filter || filter.getAttribute('aria-expanded')!=='false')throw Error('missing collapsed library filter');
+    const pointer={bubbles:true,cancelable:true,isPrimary:true,pointerId:1,pointerType:'touch',button:0};
+    filter.dispatchEvent(new PointerEvent('pointerdown',pointer));
+    filter.focus();
+    await new Promise(r=>setTimeout(r,180));
+    if(prompt())throw Error('permission dialog interrupted held Filter action');
+    filter.dispatchEvent(new PointerEvent('pointerup',pointer));
+    filter.click();
+    await wait('Filter action must be delivered',()=>filter.getAttribute('aria-expanded')==='true');
     const dialog=await wait('automatic prompt after editing',prompt);
     if(field.value!=='kinh')throw Error('typed text lost after blur');
-    return {passed:true,permissionChecks,retained:field.value,dialog:dialog.getAttribute('aria-label')};
+    return {passed:true,permissionChecks,retained:field.value,filterExpanded:filter.getAttribute('aria-expanded'),holdMs:180,dialog:dialog.getAttribute('aria-label')};
   }
   addEventListener('DOMContentLoaded',()=>{
     scenario().catch(e=>({passed:false,reason:String(e)})).then(result=>

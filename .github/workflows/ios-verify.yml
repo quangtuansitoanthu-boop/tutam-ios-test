@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(github.event_name == 'push' && '["guest","extended","reminders","snapshots","audio","typing"]' || inputs.test_suite == 'full' && '["guest","extended","reminders","snapshots"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
+        suite: ${{ fromJSON(github.ref_name == 'codex/qa-final-gesture-20261126' && github.event_name == 'push' && '["typing","journal","extended"]' || github.event_name == 'push' && '["guest","extended","reminders","snapshots","audio","typing"]' || inputs.test_suite == 'full' && '["guest","extended","reminders","snapshots"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     runs-on: macos-15
     timeout-minutes: 70
     env:
