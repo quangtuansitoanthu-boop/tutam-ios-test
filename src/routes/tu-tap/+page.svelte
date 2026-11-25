@@ -4017,6 +4017,7 @@
     };
 
     const popState = () => {
+      handledHistoryBackPending = false;
       toolNavigationGeneration += 1;
       if (ignoreNextHandledPopState) { ignoreNextHandledPopState = false; return; }
       const targetUrl = new URL(window.location.href);

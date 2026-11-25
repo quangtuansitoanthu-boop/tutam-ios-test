@@ -5,12 +5,79 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const root = path.resolve('ios/App/App/public');
-const origin = 'http://127.0.0.1:8793';
+const practiceHistory = process.argv.includes('--practice-history');
+const port = practiceHistory ? 8794 : 8793;
+const origin = 'http://127.0.0.1:'+port;
 const member = { id: 'qa-journal', role: 'user', displayName: 'QA', avatarUrl: '', email: '' };
 let finish;
 const result = new Promise(resolve => { finish = resolve; });
 const posts = [];
 const requests = [];
+
+function exercisePracticeHistory() {
+  const visible = node => node && node.getClientRects().length > 0;
+  const all = selector => [...document.querySelectorAll(selector)].filter(visible);
+  const current = () => location.pathname + location.search;
+  const find = async (label, read) => {
+    for (let i = 0; i < 200; i++) {
+      const permission = all('dialog[open] button').find(b => b.textContent.trim() === 'Để sau');
+      if (permission) permission.click();
+      const value = read();
+      if (value) return value;
+      await new Promise(resolve => setTimeout(resolve, 120));
+    }
+    throw Error(label + ' at ' + current() + ', heading ' + (all('h1').map(x=>x.textContent).join(' | ')));
+  };
+  const click = async (name, locate) => {
+    const control = await find(name, locate);
+    control.scrollIntoView({block:'center'});
+    control.click();
+  };
+  const card = () => all('.tt-grid .tt-card').find(n => n.textContent.toLocaleUpperCase('vi').includes('ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN'));
+  const toc = () => all('.tt-preview__toc-list > button')[0];
+  const back = () => all('.tt-topbar .tt-back-btn,.qts-nav .nav-back-circle-btn')[0];
+  const hub = () => all('.tt-mode-card--kinh')[0] && all('.tt-page-header .tt-page-title')[0] && current()==='/tu-tap';
+  const marker = 'tutam-simulator-history-reload';
+  const cleanSearch = () => !new URL(location.href).searchParams.has('chap');
+  async function scenario() {
+    await find('mounted visit', () => document.querySelector('[data-mounted="1"]'));
+    const prior = sessionStorage.getItem(marker);
+    if (prior) {
+      await find('reload must reopen the hub', hub);
+      const path = JSON.parse(prior);
+      sessionStorage.removeItem(marker);
+      return {passed:true,path:[...path,current()],reloaded:true};
+    }
+    const path = [];
+    await find('reading hub with clean URL', hub);
+    path.push(current());
+    await click('choose reading category', () => all('.tt-mode-card--kinh')[0]);
+    await find('list route and offline article', () => new URL(location.href).searchParams.get('muc')==='kinh' && card());
+    path.push(current());
+    await click('open Earth Store Sutra',card);
+    await find('table of contents',toc);
+    path.push(current());
+    await click('open chapter',toc);
+    await find('chapter URL and rendered text', () => new URL(location.href).searchParams.has('chap') && all('.tt-reader-chapter-title')[0]);
+    path.push(current());
+    await click('return to chapters', () => all('.tt-reader-back-btn')[0]);
+    await find('chapter cleared and contents visible', () => cleanSearch() && toc());
+    path.push(current());
+    await click('header Back to reading category',back);
+    await find('category restored', () => current()==='/tu-tap?muc=kinh' && card());
+    path.push(current());
+    await click('header Back to practice hub',back);
+    await find('hub must clear category query',hub);
+    path.push(current());
+    sessionStorage.setItem(marker,JSON.stringify(path));
+    location.reload();
+    return new Promise(()=>{});
+  }
+  addEventListener('DOMContentLoaded',()=>{
+    scenario().catch(e=>({passed:false,reason:String(e)})).then(result=>
+      fetch('/__qa-result',{method:'POST',body:JSON.stringify(result)}));
+  },{once:true});
+}
 
 function exercise() {
   const wait = async (name, verify) => {
@@ -101,7 +168,7 @@ const server=createServer(async (req,res)=>{
       json({});return;
     }
     if(route==='/api/session'||route==='/api/auth/session'){json({authenticated:true,user:member,csrfToken:'qa-fixture',expiresAt:'2099-01-01T00:00:00.000Z'});return}
-    if(route.startsWith('/api/')){json({items:[],nextCursor:null});return}
+    if(route.startsWith('/api/')){if(practiceHistory) json({error:'Offline fixture'},503);else json({items:[],nextCursor:null});return}
     let file=path.resolve(root,'.'+decodeURIComponent(route));
     if(file!==root&&!file.startsWith(root+path.sep)){json({},400);return}
     if(!existsSync(file)||!statSync(file).isFile()){
@@ -113,12 +180,12 @@ const server=createServer(async (req,res)=>{
       res.setHeader('Set-Cookie','quangtu_session=qa-local-fixture; Path=/; HttpOnly; SameSite=Lax');
       res.setHeader('Cache-Control','no-store');
       res.setHeader('Content-Security-Policy',"connect-src 'self'; worker-src 'none'");
-      res.end(bytes.toString().replace('<head>','<head><script>('+exercise.toString()+')()</script>'));return;
+      res.end(bytes.toString().replace('<head>','<head><script>('+(practiceHistory ? exercisePracticeHistory : exercise).toString()+')()</script>'));return;
     }
     res.end(bytes);
   }catch {json({error:'fixture'},500)}
 });
-await new Promise((ok,fail)=>{server.once('error',fail);server.listen(8793,'127.0.0.1',ok)});
+await new Promise((ok,fail)=>{server.once('error',fail);server.listen(port,'127.0.0.1',ok)});
 let browser;
 try{
  if(process.env.TUTAM_QA_SIMULATOR) execFileSync('xcrun',['simctl','openurl',process.env.TUTAM_QA_SIMULATOR,origin+'/tu-tap']);
@@ -130,6 +197,6 @@ try{
  const timer=setTimeout(()=>finish({passed:false,reason:'Fixture timed out',posts,requests:requests.slice(-45)}),115000);let out;
  try{out=await result}finally{clearTimeout(timer)}
  console.log(JSON.stringify(out));
- if(process.env.TUTAM_QA_SIMULATOR)writeFileSync('build/release-evidence/journal-webkit.json',JSON.stringify(out));
- if(!out.passed||out.posts?.join(',')!=='repentance,good_deed')process.exitCode=1;
+ if(process.env.TUTAM_QA_SIMULATOR)writeFileSync('build/release-evidence/'+(practiceHistory?'practice-history.json':'journal-webkit.json'),JSON.stringify(out));
+ if(!out.passed||(practiceHistory ? !out.reloaded : out.posts?.join(',')!=='repentance,good_deed'))process.exitCode=1;
 }finally{await browser?.close();server.closeAllConnections();server.close();}

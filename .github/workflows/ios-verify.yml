@@ -361,7 +361,9 @@ jobs:
       - name: Verify 48-hour journal feedback on real simulator WebKit with loopback-only fixtures
         if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'journal') && env.TUTAM_QA_HOSTS_ISOLATED == '1'
         timeout-minutes: 3
-        run: node .github/qa/journal-webkit.mjs
+        run: |
+          node .github/qa/journal-webkit.mjs
+          node .github/qa/journal-webkit.mjs --practice-history
       - name: Verify system URL deliveries from XCTest on the installed native app
         if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'extended') && env.TUTAM_QA_HOSTS_ISOLATED == '1'
         run: python3 .github/qa/ios-native-evidence.py links
@@ -420,6 +422,7 @@ jobs:
           path: |
             build/release-evidence/native-ui-summary.json
             build/release-evidence/journal-webkit.json
+            build/release-evidence/practice-history.json
             build/release-evidence/native-link-receipts.json
             build/release-evidence/native-startup-paint.json
             build/release-evidence/startup-controlled-webkit.json
