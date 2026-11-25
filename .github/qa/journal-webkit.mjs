@@ -38,15 +38,31 @@ function exercise() {
   async function test() {
     await wait('app mounted',()=>document.querySelector('[data-mounted="1"]'));
     (await wait('journal entry',()=>select('.tt-mode-card--reflection'))).click();
-    const guide=await wait('journal guide or form',()=>select('[data-testid=reflection-guide]')||select('#panel-repentance'));
-    if(guide.matches('[data-testid=reflection-guide]')) (await wait('guide action',()=>btn(guide,'Tôi đã hiểu, Bắt đầu quán chiếu →'))).click();
-    await wait('authenticated journal ready',()=>select('.journal-columns')&&!document.querySelector('.personal-journal p.notice'));
+    const acceptedGuides = new WeakSet();
+    await wait('authenticated journal ready', () => {
+      const guide = select('.personal-journal [data-testid=reflection-guide]');
+      if (guide && !acceptedGuides.has(guide)) {
+        const action = btn(guide, 'Tôi đã hiểu, Bắt đầu quán chiếu →');
+        if (action) {
+          acceptedGuides.add(guide);
+          action.click();
+        }
+      }
+      return select('#panel-repentance textarea') && !document.querySelector('.personal-journal p.notice');
+    });
     input(await wait('nickname',()=>select('input[aria-label="Biệt danh đồng tu"]')),'Đồng Tu QA');
     const evidence=[];
     for(const [id,share] of [['repentance','Gửi cộng đồng sám hối'],['good-deed','Chia sẻ việc lành']]){
       document.querySelector('#tab-'+id).click();
       const panel=await wait('active panel '+id,()=>select('#panel-'+id));
-      input(select('textarea',panel),'Hôm nay tôi tập lắng nghe và giữ tâm an lành. '.repeat(6));
+      const textarea=select('textarea',panel);
+      const editorHeight=textarea.getBoundingClientRect().height;
+      const snippets=[...panel.querySelectorAll('.snippet-pill')].filter(visible);
+      const minSnippet=snippets.length ? Math.min(...snippets.flatMap(el=>{
+        const {width,height}=el.getBoundingClientRect();return [width,height];
+      })) : 0;
+      if(editorHeight<280 || minSnippet<44)throw Error('journal layout '+JSON.stringify({id,editorHeight,minSnippet}));
+      input(textarea,'Hôm nay tôi tập lắng nghe và giữ tâm an lành. '.repeat(6));
       const send=await wait('send '+id,()=>btn(panel,share));send.scrollIntoView({block:'center'});send.click();
       (await wait('confirm '+id,()=>btn(document,'Đồng ý chia sẻ'))).click();
       const dlg=await wait('48 hour alert '+id,()=>{const node=select('dialog[data-app-message]');return node?.querySelector('p')?.textContent===exact&&node});
@@ -61,7 +77,7 @@ function exercise() {
       const deadline=await wait('48h date '+id,()=>{const d=card.querySelectorAll('time');return d.length===2&&Date.parse(d[1].dateTime)-Date.parse(d[0].dateTime)===48*3600000});
       btn(card,'Thu gọn').click();
       await wait('collapse '+id,()=>!select('time',card));
-      evidence.push({id,height,deadline});
+      evidence.push({id,height,deadline,editorHeight,minSnippet});
     }
     return {passed:true,evidence,width:innerWidth};
   }
