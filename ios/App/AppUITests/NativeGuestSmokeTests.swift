@@ -103,16 +103,20 @@ class NativeGuestUITestCase: XCTestCase {
 
     @MainActor
     func openNativeLink(_ url: URL, app: XCUIApplication) {
-        app.open(url)
+        XCUIDevice.shared.system.open(url)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let titles = ["Open in “Tu tập”?", "Mở trong “Tu tập”?"] as NSArray
-        let prompt = springboard.alerts.matching(NSPredicate(format: "label IN %@", titles)).firstMatch
-        guard prompt.waitForExistence(timeout: 4) else { return }
+        let prompt = springboard.alerts.firstMatch
         let open = prompt.buttons.matching(NSPredicate(format: "label IN %@", ["Open", "Mở"] as NSArray)).firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 5) && open.isHittable,
-                      "The system confirmation must offer its actual Open action for Tu tập")
-        open.tap()
-        waitUntil("The system confirmation for Tu tập must close after choosing Open") { !prompt.exists }
+        if open.waitForExistence(timeout: 6) {
+            let appName = NSPredicate(format: "label CONTAINS[cd] %@", "Tu tập")
+            XCTAssertTrue(prompt.label.localizedCaseInsensitiveContains("Tu tập")
+                          || prompt.staticTexts.matching(appName).firstMatch.exists,
+                          "The Open action must belong to the system confirmation for Tu tập")
+            XCTAssertTrue(open.isHittable)
+            open.tap()
+            waitUntil("The system confirmation for Tu tập must close after choosing Open") { !prompt.exists }
+        }
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "The system must deliver the URL to Tu tập")
     }
 
     @MainActor
@@ -497,7 +501,7 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         XCTAssertFalse(app.staticTexts["Không thể tải ảnh. Vui lòng thử lại."].firstMatch.exists)
         tap(saveImage, app: app)
 
-        // Nhận diện owner Files thật; iOS có thể công bố nút Hủy dưới dạng Other.
+        // iOS 26 exposes an off-sheet “Hủy” at the same screen position as the Files More button.
         let pickerNavigation = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].firstMatch
         let pickerSave = pickerNavigation.buttons.matching(NSPredicate(format: "label IN %@", ["Lưu", "Save"] as NSArray)).firstMatch
         XCTAssertTrue(pickerSave.waitForExistence(timeout: 20), "PNG export must present the native Files destination picker instead of a blob navigation")
@@ -505,28 +509,19 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         XCTAssertFalse(saveImage.isEnabled, "The export promise must remain pending while the native picker owns the file")
         evidence("quote-image-native-files-picker", app: app)
         let cancelLabels = NSPredicate(format: "label IN %@", ["Hủy", "Cancel"] as NSArray)
-        let viewport = app.frame
-        let header = pickerNavigation.frame
-        let saveFrame = pickerSave.frame
-        let candidates = app.buttons.matching(cancelLabels).allElementsBoundByIndex +
-            app.otherElements.matching(cancelLabels).allElementsBoundByIndex
-        guard let cancel = candidates.first(where: { element in
-            let frame = element.frame
-            return frame.width > 0 && frame.height > 0 && viewport.contains(frame) &&
-                header.contains(frame) && frame.midX < saveFrame.midX && abs(frame.midY - saveFrame.midY) <= 4
-        }) else {
-            evidence("quote-image-files-cancel-not-reachable", app: app)
-            XCTFail("The native Files header must expose a reachable cancellation action")
-            return
-        }
-        if cancel.isHittable {
+        let cancel = pickerNavigation.buttons.matching(cancelLabels).firstMatch
+        if cancel.exists && cancel.isHittable {
             cancel.tap()
         } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: (cancel.frame.midX - viewport.minX) / viewport.width,
-                dy: (cancel.frame.midY - viewport.minY) / viewport.height)).tap()
+            let sheet = app.otherElements["Browse View (Picker)"].firstMatch
+            XCTAssertTrue(sheet.exists, "The Files sheet must be available for interactive dismissal")
+            let handle = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+            let bottom = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.94))
+            handle.press(forDuration: 0.1, thenDragTo: bottom)
         }
+        waitUntil("The native Files destination must dismiss when canceled") { !pickerNavigation.exists }
         waitUntil("Cancel must return to the existing quote dialog and settle its export state") {
-            !pickerSave.exists && title.exists && saveImage.exists && saveImage.isEnabled
+            title.exists && saveImage.exists && saveImage.isEnabled
         }
         reveal(saveImage, app: app)
         XCTAssertTrue(insideViewport(saveImage, app: app), "Cancel must leave the quote image action reachable")

@@ -109,12 +109,21 @@
 </script>
 
 <section id="content-updates" class="content-update-card" aria-labelledby="content-update-title">
-  <div class="content-update-copy">
-    <h2 id="content-update-title">{t.title}</h2>
-    <p>{t.hint}</p>
+  <div class="content-update-left">
+    <span class="content-update-icon" aria-hidden="true">↻</span>
+    <div class="content-update-copy">
+      <h2 id="content-update-title">{t.title}</h2>
+      <p>{locale.current === 'en' ? 'Books, sutras & Dharma talks' : 'Sách, kinh, Pháp thoại mới'} · {native ? t.scheduled : t.manual}</p>
+    </div>
   </div>
-  <button class="primary" type="button" onclick={() => check()} aria-disabled={busy} aria-haspopup="dialog"><span aria-hidden="true">↻</span>{t.title}</button>
-  <small>{native ? t.scheduled : t.manual}</small>
+  <button
+    class="primary"
+    type="button"
+    onclick={() => check()}
+    aria-label={t.title}
+    aria-disabled={busy}
+    aria-haspopup="dialog"
+  >{locale.current === 'en' ? 'Update' : 'Cập nhật'}</button>
 </section>
 
 {#if open}
@@ -163,17 +172,18 @@
 {/if}
 
 <style>
-  .content-update-card{display:grid;gap:calc(var(--space-page)*.6);width:100%;min-width:0;box-sizing:border-box;padding:var(--space-page);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--card);color:var(--text);text-align:start}
-  .content-update-copy{display:grid;gap:calc(var(--space-page)*.3);min-width:0}
-  h2{margin:0;font:inherit;font-weight:700;font-size: var(--font-size-card-title);color:var(--text)}
+  .content-update-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;min-width:0;box-sizing:border-box;padding:12px 13px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--card);color:var(--text);box-shadow:var(--shadow-sm);text-align:start}
+  .content-update-left{display:flex;align-items:center;gap:10px;min-width:0}
+  .content-update-icon{display:grid;place-items:center;width:36px;height:36px;flex-shrink:0;border-radius:11px;background:var(--gold-light);border:1px solid var(--gold-muted);color:var(--brown);font-size:17px;font-weight:700}
+  .content-update-copy{display:grid;gap:2px;min-width:0}
+  h2{margin:0;font:inherit;font-weight:700;font-size:var(--font-size-card-title);line-height:1.3;color:var(--text)}
   p{line-height:1.6;color:var(--text2);overflow-wrap:anywhere}
-  .content-update-copy p{margin:0;font-size: var(--font-size-body);line-height:1.6;text-align:justify;text-align-last:start}
+  .content-update-copy p{margin:0;font-size:var(--font-size-meta);line-height:1.4;color:var(--muted)}
   button{min-height:44px;padding:calc(var(--space-page)/2) var(--space-page);border:1px solid var(--border);border-radius:var(--radius-control);background:var(--bg2);color:var(--text);font:inherit;font-weight:600;cursor:pointer}
   button:disabled{opacity:.65;cursor:wait}
   button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
   .primary{background:var(--gold);color:var(--on-gold);border-color:var(--gold)}
-  .content-update-card>button{display:flex;align-items:center;justify-content:center;gap:calc(var(--space-page)*.4);width:100%;box-sizing:border-box}
-  .content-update-card>small{margin:0;font-size: var(--font-size-meta);line-height:1.5}
+  .content-update-card>button{display:inline-flex;align-items:center;justify-content:center;padding:0 14px;border-radius:12px;font-size:var(--font-size-label);font-weight:700;white-space:nowrap;flex-shrink:0}
   small{display:block;color:var(--muted);font-size:var(--font-size-meta);line-height:1.5;margin-top:calc(var(--space-page)/2)}
   dialog{inset:0;margin:auto;width:min(var(--practice-dialog-width),calc(100% - 2 * var(--space-page)));max-height:min(var(--practice-dialog-height),calc(100dvh - 2 * var(--space-page)));box-sizing:border-box;padding:var(--space-page);border:1px solid var(--dialog-surface-border,var(--border));border-radius:var(--radius-card);background:var(--dialog-surface-background,var(--card));box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));color:var(--text);font-family:var(--font-app);overflow:auto}
   dialog::backdrop{background:var(--practice-dialog-backdrop)}
@@ -188,9 +198,4 @@
   .notice h3{margin:0 0 calc(var(--space-page)*.4);font-size:var(--font-size-body);color:var(--brown-dark)}
   .notice p:last-child{margin-bottom:0}.secondary{font-size:var(--font-size-meta)}.book-name{font-weight:700;color:var(--text)}.success{font-weight:700;color:var(--green-ok)}
   progress{width:100%;accent-color:var(--gold)}
-  @media(min-width:640px){
-    .content-update-card{grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:var(--space-page)}
-    .content-update-card>button{width:auto;min-width:calc(var(--space-page)*11)}
-    .content-update-card>small{grid-column:1/-1}
-  }
 </style>

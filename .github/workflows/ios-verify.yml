@@ -11,6 +11,8 @@ on:
         options:
           - smoke
           - full
+          - guest
+          - extended
           - picker
           - audio
           - journal
@@ -63,8 +65,12 @@ jobs:
           npx vitest run --config tests/unit/vitest.config.ts tests/unit/facebook-limited-token.test.ts tests/unit/facebook-limited-identity.test.ts tests/unit/native-auth-security.test.ts tests/unit/native-login-transport.test.ts
       - name: Check bundled content update regressions
         run: npm run test:unit -- tests/unit/content-update-client.test.ts tests/unit/build-content-sync.test.ts tests/unit/content-update-pdf-transition.test.ts
-      - name: Select bundled media for the simulator audio fixture
-        if: env.IOS_TEST_SUITE == 'audio'
+      - name: Verify the repaired Home controls and reminder card
+        if: env.IOS_TEST_SUITE == 'guest'
+        run: |
+          npm run test:unit -- tests/unit/styles/home-daily-reminders.test.ts
+          npm run test:copying-editor -- tests/component/home/content-update-transition.browser.spec.ts
+      - name: Select the same bundled media fixture for all QA simulator builds
         run: |
           node --input-type=module <<'JS'
           import { readFileSync, writeFileSync } from 'node:fs';
@@ -308,7 +314,7 @@ jobs:
         timeout-minutes: 3
         run: node .github/qa/journal-webkit.mjs
       - name: Diagnose native URL delivery after XCTest evidence is saved
-        if: always() && env.TUTAM_QA_HOSTS_ISOLATED == '1' && env.IOS_TEST_SUITE != 'picker' && env.IOS_TEST_SUITE != 'audio' && env.IOS_TEST_SUITE != 'journal'
+        if: always() && env.TUTAM_QA_HOSTS_ISOLATED == '1' && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'extended')
         continue-on-error: true
         timeout-minutes: 3
         run: |
@@ -327,13 +333,13 @@ jobs:
           copy_trace() {
             if [ -f "$trace" ]; then cp "$trace" build/release-evidence/direct-openurl-events.jsonl; fi
           }
-          for attempt in {1..25}; do
-            if grep -q '"type":"installed"' "$trace" 2>/dev/null; then break; fi
+          for attempt in {1..55}; do
+            if grep -q '"phase":"listener-ready"' "$trace" 2>/dev/null; then break; fi
             sleep 1
           done
           copy_trace
-          if ! grep -q '"type":"installed"' "$trace"; then
-            echo 'WKWebView startup trace was unavailable before opening the URL.'
+          if ! grep -q '"phase":"listener-ready"' "$trace"; then
+            echo 'Native URL listener was unavailable before opening the URL.'
             exit 1
           fi
           xcrun simctl openurl "$simulator" 'vn.quangtu.tutam:///tu-tap/chep-kinh'
@@ -349,6 +355,10 @@ jobs:
             exit 1
           fi
           echo 'Confirmed a native openurl event reached the copying route in the running app.'
+      - name: Collect scrubbed iOS scene URL delivery phases
+        if: always() && (env.IOS_TEST_SUITE == 'guest' || env.IOS_TEST_SUITE == 'extended') && env.TUTAM_QA_SIMULATOR != ''
+        run: |
+          xcrun simctl spawn "$TUTAM_QA_SIMULATOR" log show --last 50m --style compact --predicate 'eventMessage CONTAINS "[TutamQALink]"' > build/release-evidence/native-link-phases.txt
       - name: Shut down the CI simulator before restoring network resolution
         if: always()
         run: |
@@ -382,6 +392,7 @@ jobs:
             build/release-evidence/native-ui-summary.json
             build/release-evidence/journal-webkit.json
             build/release-evidence/direct-openurl-screen.png
+            build/release-evidence/native-link-phases.txt
             build/release-evidence/*-events.jsonl
             build/release-evidence/native-ui-attachments/manifest.json
             build/release-evidence/native-ui-attachments/*.txt

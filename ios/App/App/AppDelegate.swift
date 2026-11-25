@@ -4,6 +4,11 @@ import Capacitor
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") {
+            NSLog("[TutamQALink] phase=app-open")
+        }
+#endif
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
 
@@ -21,6 +26,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             _ = openHomeShortcut(shortcut)
         }
         for context in connectionOptions.urlContexts {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") {
+            NSLog("[TutamQALink] phase=scene-cold")
+        }
+#endif
             openURL(context)
         }
         for activity in connectionOptions.userActivities {
@@ -48,6 +58,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
         for context in URLContexts {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") {
+            NSLog("[TutamQALink] phase=scene-warm")
+        }
+#endif
             openURL(context)
         }
     }
