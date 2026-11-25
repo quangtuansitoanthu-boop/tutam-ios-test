@@ -890,24 +890,44 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         evidence("practice-white-shared-theme-header-toolbar-footer", app: app)
         selectPracticePaper("Tự động", app: app)
         evidence("practice-auto-shared-theme", app: app)
-        let collapseControls = app.buttons["Thu gọn công cụ tu tập"].firstMatch
-        tap(collapseControls, app: app)
-        let increment = app.buttons["+1"].firstMatch
-        let decrement = app.buttons["-1"].firstMatch
-        let openControls = app.buttons["Mở công cụ tu tập"].firstMatch
+        let controls = app.otherElements.matching(NSPredicate(format: "label == %@", "Bảng điều khiển tu tập")).firstMatch
+        let collapseControls = controls.buttons["Thu gọn công cụ tu tập"].firstMatch
+        let increment = controls.buttons["+1"].firstMatch
+        let decrement = controls.buttons["-1"].firstMatch
+        let openControls = controls.buttons["Mở công cụ tu tập"].firstMatch
+        func tapFloatingControl(_ button: XCUIElement, collapsed: Bool = false) {
+            var previousFrame: CGRect?
+            waitUntil("The chosen floating control must settle in its visible panel before tapping") {
+                guard controls.exists && button.exists && button.isHittable else { return false }
+                let frame = button.frame
+                let panel = controls.frame
+                guard frame.width >= 44 && frame.height >= 44 && app.frame.contains(frame)
+                        && panel.insetBy(dx: -1, dy: -1).contains(frame) else { return false }
+                // A collapsed group contains the handle and the 8 pt flex gap. Its old footprint included Exit.
+                if collapsed && (panel.width > frame.width + 2 || panel.height > frame.height + 12) { return false }
+                let settled = previousFrame == frame
+                previousFrame = frame
+                return settled
+            }
+            let target = button.frame
+            let viewport = app.frame
+            app.coordinate(withNormalizedOffset: CGVector(dx: (target.midX - viewport.minX) / viewport.width,
+                dy: (target.midY - viewport.minY) / viewport.height)).tap()
+        }
+        tapFloatingControl(collapseControls)
         waitUntil("Collapsed practice controls must disappear from accessibility") {
             !increment.exists && !decrement.exists && openControls.exists
         }
         XCTAssertTrue(insideViewport(openControls, app: app) && openControls.isHittable, "Collapsed practice controls must retain a reachable opener")
-        openControls.tap()
+        evidence("practice-controls-collapsed-before-reopen", app: app)
+        tapFloatingControl(openControls, collapsed: true)
         XCTAssertTrue(increment.waitForExistence(timeout: 15))
-        let controls = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Bảng điều khiển tu tập")).firstMatch
         XCTAssertTrue(controls.staticTexts["0"].firstMatch.exists, "Fresh practice counter must start at zero")
-        tap(increment, app: app)
+        tapFloatingControl(increment)
         waitUntil("One increment must increase the real practice counter to exactly one") { controls.staticTexts["1"].firstMatch.exists }
-        tap(decrement, app: app)
+        tapFloatingControl(decrement)
         waitUntil("One decrement must restore the real practice counter to zero") { controls.staticTexts["0"].firstMatch.exists }
-        tap(collapseControls, app: app)
+        tapFloatingControl(collapseControls)
         waitUntil("Reclosed practice controls must remain absent from accessibility") {
             !increment.exists && !decrement.exists && openControls.exists
         }
