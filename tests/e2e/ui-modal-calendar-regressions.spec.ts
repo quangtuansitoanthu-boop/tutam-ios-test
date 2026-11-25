@@ -44,7 +44,7 @@ test('Escape closes only the nested rejection dialog and retains the editor draf
   await expect(editor).toBeVisible();
   const title = editor.getByLabel('Tiêu đề bài viết');
   await title.fill('Bản nháp quản trị chưa lưu');
-  const trigger = editor.getByRole('button', { name: 'Trả lại cho CTV', exact: true });
+  const trigger = editor.getByRole('button', { name: 'Yêu cầu chỉnh sửa', exact: true });
   await trigger.click();
   const rejection = page.locator('.reject-modal-overlay');
   await expect(rejection).toBeVisible();

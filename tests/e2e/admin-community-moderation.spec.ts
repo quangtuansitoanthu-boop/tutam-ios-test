@@ -20,7 +20,7 @@ test('moderation keeps rejection reason on failure and never submits duplicate d
     await new Promise<void>(resolve => { release = resolve; });
     await route.fulfill({ status: 503, json: { error: { code: 'unavailable', message: 'Chưa cập nhật được' } } });
   });
-  await page.goto('/admin/community');
+  await page.goto('/admin/community?moderation=comments');
   await settleClient(page);
   const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
   await moderation.getByRole('button', { name: /^(?:▼\s*)?Xem nội dung & ngữ cảnh$/u, exact: true }).click();
@@ -51,15 +51,10 @@ test('admin community shows two main queues and keeps reflection filters inside 
   });
   await page.goto('/admin/community');
   await settleClient(page);
-  const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
-  await expect(moderation).toBeVisible();
   const tabs = page.getByRole('navigation', { name: 'Hàng chờ kiểm duyệt', exact: true });
-  await expect(tabs.getByRole('button')).toHaveText(['Bình luận', 'Quán chiếu thiện ác']);
-  await expect(tabs.getByRole('button', { name: 'Bình luận', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('group', { name: 'Loại bài', exact: true })).toHaveCount(0);
-  await expect(moderation.getByText('Không có nội dung chờ xử lý', { exact: true })).toBeVisible();
-  await touchModeration(tabs.getByRole('button', { name: 'Quán chiếu thiện ác', exact: true }));
-  await expect.poll(() => reads).toEqual(['comments', 'mindful']);
+  await expect(tabs.getByRole('button')).toHaveText(['Quán chiếu thiện ác', 'Bình luận']);
+  await expect(tabs.getByRole('button', { name: 'Quán chiếu thiện ác', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => reads).toEqual(['mindful']);
   const mindful = page.getByRole('region', { name: 'Quán chiếu thiện ác', exact: true });
   await expect(mindful.getByText('Không còn bài chờ duyệt')).toBeVisible();
   await expect(mindful.getByRole('group', { name: 'Trạng thái', exact: true }).getByRole('button')).toHaveCount(2);
@@ -68,10 +63,15 @@ test('admin community shows two main queues and keeps reflection filters inside 
   await expectNoHorizontalOverflow(page, mindful);
   await touchModeration(tabs.getByRole('button', { name: 'Bình luận', exact: true }));
   await expect(page.getByRole('group', { name: 'Loại bài', exact: true })).toHaveCount(0);
-  expect(reads).toEqual(['comments', 'mindful']);
+  const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
+  await expect(moderation.getByText('Không có nội dung chờ xử lý', { exact: true })).toBeVisible();
+  await expect.poll(() => reads).toEqual(['mindful', 'comments']);
+  await touchModeration(tabs.getByRole('button', { name: 'Quán chiếu thiện ác', exact: true }));
+  await expect(mindful).toBeVisible();
+  expect(reads).toEqual(['mindful', 'comments']);
   await page.goto('/admin/community?moderation=profiles');
   await expect(page.getByRole('region', { name: 'Tên/ảnh công khai chờ duyệt' })).toBeVisible();
-  await expect.poll(() => reads).toEqual(['comments', 'mindful', 'profiles']);
+  await expect.poll(() => reads).toEqual(['mindful', 'comments', 'profiles']);
 });
 
 test('reported content hides through its target revision and resolves the report separately', async ({ page }) => {
@@ -115,7 +115,7 @@ test('moderation pagination reuses its principal cache and keeps stale decisions
     writes++;
     await route.fulfill({ status: 409, json: { error: { code: 'conflict' } } });
   });
-  await page.goto('/admin/community');
+  await page.goto('/admin/community?moderation=comments');
   await settleClient(page);
   const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
   await moderation.getByRole('button', { name: 'Trang sau', exact: true }).click();
@@ -135,7 +135,7 @@ test('moderation pagination reuses its principal cache and keeps stale decisions
 test('session loss clears moderation context and closes a private rejection draft', async ({ page }) => {
   await loginAsAdmin(page);
   await page.route('**/api/admin/community/moderation?*', route => route.fulfill({ json: { items: [comment], nextCursor: null } }));
-  await page.goto('/admin/community');
+  await page.goto('/admin/community?moderation=comments');
   await settleClient(page);
   const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
   await moderation.getByRole('button', { name: /^(?:▼\s*)?Xem nội dung & ngữ cảnh$/u, exact: true }).click();

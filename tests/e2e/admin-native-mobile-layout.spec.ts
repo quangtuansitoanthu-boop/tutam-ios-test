@@ -76,7 +76,7 @@ test('native admin can lock and unlock members while content management stays re
     expect(new URL(request.url).origin).toBe(nativeBackendOrigin);
     expect(new URL(request.url).pathname).toBe('/api/admin/members/member');
     expect(request.method).toBe('PATCH');
-    expect(request.headers).toMatchObject({ origin: 'https://quangtu.vn', 'x-csrf-token': 'test-csrf' });
+    expect(request.headers).toMatchObject({ origin: nativeBackendOrigin, 'x-csrf-token': 'test-csrf' });
   }
   await page.screenshot({ path: testInfo.outputPath('native-admin-members.png'), fullPage: true });
   for (const path of ['/admin/books?mode=create', '/admin/tu-tap', '/admin/phap-thoai', '/admin/practice']) {

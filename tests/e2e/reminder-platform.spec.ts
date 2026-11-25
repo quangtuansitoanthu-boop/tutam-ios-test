@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 
 for (const theme of ['light', 'dark'] as const) {
   test(`practice reminder chevron follows expanded state (${theme})`, async ({ page }, info) => {
@@ -29,6 +29,7 @@ for (const theme of ['light', 'dark'] as const) {
 for (const platform of ['ios', 'web'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     test(`reminder guidance matches ${platform} (${theme})`, async ({ page }, testInfo) => {
+      await deferStartupNotification(page);
       await page.addInitScript(({ platform, theme }) => {
         localStorage.setItem('tutam_locale', 'vi');
         localStorage.setItem('tutam_dark_mode', theme === 'dark' ? '1' : '0');

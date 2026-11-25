@@ -1,34 +1,46 @@
 import { expect, test } from '@playwright/test';
 import { settleClient } from './runtime-helpers';
+import { deferJournalNotifications, openJournalSection } from './helpers/journal-controls';
 
 for (const width of [375, 1440]) for (const dark of [false, true]) {
   test(`journal icon tools preserve the other field and require confirmation ${width} ${dark}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
+    await deferJournalNotifications(page);
     await page.addInitScript(() => {
       localStorage.setItem('tt_reflection_guide_seen_v1', '1');
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
         writeText: async (text: string) => { (window as Window & { copiedText?: string }).copiedText = text; },
       } });
     });
-    await page.goto('/tu-tap'); await settleClient(page);
+    await page.goto('/tu-tap', { waitUntil: 'domcontentloaded' }); await settleClient(page);
     await page.evaluate(dark => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, dark);
     await page.locator('.tt-mode-card--reflection').click();
     await expect(page.locator('.guide-toggle-button')).toHaveAttribute('aria-expanded', 'true');
     await page.locator('.guide-toggle-button').click();
-    const cards = page.locator('.personal-journal .journal-columns > section');
-    const fields = cards.locator('textarea');
-    for (const card of await cards.all()) {
+    const journal = page.locator('.personal-journal');
+    const entries = [
+      ['repentance', 'Nội dung riêng ô thứ nhất.\nGiữ nguyên dấu và dòng.'],
+      ['good-deed', 'Nội dung riêng ô thứ hai.'],
+    ] as const;
+    for (const [id, value] of entries) {
+      const card = await openJournalSection(journal, id, width === 375);
       await expect(card.getByRole('button', { name: 'Sao chép nội dung', exact: true })).toBeDisabled();
       await expect(card.getByRole('button', { name: 'Xoá hết', exact: true })).toBeDisabled();
+      const buttons = card.locator('.editor-tools button');
+      await expect(buttons).toHaveCount(3);
+      for (const button of await buttons.all()) {
+        const bounds = await button.boundingBox();
+        expect(bounds?.width).toBeGreaterThanOrEqual(44);
+        expect(bounds?.height).toBeGreaterThanOrEqual(44);
+      }
+      await card.locator('textarea').fill(value);
     }
-    const first = 'Nội dung riêng ô thứ nhất.\nGiữ nguyên dấu và dòng.', second = 'Nội dung riêng ô thứ hai.';
-    await fields.nth(0).fill(first); await fields.nth(1).fill(second);
     const writes: string[] = [];
     page.on('request', request => {
       if (new URL(request.url()).pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(request.method())) writes.push(request.url());
     });
-    for (const [index, value] of [[0, first], [1, second]] as const) {
-      const card = cards.nth(index);
+    for (const [id, value] of entries) {
+      const card = await openJournalSection(journal, id, width === 375);
       await card.getByRole('button', { name: 'Sao chép nội dung', exact: true }).click();
       await expect.poll(() => page.evaluate(() => (window as Window & { copiedText?: string }).copiedText)).toBe(value);
       await expect(page.getByRole('status').filter({ hasText: 'Đã sao chép.' })).toBeVisible();
@@ -42,15 +54,14 @@ for (const width of [375, 1440]) for (const dark of [false, true]) {
       const confirm = page.getByRole('dialog', { name: 'Xoá hết nội dung?', exact: true });
       await expect(confirm).toContainText('Bạn muốn xoá hết dữ liệu trong ô hiện có?');
       await confirm.getByRole('button', { name: 'Hủy', exact: true }).click();
-      await expect(fields.nth(index)).toHaveValue(value);
+      await expect(card.locator('textarea')).toHaveValue(value);
     }
-    await cards.nth(0).getByRole('button', { name: 'Xoá hết', exact: true }).click();
+    const repentance = await openJournalSection(journal, 'repentance', width === 375);
+    await repentance.getByRole('button', { name: 'Xoá hết', exact: true }).click();
     await page.getByRole('dialog', { name: 'Xoá hết nội dung?', exact: true }).getByRole('button', { name: 'Xoá hết', exact: true }).click();
-    await expect(fields.nth(0)).toHaveValue(''); await expect(fields.nth(1)).toHaveValue(second);
-    const buttons = await cards.locator('.editor-tools button').evaluateAll(nodes => nodes.map(node => {
-      const rect = node.getBoundingClientRect(); return { width: rect.width, height: rect.height };
-    }));
-    expect(buttons.every(button => button.width >= 44 && button.height >= 44)).toBe(true);
+    await expect(repentance.locator('textarea')).toHaveValue('');
+    const goodDeed = await openJournalSection(journal, 'good-deed', width === 375);
+    await expect(goodDeed.locator('textarea')).toHaveValue(entries[1][1]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(writes).toEqual([]);
   });

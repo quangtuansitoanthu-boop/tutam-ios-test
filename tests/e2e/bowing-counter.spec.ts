@@ -15,9 +15,9 @@ for (const [width, dark] of [[375, false], [375, true], [1440, false], [1440, tr
  await counter.click();
  await page.keyboard.press('Space');
  await page.locator('.lp-fullscreen-portrait-wrap').click({ position: { x: 80, y: 200 } });
- await expect(counter).toContainText('3 lạy');
+ await expect(counter.locator('[aria-live]')).toHaveText('3 / 21 lạy');
  await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', repeat: true, bubbles: true })));
- await expect(counter).toContainText('3 lạy');
+ await expect(counter.locator('[aria-live]')).toHaveText('3 / 21 lạy');
  await expect(page.locator('.lp-fullscreen-portrait')).toHaveCSS('transform', 'none');
  await expect(page.locator('.lp-fullscreen-img')).toHaveCSS('filter', 'none');
  for (const button of [page.locator('.lp-fullscreen-back-btn'), page.locator('.lp-fullscreen-finish-btn')]) {
@@ -31,14 +31,14 @@ for (const [width, dark] of [[375, false], [375, true], [1440, false], [1440, tr
  await expect(page.locator('.lp__dialog-input')).toHaveValue('3');
  await page.getByRole('button', { name: 'Tiếp tục lễ Phật', exact: true }).click();
  await page.locator('.lp__action-btn--start').click();
- await expect(counter).toContainText('3 lạy');
+ await expect(counter.locator('[aria-live]')).toHaveText('3 / 21 lạy');
  await page.goBack();
  await expect(page.locator('.lp-fullscreen-screen')).toHaveCount(0);
  await expect(page.getByText('🙏 Đã tự động ghi nhận 3 lạy', { exact: false })).toBeVisible();
  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('quangtu_principal_v1:anonymous:tt_practice_logs_v1') || '[]').map((log: { count: number }) => log.count))).toEqual([3]);
  await page.locator('.tt-mode-card--le-phat').click();
  await page.locator('.lp__action-btn--start').click();
- await expect(counter).toContainText('0 lạy');
+ await expect(counter.locator('[aria-live]')).toHaveText('0 / 21 lạy');
 });
 
 test('bowing edits a whole count and Escape asks before saving', async ({ page }) => {
@@ -55,7 +55,7 @@ test('bowing edits a whole count and Escape asks before saving', async ({ page }
  await page.keyboard.press('Escape');
  await expect(page.locator('.lp__dialog-input')).toHaveValue('1');
  await page.getByRole('button', { name: 'Tiếp tục lễ Phật', exact: true }).click();
- await expect(page.locator('.lp-fullscreen-counter')).toContainText('1 lạy');
+ await expect(page.locator('.lp-fullscreen-counter').locator('[aria-live]')).toHaveText('1 / 21 lạy');
  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('quangtu_principal_v1:anonymous:tt_practice_logs_v1') || '[]').map((log: { count: number }) => log.count))).toEqual([4]);
 });
 
@@ -67,13 +67,13 @@ for (const dark of [false,true]) test(`bowing counter records actual taps, conti
  await page.locator('.tt-mode-card--le-phat').click();
  await page.locator('.lp__action-btn--start').click();
  const counter=page.locator('.lp-fullscreen-counter');
- await expect(counter).toBeVisible();await expect(counter).toContainText('0 lạy');
+ await expect(counter).toBeVisible();await expect(counter.locator('[aria-live]')).toHaveText('0 / 21 lạy');
  await counter.click();await counter.click();await counter.press('Enter');
- await expect(counter).toContainText('3 lạy');
+ await expect(counter.locator('[aria-live]')).toHaveText('3 / 21 lạy');
  await page.locator('.lp-fullscreen-finish-btn').click();
  await expect(page.locator('.lp__dialog-input')).toHaveValue('3');
  await page.getByRole('button',{name:'Tiếp tục lễ Phật',exact:true}).click();
- await expect(counter).toContainText('3 lạy');
+ await expect(counter.locator('[aria-live]')).toHaveText('3 / 21 lạy');
  const size=await counter.boundingBox();expect(size!.height).toBeGreaterThanOrEqual(44);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.locator('.lp-fullscreen-finish-btn').click();
@@ -81,6 +81,6 @@ for (const dark of [false,true]) test(`bowing counter records actual taps, conti
  await expect(page.getByText('🙏 Đã tự động ghi nhận 3 lạy', {exact:false})).toBeVisible();
  await page.locator('.tt-mode-card--le-phat').click();
  await page.locator('.lp__action-btn--start').click();
- await expect(counter).toContainText('0 lạy');
+ await expect(counter.locator('[aria-live]')).toHaveText('0 / 21 lạy');
 });
 

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import bundledManifest from '../../src/lib/data/english-pack-manifest.json' with { type: 'json' };
 import bundledRituals from '../../src/lib/data/bundled-english-rituals.json' with { type: 'json' };
-import { useNativeApiWithLocalBackend } from './runtime-helpers';
+import { deferStartupNotification, useNativeApiWithLocalBackend } from './runtime-helpers';
 
 test.afterEach(async ({ page }, info) => {
   if (info.title === 'notification bell follows the restored principal and clears private items when the session expires') {
@@ -100,6 +100,7 @@ test('the feedback address copy also reports a denied clipboard', async ({ page 
 });
 
 test('notification bell follows the restored principal and clears private items when the session expires', async ({ page, baseURL }) => {
+  await deferStartupNotification(page);
   await page.context().addCookies([{ name: 'quangtu_session', value: 'e2e-google-admin-session-token', url: baseURL!, httpOnly: true, sameSite: 'Lax' }]);
   const verified = await (await page.request.get('/api/session')).json();
   expect(verified.authenticated).toBe(true);
@@ -127,7 +128,7 @@ test('notification bell follows the restored principal and clears private items 
   await expect.poll(() => notifications).toBe(1);
   await page.locator('.notification-bell-btn').click();
   await expect(page.getByText('QA private notification', { exact: true })).toBeVisible();
-  expect(notifications).toBe(1);
+  await expect.poll(() => notifications).toBe(2);
   await page.context().clearCookies();
   await page.clock.fastForward(61_000);
   await expect(page.getByRole('button', { name: 'Đăng xuất', exact: true })).toHaveCount(0);
@@ -172,6 +173,7 @@ test('English pack saves bundled and downloaded chapters then reloads without fe
 });
 
 test('the first notification opening refreshes data if the initial read is older than thirty seconds', async ({ page, baseURL }) => {
+  await deferStartupNotification(page);
   await page.context().addCookies([{ name: 'quangtu_session', value: 'e2e-google-admin-session-token', url: baseURL!, httpOnly: true, sameSite: 'Lax' }]);
   const verified = await (await page.request.get('/api/session')).json();
   expect(verified.authenticated).toBe(true);

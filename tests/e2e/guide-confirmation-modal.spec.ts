@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ context, page }) => {
+  await context.grantPermissions(['notifications']);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.route('**/api/**', (route) => route.abort('failed'));
   await page.goto('/huong-dan#cong-cu-tu-tap', { waitUntil: 'networkidle' });
@@ -48,6 +49,7 @@ test('guide confirmation still follows the selected destination only after confi
   const trigger = page.locator('#cong-cu-tu-tap .guide-link-card a[href="/tu-tap?mode=le-phat"]');
   await trigger.click();
   await page.locator('.guide-confirm-dialog .guide-btn-confirm').click();
-  await expect(page).toHaveURL(/\/tu-tap\?mode=le-phat$/);
+  await expect(page).toHaveURL(/\/tu-tap\?action=le-phat$/);
+  await expect(page.getByRole('button', { name: 'Vị Phật trước', exact: true })).toBeVisible();
   await expect(page.locator('.guide-confirm-scrim')).toHaveCount(0);
 });

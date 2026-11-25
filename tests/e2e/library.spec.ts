@@ -1,5 +1,16 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { loginAsMember, settleClient, choosePdfOnline, openReaderTools, savePdfOffline } from './runtime-helpers';
+
+function resolvedFontSize(page: Page, token: '--font-size-meta' | '--font-size-label'): Promise<string> {
+  return page.evaluate(name => {
+    const probe = document.createElement('span');
+    probe.style.fontSize = `var(${name})`;
+    document.body.append(probe);
+    const fontSize = getComputedStyle(probe).fontSize;
+    probe.remove();
+    return fontSize;
+  }, token);
+}
 
 test.describe('homepage and guide parity', () => {
   test('primary client navigation reuses the hydrated root session', async ({ page }) => {
@@ -113,7 +124,7 @@ test.describe('homepage and guide parity', () => {
     expect(viewCounts).toHaveLength(await popularItems.count());
     expect(viewCounts.every(count => Number.isInteger(count) && count > 0)).toBe(true);
     expect(viewCounts).toEqual([...viewCounts].sort((a, b) => b - a));
-    await expect(firstPopular.locator('small')).toHaveCSS('font-size', '12px');
+    await expect(firstPopular.locator('small')).toHaveCSS('font-size', await resolvedFontSize(page, '--font-size-meta'));
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(trigger).toBeFocused();
@@ -127,7 +138,7 @@ test.describe('homepage and guide parity', () => {
     const cards = page.locator('.articles-grid .art-card');
     const tagButtons = cards.locator('.art-tag');
     expect(await tagButtons.count()).toBeGreaterThanOrEqual(4);
-    await expect(tagButtons.nth(0)).toHaveCSS('font-size', '13px');
+    await expect(tagButtons.first()).toHaveCSS('font-size', await resolvedFontSize(page, '--font-size-label'));
     await expect(tagButtons.nth(0)).toHaveCSS('padding', '2px 8px');
 
     const causalTag = cards.getByRole('button', { name: 'nhân quả', exact: true });
