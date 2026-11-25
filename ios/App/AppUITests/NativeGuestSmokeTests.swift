@@ -55,6 +55,7 @@ class NativeGuestUITestCase: XCTestCase {
                                "The simulator WebView must reach startup UI before testing playback")
             }
         }
+        waitForStartupCoverToClear(app)
         deferStartupNotificationPrompt(app, timeout: 15)
         let personalTab = app.links["Cá nhân"].firstMatch
         if !personalTab.waitForExistence(timeout: 20) { deferStartupNotificationPrompt(app) }
@@ -66,6 +67,18 @@ class NativeGuestUITestCase: XCTestCase {
     func waitUntil(_ message: String, timeout: TimeInterval = 15, _ condition: @escaping () -> Bool) {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: NSObject())
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: timeout), .completed, message)
+    }
+
+    @MainActor
+    func waitForStartupCoverToClear(_ app: XCUIApplication) {
+        let web = app.webViews.firstMatch
+        let status = web.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Ứng dụng Tu tập Phật pháp")).firstMatch
+        let loading = web.staticTexts.matching(NSPredicate(format: "label IN %@", ["Đang tải ứng dụng...", "Loading app..."] as NSArray)).firstMatch
+        let prompt = web.otherElements.matching(NSPredicate(format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray)).firstMatch
+        let personal = app.links["Cá nhân"].firstMatch
+        waitUntil("The actual loading artwork must clear before touching the rendered app", timeout: 60) {
+            app.state == .runningForeground && (personal.exists || prompt.exists) && !status.exists && !loading.exists
+        }
     }
 
     @MainActor
@@ -1070,6 +1083,7 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     private func relaunchPersonal(_ app: XCUIApplication, captureNavigationEvidence: Bool = true) {
         app.terminate()
         app.launch()
+        waitForStartupCoverToClear(app)
         deferStartupNotificationPrompt(app, timeout: 7)
         XCTAssertTrue(existsOrWait(app.links["Cá nhân"].firstMatch, timeout: 30))
         openSettings(app, captureNavigationEvidence: captureNavigationEvidence)
