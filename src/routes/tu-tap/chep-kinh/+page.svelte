@@ -1140,7 +1140,7 @@
     </section>
     {#if showIntro}<aside class="notice" aria-labelledby="copy-notice-title"><h2 id="copy-notice-title">{localizeUi("Bản chép được lưu ở đâu?")}</h2><p>{localizeUi(COPY_NOTICE)}</p><button type="button" onclick={dismissIntro}>{localizeUi("Đã hiểu")}</button></aside>{/if}
   {:else if step === 'guide'}
-    <header class="choose-header"><span class="eyebrow">{localizeUi('BƯỚC 2 · CHUẨN BỊ')}</span><h1 bind:this={preparationTitle} tabindex="-1">{localizeUi('Hướng dẫn trước khi chép kinh')}</h1><p>{selectedBookInfo?.title}</p></header>
+    <header class="choose-header"><span class="eyebrow">{localizeUi('BƯỚC 2 · CHUẨN BỊ')}</span><h1 bind:this={preparationTitle} tabindex="-1">{localizeUi('Hướng dẫn trước khi chép kinh')}</h1><p class="copy-book-title">{selectedBookInfo?.title}</p></header>
     <ol class="stepper" aria-label={localizeUi('Các bước chép kinh')}><li><span>1</span>{localizeUi('Chọn kinh')}</li><li aria-current="step"><span>2</span>{localizeUi('Hướng dẫn')}</li><li><span>3</span>{localizeUi('Chép kinh')}</li></ol>
     <CopyingPreparation />
     <section class="selection-section" aria-labelledby="copy-preparation-book">
@@ -1161,7 +1161,7 @@
       </div>
     </header>
     <div class="save-status" class:error={localError}><span role="status">{localStatus || localizeUi("Đang mở bộ nhớ ứng dụng…")}</span><span class="account-note">{draft?.dirty ? localizeUi('Chưa lưu thay đổi vào tài khoản') : draft?.savedAt ? localizeUi('Đã lưu vào tài khoản') : localizeUi('Bản chép chỉ ở trên thiết bị')}</span></div>
-    {#if message}<div class="message" role="status"><p>{message}</p><button class="icon-button" type="button" aria-label={localizeUi('Đóng thông báo')} onclick={() => message = ''}><X size={18} aria-hidden="true" /></button></div>{/if}
+    {#if message && !optionsOpen}<div class="message" role="status"><p>{message}</p><button class="icon-button" type="button" aria-label={localizeUi('Đóng thông báo')} onclick={() => message = ''}><X size={18} aria-hidden="true" /></button></div>{/if}
     {#if showGuestBanner && guestDraft?.texts.some(Boolean)}
       <aside class="guest-draft" role="status">
         <p>{localizeUi("Có bản chép khách trên thiết bị này. Bản đó chưa được lưu vào tài khoản.")}</p>
@@ -1281,8 +1281,8 @@
         <div class="mobile-account-actions">
           <button class="primary save-button" type="button" disabled={loading || !draft || networkBusy} onclick={save}>{networkBusy ? localizeUi("Đang xử lý…") : draft?.pending ? localizeUi("Thử lưu lại lên hệ thống") : localizeUi("Lưu lên hệ thống")}</button>
           {#if fullscreenAvailable}<button class="icon-button" type="button" title={fullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'} aria-label={fullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'} onclick={toggleFullscreen}>{#if fullscreen}<Minimize size={19} aria-hidden="true" />{:else}<Maximize size={19} aria-hidden="true" />{/if}</button>{/if}
-          {#if message}<p class="mobile-save-feedback" role="status">{message}</p>{/if}
         </div>
+        {#if message}<p role="status">{message}</p>{/if}
         <section class="storage-details">
           <h3>{localizeUi('Đọc để chép')}</h3>
           <p>{localizeUi('Dùng trình đọc Kinh sách. Ưu tiên giọng ngoại tuyến đã cài trên thiết bị.')}</p>
@@ -1424,6 +1424,7 @@
   .book-run-actions a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:calc(var(--space-page) * .4);border:1px solid var(--border);border-radius:var(--radius-control);color:var(--text);text-decoration:none}
   .choose-header h1,.selection-section h2,.notice h2,.options-panel h2,.options-panel h3{font-weight:700;text-align:center}
   .choose-header p,.notice p,.storage-details>p,.cloud-panel>p,.edition-note{text-align:justify}
+  .choose-header .copy-book-title,#copy-preparation-book{font-weight:700;text-align:center;text-transform:uppercase;margin-inline:auto}
   /* Giấy vẫn sáng trong chế độ tối; chữ trên giấy dùng màu mực riêng. */
   .copy-writing .copy-note,.copy-writing .review-actions .muted,.copy-writing .review-actions strong{color:var(--copy-paper-ink)}
   .copy-writing .editor-tools>.icon-button{color:var(--text)}
@@ -1592,7 +1593,6 @@
     .copy-review-footer button{flex:1 1 auto}
     .mobile-account-actions{display:flex;flex-wrap:wrap;gap:var(--radius-sm);padding-block:var(--radius-sm)}
     .copy-writing .mobile-account-actions .save-button{max-width:none}
-    .mobile-save-feedback{flex-basis:100%}
     .copy-writing .source-heading{padding-inline:calc(var(--radius-sm) * .75);gap:calc(var(--radius-sm) / 3);justify-content:space-between}
     .copy-writing .source-heading h2{margin-inline-end:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:var(--font-size-meta)}
     .copy-writing .source-heading .block-nav{margin-inline-start:auto;border:1px solid var(--copy-paper-rule);border-radius:var(--radius-control)}

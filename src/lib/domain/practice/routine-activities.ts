@@ -5,9 +5,9 @@ import type { PracticeCategory } from './state';
 
 export const ROUTINE_ACTIVITY_GROUPS = [
   { label: 'Công phu thường nhật', modes: ['meditation', 'rosary', 'prostration'] },
+  { label: 'Kho kinh điển & Nghi thức', modes: ['sutra', 'mantra', 'ritual'] },
   { label: 'Biên chép công đức', modes: ['scripture-copying', 'name-copying'] },
   { label: 'Thanh tịnh & Giới luật', modes: ['precepts', 'eight-precepts', 'abstinence'] },
-  { label: 'Kho kinh điển & Nghi thức', modes: ['sutra', 'mantra', 'ritual'] },
 ] as const;
 
 export const ROUTINE_READING_CATEGORIES = {
