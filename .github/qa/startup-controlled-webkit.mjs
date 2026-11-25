@@ -1,6 +1,8 @@
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const simctl=promisify(execFile);
 import { readFileSync, readdirSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
@@ -71,8 +73,9 @@ async function exercise(mode, moduleUrl) {
 
 const mime={'.js':'application/javascript','.css':'text/css','.html':'text/html; charset=utf-8','.webp':'image/webp','.woff2':'font/woff2','.json':'application/json'};
 const evidence=[];
-let finish; const completed=new Promise(resolve=>{finish=resolve;});
+let incoming=0; let finish; const completed=new Promise(resolve=>{finish=resolve;});
 const server=createServer(async(req,res)=>{
+  incoming++;
   const pathname=new URL(req.url,host).pathname;
   try {
     if(pathname==='/__result' && req.method==='POST'){
@@ -101,9 +104,19 @@ const server=createServer(async(req,res)=>{
 await new Promise((ok,fail)=>{server.once('error',fail);server.listen(8794,'127.0.0.1',ok)});
 let browser,timeout;
 try {
-  if(process.env.TUTAM_QA_SIMULATOR)execFileSync('xcrun',['simctl','openurl',process.env.TUTAM_QA_SIMULATOR,host]);
+  if(process.env.TUTAM_QA_SIMULATOR){
+    const device=process.env.TUTAM_QA_SIMULATOR;
+    for(let attempt=1;attempt<=3 && !incoming;attempt++){
+      try{await simctl('xcrun',['simctl','launch',device,'com.apple.mobilesafari'],{timeout:75000});}
+      catch(e){console.log('Safari prewarm attempt',attempt,String(e.message).slice(0,220));}
+      try{await simctl('xcrun',['simctl','openurl',device,host],{timeout:75000});}
+      catch(e){console.log('MobileSafari OS open attempt',attempt,String(e.message).slice(0,240));}
+      for(let i=0;i<25&&!incoming;i++)await new Promise(r=>setTimeout(r,400));
+    }
+    if(!incoming)throw Error('MobileSafari did not reach the loopback fixture');
+  }
   else {const {webkit}=await import('playwright');browser=await webkit.launch();const page=await browser.newPage({viewport:{width:402,height:874}});await page.goto(host);}
-  timeout=setTimeout(finish,55000);
+  timeout=setTimeout(finish,100000);
   await completed;
   const out={compiledOwnerSha256:verifiedHash,cases:evidence};
   console.log(JSON.stringify(out));

@@ -59,11 +59,19 @@ def require_scheduled_links():
 
 def read_launch(trace, index):
     # Preserve earlier evidence and avoid starving diagnostic writes at the cap.
-    simctl("terminate", simulator, bundle, capture_output=True)
+    try:
+        simctl("terminate", simulator, bundle, capture_output=True, timeout=45)
+    except subprocess.TimeoutExpired:
+        print("Simulator terminate acknowledgement was delayed", flush=True)
     if trace.exists():
         trace.rename(trace.with_name(f"tutam-qa-before-paint-{index}.jsonl"))
-    simctl("launch", simulator, bundle, "-tutam-qa-events", "1", check=True)
-    until = time.monotonic() + 50
+    try:
+        result = simctl("launch", simulator, bundle, "-tutam-qa-events", "1", timeout=75)
+        if result.returncode:
+            print("Waiting for native frame evidence after delayed launch acknowledgement", result.returncode, flush=True)
+    except subprocess.TimeoutExpired:
+        print("Checking for already-launched app after host command timeout", flush=True)
+    until = time.monotonic() + 95
     while time.monotonic() < until:
         if trace.exists():
             for line in trace.read_text().splitlines():
@@ -82,8 +90,10 @@ def measure_startup():
     trace = Path(directory) / "Library/Caches/tutam-qa-events.jsonl"
     results = []
     for index in range(3):
+        print(f"Starting measured native process {index+1}", flush=True)
         results.append(read_launch(trace, index))
         (output / "native-startup-paint.json").write_text(json.dumps(results))
+        print(json.dumps(item if (item := results[-1]) else {}), flush=True)
     for index, item in enumerate(results):
         for key in ("shownAt", "assetAt", "mountedAt", "fadeAt", "removedAt", "imageNumber", "viewport"):
             assert isinstance(item.get(key), (int, float)) and math.isfinite(item[key]), (key, item)
