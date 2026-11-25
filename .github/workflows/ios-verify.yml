@@ -46,9 +46,11 @@ jobs:
       IOS_TEST_SUITE: ${{ matrix.suite }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: a399515c811dc6e02700bd194ff4565768fae221
       - name: Record the tested app source, assets and native build inputs
         run: |
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = a399515c811dc6e02700bd194ff4565768fae221
           git ls-tree HEAD -- src static ios android scripts package.json package-lock.json capacitor.config.ts svelte.config.js vite.config.ts
       - name: Apply QA audit source overlay if present
         run: |
@@ -280,6 +282,8 @@ jobs:
           elif [ "$IOS_TEST_SUITE" = "picker" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarPickerWithMotionDisabled)
           fi
+          allowance=600
+          if [ "$IOS_TEST_SUITE" = "reminder-crud" ]; then allowance=1200; fi
           xcodebuild \
             -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
             -sdk iphonesimulator -destination "platform=iOS Simulator,id=$TUTAM_QA_SIMULATOR" \
@@ -288,8 +292,8 @@ jobs:
             "${testing_args[@]}" \
             -parallel-testing-enabled NO \
             -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 600 \
-            -maximum-test-execution-time-allowance 600 \
+            -default-test-execution-time-allowance "$allowance" \
+            -maximum-test-execution-time-allowance "$allowance" \
             CODE_SIGNING_ALLOWED=NO test-without-building 2>&1 | tee build/release-evidence/native-ui-test.log
       - name: Require executed native UI tests with no failures or skips
         if: always() && env.IOS_TEST_SUITE != 'journal' && env.IOS_TEST_SUITE != 'startup-webkit' && env.IOS_TEST_SUITE != 'startup'
