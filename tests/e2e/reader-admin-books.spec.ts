@@ -20,6 +20,10 @@ async function resetBookProgress(page: import('@playwright/test').Page): Promise
 }
 
 test.describe("reader and books admin", () => {
+  test.beforeEach(async ({ page }) => {
+    await deferStartupNotification(page);
+  });
+
   test("member reads chapters, changes display settings and restores them without file export", async ({ page }) => {
     await loginAsMember(page);
     await page.goto('/kinh-sach');
@@ -792,7 +796,6 @@ test.describe("reader and books admin", () => {
     page,
   }) => {
     await loginAsMember(page);
-    await deferStartupNotification(page);
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     let release!: () => void;

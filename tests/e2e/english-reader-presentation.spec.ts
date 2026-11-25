@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { deferStartupNotification } from './runtime-helpers';
 import englishManifest from '../../src/lib/data/english-pack-manifest.json' with { type: 'json' };
 import videoManifest from '../../src/lib/data/quang-tu-facebook-videos.json' with { type: 'json' };
 const ENGLISH_TRANSLATION_NOTICE = 'AI is used to prepare English translations, which may contain errors. Please refer to the Vietnamese original when needed.';
@@ -54,6 +55,7 @@ for (const width of [375, 1440]) {
       expect(original.byteLength).toBe(metadata.bytes);
       expect(createHash('sha256').update(original).digest('hex')).toBe(metadata.sha256);
       await page.setViewportSize({ width, height: width === 375 ? 844 : 900 });
+      await deferStartupNotification(page);
       await page.addInitScript(({ dark, bookId }) => {
         if (!localStorage.getItem('tutam_locale')) localStorage.setItem('tutam_locale', 'en');
         localStorage.setItem('tutam_dark_mode', dark ? '1' : '0');
