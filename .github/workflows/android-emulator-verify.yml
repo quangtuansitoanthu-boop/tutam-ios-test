@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - 'codex/qa-*'
+      - 'codex/android-ci-*'
 
 permissions:
   contents: read
@@ -243,11 +244,11 @@ jobs:
         if: always()
         run: |
           mkdir -p build/android-device-evidence
-          if [[ -n "${ADB:-}" ]]; then
-            "$ADB" -s "$ANDROID_SERIAL" logcat -d -v threadtime > build/android-device-evidence/logcat-final.txt 2>&1 || true
-            "$ADB" -s "$ANDROID_SERIAL" logcat -d -b crash > build/android-device-evidence/crash-final.txt 2>&1 || true
-            "$ADB" -s "$ANDROID_SERIAL" exec-out screencap -p > build/android-device-evidence/device-final.png || true
-            "$ADB" -s "$ANDROID_SERIAL" shell dumpsys connectivity > build/android-device-evidence/connectivity-final.txt 2>&1 || true
+          if [[ -n "${ADB:-}" ]] && [[ "$(timeout 5s "$ADB" -s "$ANDROID_SERIAL" get-state 2>/dev/null)" == device ]]; then
+            timeout 15s "$ADB" -s "$ANDROID_SERIAL" logcat -d -v threadtime > build/android-device-evidence/logcat-final.txt 2>&1 || true
+            timeout 15s "$ADB" -s "$ANDROID_SERIAL" logcat -d -b crash > build/android-device-evidence/crash-final.txt 2>&1 || true
+            timeout 15s "$ADB" -s "$ANDROID_SERIAL" exec-out screencap -p > build/android-device-evidence/device-final.png || true
+            timeout 15s "$ADB" -s "$ANDROID_SERIAL" shell dumpsys connectivity > build/android-device-evidence/connectivity-final.txt 2>&1 || true
           fi
       - name: Stop and clean up temporary CI emulator
         if: always()
@@ -255,12 +256,15 @@ jobs:
           python3 - <<'PY'
           import os, pathlib, shutil, subprocess, time
           adb = os.environ.get('ADB')
-          if adb:
-              subprocess.run([adb, '-s', os.environ['ANDROID_SERIAL'], 'shell', 'am', 'force-stop', os.environ['QA_PACKAGE']], timeout=15, check=False)
-              subprocess.run([adb, '-s', os.environ['ANDROID_SERIAL'], 'emu', 'kill'], timeout=15, check=False)
           temp = pathlib.Path(os.environ['RUNNER_TEMP']).resolve()
           pidfile = temp / 'tutam-ci-emulator.pid'
           if pidfile.exists():
+              if adb:
+                  for args in [['shell', 'am', 'force-stop', os.environ['QA_PACKAGE']], ['emu', 'kill']]:
+                      try:
+                          subprocess.run([adb, '-s', os.environ['ANDROID_SERIAL'], *args], timeout=15, check=False)
+                      except subprocess.TimeoutExpired:
+                          pass
               pid = int(pidfile.read_text().strip())
               for _ in range(30):
                   try:
