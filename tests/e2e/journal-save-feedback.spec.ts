@@ -1,12 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
-import { deferJournalNotifications, openJournalSection } from './helpers/journal-controls';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+import { openJournalSection } from './helpers/journal-controls';
 
 for (const width of [375, 1440]) {
   for (const dark of [false, true]) {
     test(`journal save feedback ${width} ${dark}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 900 });
-      await deferJournalNotifications(page);
+      await deferStartupNotification(page);
       await page.addInitScript(value => {
         localStorage.setItem('tt_reflection_guide_seen_v1', '1');
         localStorage.setItem('tutam_dark_mode', value ? '1' : '0');

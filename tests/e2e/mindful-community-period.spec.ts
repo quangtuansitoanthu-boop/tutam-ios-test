@@ -2,11 +2,12 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import type { MindfulPost, MindfulPostKind } from '../../src/lib/contracts/mindful-community';
 import { getVietnamIsoDate, shiftVietnamDate } from '../../src/lib/domain/practice/stats';
-import { loginAsMember, settleClient } from './runtime-helpers';
+import { deferStartupNotification, loginAsMember, settleClient } from './runtime-helpers';
 
 const postsPath = '/api/practice/mindful-posts';
 
 test('mobile community periods keep newest posts first and reuse cached pages without reaction refetches', async ({ page }) => {
+  await deferStartupNotification(page);
   await loginAsMember(page);
   await page.setViewportSize({ width: 375, height: 844 });
   const today = getVietnamIsoDate();
@@ -49,16 +50,17 @@ test('mobile community periods keep newest posts first and reuse cached pages wi
   expect(reads).toHaveLength(0);
   await page.getByRole('button', { name: 'Cộng đồng', exact: true }).click();
   const community = page.locator('.mindful-community');
-  const periods = community.getByRole('combobox', { name: 'Thời gian bài chia sẻ', exact: true });
+  const periods = community.getByRole('group', { name: 'Thời gian bài chia sẻ', exact: true });
+  const selectedPeriod = periods.getByRole('button', { pressed: true });
   const articles = community.locator('article');
-  await expect(periods).toHaveText('Tất cả');
+  await expect(selectedPeriod).toHaveText('Tất cả');
   await expect(articles).toHaveCount(2);
   expect(reads).toHaveLength(1);
   expect(new URLSearchParams(reads[0]).has('period')).toBe(false);
   await expect(articles.first()).toContainText('repentance: newest');
   await expect(articles.last()).toContainText('repentance: earlier');
   await expect(community).not.toContainText('repentance: yesterday');
-  expect(await periods.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+  expect(await selectedPeriod.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
   const typography = await articles.first().locator('.content').evaluate(element => {
     const style = getComputedStyle(element);
     return { size: parseFloat(style.fontSize), lineHeight: parseFloat(style.lineHeight), whiteSpace: style.whiteSpace, font: style.fontFamily };
@@ -73,9 +75,9 @@ test('mobile community periods keep newest posts first and reuse cached pages wi
   await mkdir('.artifacts', { recursive: true });
   await page.evaluate(async () => { await document.fonts.ready; });
   await articles.first().screenshot({ path: '.artifacts/community-post-bookerly-light.png', animations: 'disabled' });
-  await page.getByRole('button', { name: 'Giao diện Sáng/Tối', exact: true }).click();
+  await page.getByRole('button', { name: 'Chuyển sang chế độ tối', exact: true }).click();
   await articles.first().screenshot({ path: '.artifacts/community-post-bookerly-dark.png', animations: 'disabled' });
-  await page.getByRole('button', { name: 'Giao diện Sáng/Tối', exact: true }).click();
+  await page.getByRole('button', { name: 'Chuyển sang chế độ sáng', exact: true }).click();
 
   await community.getByRole('button', { name: 'Xem thêm', exact: true }).click();
   await expect(articles).toHaveCount(3);
@@ -92,7 +94,7 @@ test('mobile community periods keep newest posts first and reuse cached pages wi
   expect(reads).toHaveLength(3);
 
   await community.getByRole('button', { name: 'Tùy hỷ thiện lành', exact: true }).click();
-  await expect(periods).toHaveText('Tất cả');
+  await expect(selectedPeriod).toHaveText('Tất cả');
   await expect(articles.first()).toContainText('good_deed: newest');
   await expect.poll(() => reads.length).toBe(4);
   await choosePeriod(page, 'Hôm nay');
@@ -114,7 +116,7 @@ test('mobile community periods keep newest posts first and reuse cached pages wi
   expect(reads).toHaveLength(5);
   await page.getByRole('button', { name: 'Sổ quán chiếu', exact: true }).click();
   await page.getByRole('button', { name: 'Cộng đồng', exact: true }).click();
-  await expect(periods).toHaveText('Tất cả');
+  await expect(selectedPeriod).toHaveText('Tất cả');
   await expect(articles.first()).toContainText('repentance: newest');
   expect(reads).toHaveLength(5);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
@@ -129,6 +131,7 @@ async function openReflection(page: Page) {
 }
 
 async function choosePeriod(page: Page, label: 'Hôm nay' | 'Tất cả') {
-  await page.locator('.mindful-community').getByRole('combobox', { name: 'Thời gian bài chia sẻ', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Thời gian bài chia sẻ', exact: true }).getByRole('button', { name: label, exact: true }).click();
+  const choice = page.getByRole('group', { name: 'Thời gian bài chia sẻ', exact: true }).getByRole('button', { name: label, exact: true });
+  await choice.click();
+  await expect(choice).toHaveAttribute('aria-pressed', 'true');
 }

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
+import { deferStartupNotification, settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
 
 for (const width of [375, 1440]) {
   for (const dark of [false, true]) {
@@ -27,6 +27,7 @@ for (const width of [375, 1440]) {
     test(`native ambient has no download or delete controls ${width} ${dark}`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 900 });
       await useNativeApiWithLocalBackend(page);
+      await deferStartupNotification(page);
       await page.addInitScript(value => {
         localStorage.setItem('tutam_dark_mode', value ? '1' : '0');
         Object.assign(globalThis, { Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android' } });

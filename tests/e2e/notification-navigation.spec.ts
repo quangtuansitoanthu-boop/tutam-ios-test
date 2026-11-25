@@ -17,7 +17,10 @@ test('lunar notifications open practice and stay read after reload', async ({ pa
   await page.goto('/');
   await settleClient(page);
   await page.locator('.notification-bell-btn').click();
-  await expect(page.getByRole('button', { name: /Hôm nay là ngày Ăn Chay/ })).not.toHaveClass(/unread/);
+  await expect(item).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Tất cả', exact: true }).click();
+  await expect(item).toBeVisible();
+  await expect(item).not.toHaveClass(/unread/);
   await page.getByRole('button', { name: /Nhắc nhở: Ngày Kiêng Hành Dâm/ }).click();
   await expect(page).toHaveURL(/\/tu-tap$/);
   await expect(page.locator('.notification-badge')).toHaveCount(0);

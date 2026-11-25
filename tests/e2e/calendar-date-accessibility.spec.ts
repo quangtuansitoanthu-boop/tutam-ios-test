@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`only the selected date is highlighted in the ${theme} calendar`, async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 375, height: 850 }, hasTouch: true, colorScheme: theme });
-    try {
-      const page = await context.newPage();
+  test.describe(`${theme} calendar`, () => {
+    test.use({ viewport: { width: 375, height: 850 }, hasTouch: true, colorScheme: theme });
+    test('only the selected date is highlighted', async ({ page }) => {
       await page.addInitScript(mode => localStorage.setItem('tutam_dark_mode', mode === 'dark' ? '1' : '0'), theme);
       await page.clock.setFixedTime(new Date('2026-11-14T05:00:00Z'));
       await page.goto('/');
@@ -20,15 +21,13 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(today).toHaveAttribute('aria-selected', 'false');
         await expect(calendar.getByRole('tab', { selected: true })).toHaveCount(1);
         const plain = day.locator('xpath=preceding-sibling::*[1]');
-        const background = (locator: typeof today) => locator.evaluate(element => getComputedStyle(element).backgroundColor);
+        const background = (locator: typeof today) => locator.evaluate(element => getComputedStyle(element).background);
         await expect.poll(() => background(today)).toBe(await background(plain));
         expect(await background(day)).not.toBe(await background(today));
         await calendar.getByRole('button', { name: 'Hôm nay', exact: true }).tap();
         await expect(today).toHaveAttribute('aria-selected', 'true');
       }
-    } finally {
-      await context.close();
-    }
+    });
   });
 }
 

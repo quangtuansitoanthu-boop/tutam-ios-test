@@ -1,10 +1,10 @@
 import {expect,test} from '@playwright/test';
-import {settleClient} from './runtime-helpers';
-import { deferJournalNotifications, openJournalSection } from './helpers/journal-controls';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+import { openJournalSection } from './helpers/journal-controls';
 for(const width of [411,900])for(const dark of [false,true]){
   test(`journal caret follows first IME resize without manual scroll-to-end ${width} ${dark}`,async({page})=>{
     await page.setViewportSize({width,height:814});
-    await deferJournalNotifications(page);
+    await deferStartupNotification(page);
     await page.addInitScript(dark=>{localStorage.setItem('tt_reflection_guide_seen_v1','1');localStorage.setItem('tutam_dark_mode',dark?'1':'0');},dark);
     await page.route('**/api/**',route=>route.fulfill({json:new URL(route.request().url()).pathname==='/api/session'?{authenticated:false,user:null,csrfToken:null,expiresAt:null}:new URL(route.request().url()).pathname==='/api/presence'?{enabled:false,activeCount:0}:[]}));
     await page.goto('/tu-tap', {waitUntil:'domcontentloaded'});await settleClient(page);

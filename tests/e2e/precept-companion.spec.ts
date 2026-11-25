@@ -1,9 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 import { PRECEPT_PRACTICE_COPY } from '../../src/lib/i18n/precept-practice-ui';
 import type { CompanionState } from '../../src/lib/domain/practice/precept-companion';
 import { EIGHT_PRECEPT_GUIDE_SECTIONS } from '../../src/lib/content/eight-precept-guide';
 import { EIGHT_RECEIVING_RITE } from '../../src/lib/content/eight-precept-rite';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 const copy = PRECEPT_PRACTICE_COPY.vi;
 const companionKey = 'tutam_precept_companion_v1';
 const legacyKey = 'tutam_thanh_tinh_v1';

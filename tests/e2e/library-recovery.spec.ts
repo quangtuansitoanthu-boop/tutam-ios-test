@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test';
+import { deferStartupNotification } from './runtime-helpers';
 
 for (const failure of ['server-error', 'html-response']) {
   test(`native library keeps bundled books readable when online with ${failure}`, async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
+    await deferStartupNotification(page);
     let catalogRequests = 0;
     await page.route('**/api/**', route => {
       if (new URL(route.request().url()).pathname === '/api/articles') {

@@ -1,7 +1,8 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 
 test.use(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {});
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 for (const [mode, palette, scheme, paper] of [
   ['0', 'white', 'light', 'rgb(255, 255, 255)'],
@@ -15,7 +16,7 @@ for (const [mode, palette, scheme, paper] of [
   test(`home calendar follows ${mode}/${palette}/${scheme} in the card, week and month`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme });
     await page.setViewportSize({ width: 375, height: 900 });
-    await page.clock.setFixedTime(new Date('2026-11-11T05:00:00Z'));
+    await page.clock.setFixedTime(new Date('2026-11-15T05:00:00Z'));
     await page.addInitScript(({ mode, palette }) => {
       localStorage.setItem('tutam_dark_mode', mode);
       localStorage.setItem('tutam_app_light_palette', palette);
@@ -29,20 +30,28 @@ for (const [mode, palette, scheme, paper] of [
     await expect(art.locator('.art-main')).toHaveCSS('background-image', 'none');
     const strip = page.locator('.weekly-lunar-strip');
     const selectedWeek = strip.locator('.day-col.is-selected');
-    await expect(selectedWeek).toHaveCSS('background-image', 'none');
-    const selectedColor = await selectedWeek.evaluate(el => {
+    const { gold, ink } = await selectedWeek.evaluate(el => {
       const sample = document.createElement('span');
-      sample.style.backgroundColor = 'var(--gold-muted)';
+      sample.style.backgroundColor = 'var(--gold)';
+      sample.style.color = 'var(--on-gold)';
       el.append(sample);
-      const expected = getComputedStyle(sample).backgroundColor;
+      const style = getComputedStyle(sample);
+      const expected = { gold: style.backgroundColor, ink: style.color };
       sample.remove();
       return expected;
     });
-    await expect(selectedWeek).toHaveCSS('background-color', selectedColor);
+    const selectedBackground = await selectedWeek.evaluate(el => getComputedStyle(el).backgroundImage);
+    expect(selectedBackground).toContain('linear-gradient(');
+    expect(selectedBackground).toContain(gold);
+    for (const label of ['.day-weekday', '.day-solar-num', '.day-lunar-num']) {
+      await expect(selectedWeek.locator(label)).toHaveCSS('color', ink);
+    }
     await strip.locator('.strip-expand-btn').click();
     const selectedMonth = strip.locator('.month-day-cell.is-selected');
-    await expect(selectedMonth).toHaveCSS('background-image', 'none');
-    await expect(selectedMonth).toHaveCSS('background-color', selectedColor);
+    await expect(selectedMonth).toHaveCSS('background-image', selectedBackground);
+    for (const label of ['.month-cell-solar', '.month-cell-lunar']) {
+      await expect(selectedMonth.locator(label)).toHaveCSS('color', ink);
+    }
   });
 }
 

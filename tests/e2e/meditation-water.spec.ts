@@ -37,7 +37,7 @@ for (const dark of [false, true]) {
   test(`hovered meditation primary stays readable when active, paused and ended (${dark ? 'dark' : 'light'})`, async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 900 });
     await page.addInitScript(darkMode => localStorage.setItem('tutam_dark_mode', darkMode ? '1' : '0'), dark);
-    await page.goto('/tu-tap?mode=meditation');
+    await page.goto('/tu-tap?mode=meditation', { waitUntil: 'domcontentloaded' });
     await settleClient(page);
     await page.locator('.meditation-chooser').getByRole('button', { name: 'Bắt đầu thiền', exact: true }).click();
     const screen = page.locator('.meditation-screen');
@@ -65,7 +65,7 @@ for (const width of [375, 1440]) {
         localStorage.setItem('tutam_dark_mode', darkMode ? '1' : '0');
         localStorage.setItem('tutam_ui_motion', '1');
       }, dark);
-      await page.goto('/tu-tap?mode=meditation');
+      await page.goto('/tu-tap?mode=meditation', { waitUntil: 'domcontentloaded' });
       await settleClient(page);
       await page.locator('.meditation-chooser').getByRole('button', { name: 'Bắt đầu thiền', exact: true }).click();
       const screen = page.locator('.meditation-screen');
@@ -123,8 +123,9 @@ for (const width of [375, 1440]) {
       if (width === 375) {
         await page.setViewportSize({ width, height: 430 });
         await expect(screen.locator('main')).toHaveCSS('touch-action', 'pan-y');
-        await screen.locator('.meditation-screen__motion').scrollIntoViewIfNeeded();
-        await expect(screen.locator('.meditation-screen__motion')).toBeInViewport();
+        const audioLayers = screen.getByLabel('Âm thanh đang dùng', { exact: true });
+        await audioLayers.scrollIntoViewIfNeeded();
+        await expect(audioLayers).toBeInViewport();
         await expect(screen.getByRole('button', { name: 'Tiếp tục', exact: true })).toBeInViewport();
       }
       expect(errors).toEqual([]);

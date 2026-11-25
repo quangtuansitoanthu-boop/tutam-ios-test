@@ -74,6 +74,24 @@ test('admin community shows two main queues and keeps reflection filters inside 
   await expect.poll(() => reads).toEqual(['mindful', 'comments', 'profiles']);
 });
 
+
+test('reloading the selected comment queue preserves its URL and filters', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.route('**/api/admin/community/moderation?*', route => route.fulfill({
+    json: { items: [], nextCursor: null },
+  }));
+  await page.goto('/admin/community?period=today#review');
+  const queues = page.getByRole('navigation', { name: 'Hàng chờ kiểm duyệt', exact: true });
+  const comments = queues.getByRole('button', { name: 'Bình luận', exact: true });
+  await comments.click();
+  await expect(comments).toHaveAttribute('aria-pressed', 'true');
+  const selected = new URL(page.url());
+  expect(selected.searchParams.get('period')).toBe('today');
+  expect(selected.hash).toBe('#review');
+  await page.reload();
+  await expect(comments).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('region', { name: 'Kiểm duyệt nội dung' })).toBeVisible();
+});
 test('reported content hides through its target revision and resolves the report separately', async ({ page }) => {
   await loginAsAdmin(page);
   const writes: Array<{ path: string; body: unknown }> = [];
@@ -208,13 +226,13 @@ test('[moderation48h] cold and repeated warm notification links reopen the mindf
     const comments = page.getByRole('region', { name: 'Kiểm duyệt nội dung', exact: true });
     await expect(comments.getByRole('button', { name: 'Bình luận', exact: true })).toHaveAttribute('aria-pressed', 'true');
     const manualUrl = new URL(page.url());
-    expect(manualUrl.searchParams.has('moderation')).toBe(false);
+    expect(manualUrl.searchParams.get('moderation')).toBe('comments');
     if (attempt === 0) {
       expect(manualUrl.searchParams.get('period')).toBe('today');
       expect(manualUrl.hash).toBe('#review');
     }
     await touchModeration(page.locator('.notification-bell-btn'));
-    await page.getByRole('tab', { name: /^Quản trị/u }).click();
+    await page.getByRole('tab', { name: 'Phê duyệt', exact: true }).click();
     await touchModeration(page.locator('.notification-item').filter({ hasText: notification.title }));
     await expect(page).toHaveURL(new URL(notification.link, page.url()).href);
     await expect(mindful.getByRole('button', { name: 'Quán chiếu thiện ác', exact: true })).toHaveAttribute('aria-pressed', 'true');

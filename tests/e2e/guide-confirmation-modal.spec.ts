@@ -1,10 +1,14 @@
 import { expect, test } from '@playwright/test';
+import { settleClient } from './runtime-helpers';
 
-test.beforeEach(async ({ context, page }) => {
-  await context.grantPermissions(['notifications']);
+test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.route('**/api/**', (route) => route.abort('failed'));
-  await page.goto('/huong-dan#cong-cu-tu-tap', { waitUntil: 'networkidle' });
+  await page.goto('/huong-dan#cong-cu-tu-tap', { waitUntil: 'domcontentloaded' });
+  await settleClient(page);
+  const prompt = page.getByRole('dialog', { name: 'Thông báo tu tập', exact: true });
+  await prompt.getByRole('button', { name: 'Để sau', exact: true }).click();
+  await expect(prompt).toHaveCount(0);
 });
 
 test('guide confirmation traps focus and Escape returns to its link without navigation', async ({ page }) => {

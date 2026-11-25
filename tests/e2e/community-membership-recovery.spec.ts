@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { loginAsMember, settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
+import { deferStartupNotification, loginAsMember, settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
 
 test.afterEach(async ({ page }) => { await page.unrouteAll({ behavior: 'ignoreErrors' }); });
 
 test('community joining exposes errors, retries, and updates membership exactly once', async ({ page, baseURL }) => {
   const session = { authenticated: true, user: { id: 'e2e-member', email: 'qa@example.test', displayName: 'Thành viên thử nghiệm', avatarUrl: '', role: 'user' }, csrfToken: 'qa-server-csrf', expiresAt: '2099-01-01T00:00:00Z' };
+  await deferStartupNotification(page);
   await loginAsMember(page);
   await useNativeApiWithLocalBackend(page);
   const headers = { 'access-control-allow-origin': new URL(baseURL || 'http://localhost:8787').origin, 'access-control-allow-credentials': 'true' };

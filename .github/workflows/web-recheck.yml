@@ -7,27 +7,13 @@ permissions:
   contents: read
 jobs:
   browser:
-    name: Focused ${{ matrix.group }}
+    name: Focused critical actions
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - group: moderation-and-bowing
-            files: admin-community-moderation.spec.ts bowing-counter.spec.ts
-          - group: copying
-            files: copying-layout.spec.ts copying-preparation.spec.ts scripture-copying.spec.ts
-          - group: home-and-notifications
-            files: guide-confirmation-modal.spec.ts settings-hub.spec.ts reminder-platform.spec.ts remaining-components.spec.ts
-          - group: journal
-            files: journal-save-feedback.spec.ts journal-ime-first-focus.spec.ts journal-toolbar.spec.ts personal-journal-zen.spec.ts personal-journal-zen-webkit.spec.ts
-          - group: reading-and-refuge
-            files: home-refuge-release.spec.ts library-controls.spec.ts library.spec.ts reader-tools-main-parity.spec.ts
-          - group: administration
-            files: admin-native-mobile-layout.spec.ts user-testimonials.spec.ts ui-modal-calendar-regressions.spec.ts
-          - group: responsive
-            files: visual-baseline.spec.ts ui-font-scale.spec.ts ios-interface-overflow.spec.ts
+        shard: [1]
     env:
       TUTAM_E2E_LOCAL_ONLY: '1'
       TUTAM_E2E_DEV_API: '1'
@@ -58,7 +44,7 @@ jobs:
           JS
           npm run build
       - name: Run the shard against fresh loopback D1 and R2
-        run: npx --no-install playwright test --config tests/e2e/playwright.config.ts --reporter=dot,json --workers=1 --project desktop-1440-light ${{ matrix.files }}
+        run: npx --no-install playwright test admin-community-moderation.spec.ts bowing-counter.spec.ts copying-layout.spec.ts --config tests/e2e/playwright.config.ts --project=desktop-1440-light --reporter=dot,json --workers=1 -g 'reloading the selected|rejection reason on failure|counter records actual taps|ghost input without keyup'
       - name: Save a compact per-test result
         if: always()
         run: |
@@ -69,7 +55,7 @@ jobs:
           const report = JSON.parse(fs.readFileSync(reportPath,'utf8'));
           const rows=[];
           const visit=s=>{
-            for(const t of s.specs ?? []) for(const r of t.tests) rows.push({ file:t.file, line:t.line, title:t.title, project:r.projectName, status:r.status, outcome:r.results.map(x=>x.status), error:r.results.find(x=>x.error)?.error?.message?.slice(0,1600) });
+            for(const t of s.specs ?? []) for(const r of t.tests) rows.push({ file:t.file, line:t.line, title:t.title, project:r.projectName, status:r.status, outcome:r.results.map(x=>x.status),error:r.results.find(x=>x.error)?.error?.message?.slice(0,1600) });
             for(const child of s.suites ?? []) visit(child);
           };
           for(const suite of report.suites ?? []) visit(suite);
@@ -78,6 +64,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: focused-results-${{ matrix.group }}
+          name: focused-results
           path: web-results.json
           retention-days: 3

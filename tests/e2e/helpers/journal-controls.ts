@@ -1,9 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
-
-export async function deferJournalNotifications(page: Page, locale: 'vi' | 'en' = 'vi') {
-  const prompt = page.getByRole('dialog', { name: locale === 'en' ? 'Practice notifications' : 'Thông báo tu tập', exact: true });
-  await page.addLocatorHandler(prompt, () => prompt.getByRole('button', { name: locale === 'en' ? 'Maybe later' : 'Để sau', exact: true }).click());
-}
+import { expect, type Locator } from '@playwright/test';
 
 export async function openJournalSection(journal: Locator, id: 'repentance' | 'good-deed', mobile: boolean) {
   if (mobile) {

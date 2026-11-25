@@ -358,7 +358,7 @@ test.describe('Tu Tập lifecycle parity', () => {
     await page.locator('button.tt-mode-card--kinh').click();
     await page.locator('.tt-card').first().click();
 
-    const topbar = page.locator('.qts-route-topbar');
+    const topbar = page.locator('nav.qts-nav');
     await expect(topbar.getByRole('button', { name: 'Quay lại' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'KINH ĐẠI THỪA CÔNG ĐỨC TẠO TƯỢNG PHẬT' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Bắt Đầu Công Phu/ })).toBeVisible();
@@ -389,8 +389,8 @@ test.describe('Tu Tập lifecycle parity', () => {
     await expect(page.getByRole('heading', { name: '📖 Tụng, Đọc Kinh', exact: true })).toBeVisible();
     await topbar.getByRole('button', { name: 'Quay lại' }).click();
     await expect(page).toHaveURL('/tu-tap');
-    await expect(page.getByRole('heading', { name: 'Chế Độ Tu Tập' })).toBeVisible();
-    await expect(topbar.locator('.tt-topbar-title')).toHaveText('Tu tập');
+    await expect(page.getByRole('heading', { name: 'Không gian Tu Tập' })).toBeVisible();
+    await expect(topbar.getByRole('link', { name: /Tu Tập Phật Pháp/ })).toBeVisible();
   });
 
   test('active practice reader matches the legacy full-screen anatomy', async ({ page }) => {
@@ -504,7 +504,7 @@ test.describe('Tu Tập lifecycle parity', () => {
     await loginAsMember(page);
     await page.addInitScript(() => localStorage.setItem('quangtu_principal_v1:e2e-member:tt_practice_logs_v1', '[]'));
     await gotoPractice(page);
-    await expect(page.getByRole('heading', { name: 'Chế Độ Tu Tập' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Không gian Tu Tập' })).toBeVisible();
     await page.locator('button.tt-mode-card--kinh').click();
     await page.locator('.tt-grid').getByText('Kinh kiểm thử E2E', { exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Kinh kiểm thử E2E' })).toBeVisible();
@@ -565,7 +565,7 @@ test.describe('Tu Tập lifecycle parity', () => {
     await musicTab.click();
     await expect(musicTab).toHaveAttribute('aria-selected', 'true');
     const music = chooser.getByRole('tabpanel', { name: 'Nhạc thiền', exact: true });
-    await expect(music.getByRole('button')).toHaveCount(4);
+    await expect(music.locator('button[aria-pressed]')).toHaveCount(4);
     for (const label of [
       'Không phát nhạc',
       'Nhạc Thiền 1 — Tĩnh lặng',
@@ -577,6 +577,7 @@ test.describe('Tu Tập lifecycle parity', () => {
     const selectedMusic = music.getByRole('button', { name: 'Nhạc Thiền 3 — An lạc', exact: true });
     await selectedMusic.click();
     await expect(selectedMusic).toHaveAttribute('aria-pressed', 'true');
+    await expect(music.getByRole('slider', { name: 'Âm lượng nhạc thiền' })).toBeEnabled();
     await chooser.getByRole('tab', { name: 'Âm thanh', exact: true }).click();
     await chooser.getByRole('checkbox', { name: 'Bật nhịp mõ đều' }).check();
     await expect(chooser.getByRole('button', { name: 'Chậm 40–50 BPM' })).toBeVisible();

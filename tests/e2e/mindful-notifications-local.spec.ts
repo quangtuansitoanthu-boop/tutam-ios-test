@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { LOCAL_ONLY_PROXY } from './global-network-guard';
-import { loginAsAdmin, loginAsMember, settleClient } from './runtime-helpers';
+import { deferStartupNotification, loginAsAdmin, loginAsMember, settleClient } from './runtime-helpers';
 
 test('local D1 delivers prayers and rejoicing only to the post owner, without duplicate notifications', async ({ page, browser, baseURL }, info) => {
   test.setTimeout(90_000);
@@ -12,6 +12,7 @@ test('local D1 delivers prayers and rejoicing only to the post owner, without du
     localStorage.setItem('tutam_locale', 'vi');
     localStorage.setItem('tt_reflection_guide_seen_v1', '1');
   });
+  await deferStartupNotification(page);
   await loginAsMember(page, 'e2e-notification-devices-session-token');
   const sender = await browser.newContext({ baseURL, proxy: LOCAL_ONLY_PROXY });
   try {
@@ -94,6 +95,7 @@ test('local D1 delivers prayers and rejoicing only to the post owner, without du
     expect(requests.filter(path => path === '/api/practice/mindful-notifications')).toHaveLength(1);
     const beforeRead = requests.length;
     await page.locator('.notification-bell-btn').click();
+    await page.getByRole('tab', { name: 'Tất cả', exact: true }).click();
     await expect(page.locator('.notification-item').filter({ hasText: prayers.nickname })).not.toHaveClass(/unread/u);
     await expect(page.locator('.notification-item').filter({ hasText: rejoicing.nickname })).not.toHaveClass(/unread/u);
     expect(requests).toHaveLength(beforeRead);

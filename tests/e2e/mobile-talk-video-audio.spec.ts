@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { deferStartupNotification } from './runtime-helpers';
 
 const media = readFileSync(new URL('./fixtures/talk-video.mp4', import.meta.url));
 
@@ -300,6 +301,7 @@ async function actualGateAudio(page: Page): Promise<GateAudioSnapshot> {
 }
 
 async function delayedVideoAlbum(page: Page, testInfo: TestInfo, preloadNone = false) {
+  await deferStartupNotification(page);
   let releaseInitial!: () => void;
   let releaseTail!: () => void;
   const initial = new Promise<void>(resolve => { releaseInitial = resolve; });
@@ -373,11 +375,16 @@ async function delayedVideoAlbum(page: Page, testInfo: TestInfo, preloadNone = f
     snapshots.push({ phase, audio, video }); return audio;
   };
   const finish = async () => {
-    await sample('final-before-release');
-    releaseInitial(); releaseTail();
-    const evidencePath = testInfo.outputPath('real-album-frame-gate.json');
-    writeFileSync(evidencePath, JSON.stringify({ preloadNone, requests, snapshots }, null, 2));
-    await testInfo.attach('real-album-frame-gate.json', { contentType: 'application/json', path: evidencePath });
+    try {
+      if (!page.isClosed()) await sample('final-before-release');
+    } catch (error) {
+      if (!page.isClosed()) throw error;
+    } finally {
+      releaseInitial(); releaseTail();
+      const evidencePath = testInfo.outputPath('real-album-frame-gate.json');
+      writeFileSync(evidencePath, JSON.stringify({ preloadNone, requests, snapshots }, null, 2));
+      await testInfo.attach('real-album-frame-gate.json', { contentType: 'application/json', path: evidencePath });
+    }
   };
   return { album, viewer, requests, videoCut, sample, releaseInitial, releaseTail, finish };
 }

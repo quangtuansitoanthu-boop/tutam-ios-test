@@ -248,7 +248,7 @@ test.describe('admin dashboard', () => {
     await expect(page.getByRole('link', { name: 'Tháng này' })).toHaveAttribute('aria-current', 'page');
     await page.getByRole('link', { name: 'Năm nay' }).click();
     await settleClient(page);
-    await expect(page).toHaveURL(/\/admin\/community\?period=year$/u);
+    await expect(page).toHaveURL(/\/admin\/community\?section=ranking&period=year$/u);
     await expect(page.getByRole('link', { name: 'Năm nay' })).toHaveAttribute('aria-current', 'page');
     await page.setViewportSize({ width: 320, height: 700 });
     await expect(communityPeriods).toHaveCSS('display', 'grid');

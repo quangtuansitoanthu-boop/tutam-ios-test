@@ -124,8 +124,7 @@
     if (locked) return;
     if (updateUrl && browser) {
       const url = new URL(window.location.href);
-      if (next === 'mindful') url.searchParams.set('moderation', 'mindful');
-      else url.searchParams.delete('moderation');
+      url.searchParams.set('moderation', next);
       if (url.href !== window.location.href) replaceState(url, routePage.state);
     }
     kind = next; cursors = [null]; page = 0; selected = null; expandedId = null; notice = ''; error = '';

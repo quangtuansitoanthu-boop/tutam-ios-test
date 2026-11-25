@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { loginAsMember } from './runtime-helpers';
+import { deferStartupNotification, loginAsMember } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
+});
 
 for (const theme of ['light', 'dark']) {
   test(`name-copying sample text remains readable (${theme})`, async ({ page }) => {
@@ -33,7 +37,7 @@ test('valid name copying shows a check and advances after Vietnamese composition
   const first = page.locator('#name-line-0');
   const second = page.locator('#name-line-1');
   await expect(first).toBeEnabled();
-  for (const incorrect of ['nam mo a di da phat', 'Nam mô A Di Đà Phát', 'Nam mô Địa Tạng Vương Bồ Tát']) {
+  for (const incorrect of ['Nam mô A Di Đà Pháp', 'Nam mô Địa Tạng Vương Bồ Tát']) {
     await first.focus();
     await first.fill(incorrect);
     await expect(page.getByRole('img', { name: 'Đạt chuẩn', exact: true })).toHaveCount(0);
@@ -45,6 +49,17 @@ test('valid name copying shows a check and advances after Vietnamese composition
     const manualAdvanceObservedAt = await page.evaluate(() => Date.now());
     await page.waitForFunction(since => Date.now() - since >= 400, manualAdvanceObservedAt);
   }
+  // The last word without accents remains editable until the user commits it.
+  await first.fill('nam mo a di da phat');
+  await expect(first).toHaveValue('NAM MÔ A DI ĐÀ PHAT');
+  await expect(page.getByRole('img', { name: 'Đạt chuẩn', exact: true })).toHaveCount(0);
+  await first.press('Enter');
+  await expect(first).toHaveValue('NAM MÔ A DI ĐÀ PHẬT');
+  await expect(second).toBeFocused();
+  await expect(page.locator('.line-mismatch-toast')).toHaveCount(0);
+  await first.fill('Nam mô A Di Đà Phát');
+  await expect(first).toHaveValue('NAM MÔ A DI ĐÀ PHẬT');
+  await expect(page.getByRole('img', { name: 'Đạt chuẩn', exact: true })).toHaveCount(1);
   await first.focus();
   await first.fill('Nam mô A Di Đà');
   await expect(first).toBeFocused();
@@ -63,7 +78,7 @@ test('valid name copying shows a check and advances after Vietnamese composition
   await expect(page.getByRole('img', { name: 'Đạt chuẩn', exact: true })).toHaveCount(2);
   await expect(page.locator('.name-copying .total')).toContainText('2 danh hiệu');
   await first.focus();
-  await first.fill('Nam mô A Di Đà Phát');
+  await first.fill('Nam mô A Di Đà Pháp');
   await expect(page.getByRole('img', { name: 'Đạt chuẩn', exact: true })).toHaveCount(1);
   await expect(page.locator('.name-copying .total')).toContainText('1 danh hiệu');
   const autoAdvanceObservedAt = await page.evaluate(() => Date.now());
@@ -150,7 +165,7 @@ test('name copying leaves space for the native header when the viewport shrinks'
   await expect(page.locator('#name-line-0')).toBeEnabled();
   await page.evaluate(() => document.documentElement.dataset.nativeApp = 'true');
   await expect.poll(async () => {
-    const header = await page.locator('.tt-topbar').boundingBox();
+    const header = await page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true }).boundingBox();
     const content = await page.locator('.name-copying h1').boundingBox();
     return content!.y >= header!.y + header!.height;
   }).toBe(true);
@@ -276,7 +291,8 @@ for (const width of [375, 1440]) {
       await expect(page.locator('.name-copying .back')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Quay lại', exact: true })).toHaveCount(1);
       const contentBox = await page.locator('.name-copying h1').boundingBox();
-      const headerBox = await page.locator('.tt-topbar').boundingBox();
+      const header = page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true });
+      const headerBox = await header.boundingBox();
       expect(contentBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.screenshot({ path: `test-results/name-copying-${width}-${dark ? 'dark' : 'light'}.png` });
@@ -289,7 +305,7 @@ for (const width of [375, 1440]) {
       const inputBox = await page.locator('#name-line-0').boundingBox();
       expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(844 - (width === 375 ? 62 : 0));
       await page.screenshot({ path: `test-results/name-copying-input-${width}-${dark ? 'dark' : 'light'}.png` });
-      await page.locator('.tt-topbar .tt-back-btn').click();
+      await header.getByRole('button', { name: 'Quay lại', exact: true }).click();
       await expect(page).toHaveURL(/\/tu-tap$/);
       await page.goto('/tu-tap/chep-danh-hieu');
       await expect(page.locator('#name-line-0')).toHaveValue('NAM MÔ A DI ĐÀ PHẬT');

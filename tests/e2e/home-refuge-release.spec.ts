@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 import { fixtureEnglishPack } from './helpers/personal-journal-zen';
 
 for (const [name, width, height, dark, english] of [
@@ -22,8 +22,7 @@ for (const [name, width, height, dark, english] of [
     // Nội dung phải đọc được khi backend không truy cập được.
     await page.route(url => url.pathname.startsWith('/api/'), route => route.abort());
     if (english) await fixtureEnglishPack(page);
-    const notificationPrompt = page.locator('dialog.notification-modal-card');
-    await page.addLocatorHandler(notificationPrompt, () => notificationPrompt.getByRole('button', { name: english ? 'Maybe later' : 'Để sau', exact: true }).click());
+    await deferStartupNotification(page);
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await settleClient(page);
     const title = english ? 'Short refuge & life release ritual' : 'Bài quy y & phóng sinh ngắn';

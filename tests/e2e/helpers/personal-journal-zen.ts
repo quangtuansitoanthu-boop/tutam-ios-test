@@ -2,8 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import bundledEnglishManifest from '../../../src/lib/data/english-pack-manifest.json' with { type: 'json' };
-import { isDataApiPath, settleClient } from '../runtime-helpers';
-import { deferJournalNotifications } from './journal-controls';
+import { deferStartupNotification, isDataApiPath, settleClient } from '../runtime-helpers';
 
 export async function fixtureEnglishPack(page: Page) {
   const origin = new URL(process.env.SVELTEKIT_BASE_URL || 'http://localhost:8787').origin;
@@ -40,7 +39,7 @@ function journalCase(width: number, dark: boolean, locale: 'vi' | 'en', fallback
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize({ width, height: 900 });
-    await deferJournalNotifications(page, locale);
+    await deferStartupNotification(page);
     await page.addInitScript(({ dark, locale, fallback }) => {
       if (fallback) {
         Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: undefined });

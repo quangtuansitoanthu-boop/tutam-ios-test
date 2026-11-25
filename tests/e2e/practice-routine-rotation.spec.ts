@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { useNativeApiWithLocalBackend } from './runtime-helpers';
+import { deferStartupNotification, useNativeApiWithLocalBackend } from './runtime-helpers';
 
 test.afterEach(async ({ page }, info) => {
   if (info.title.startsWith('bowing principal settlement')) await page.unrouteAll({ behavior: 'ignoreErrors' });
@@ -9,7 +9,7 @@ test('personal routine saves and starts bowing with the standalone fullscreen la
   await page.setViewportSize({ width: 375, height: 844 });
   await page.addInitScript(() => localStorage.setItem('tutam_locale', 'vi'));
   await page.route('**/api/**', route => route.fulfill({ json: new URL(route.request().url()).pathname === '/api/session' ? { authenticated: false, user: null, csrfToken: null, expiresAt: null } : [] }));
-  await page.goto('/tu-tap');
+  await page.goto('/tu-tap', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-mounted="1"]');
   await page.getByRole('button', { name: 'Thời khóa tu tập', exact: true }).click();
   const list = page.getByRole('region', { name: 'Thời khóa tu tập', exact: true });
@@ -28,7 +28,7 @@ test('personal routine saves and starts bowing with the standalone fullscreen la
   await dialog.getByRole('button', { name: 'Lưu thời khóa', exact: true }).click();
   await expect(list.getByRole('status')).toHaveText('Đã lưu thời khóa trên thiết bị.');
   await expect(page).toHaveURL(/action=thoi-khoa/u);
-  await page.reload();
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(list).toBeVisible();
   const editButton = list.getByRole('button', { name: 'Sửa Kiểm tra Lễ Phật', exact: true });
   await editButton.click();
@@ -70,11 +70,12 @@ test('personal routine saves and starts bowing with the standalone fullscreen la
   }
   await page.setViewportSize({ width: 375, height: 844 });
   await page.locator('.lp-fullscreen-counter').click();
-  await expect(page.locator('.lp-fullscreen-counter')).toContainText('1 lạy');
+  const count = page.locator('.lp-fullscreen-counter [aria-live]');
+  await expect(count).toHaveText('1 / 3 lạy');
   await page.getByRole('button', { name: 'Quay về màn hình chuẩn bị', exact: true }).click();
   await expect(page.locator('.lp .routine-session').getByText('Lễ Phật buổi sáng', { exact: true })).toBeVisible();
   await page.locator('.lp__action-btn--start').click();
-  await expect(page.locator('.lp-fullscreen-counter')).toContainText('1 lạy');
+  await expect(count).toHaveText('1 / 3 lạy');
 });
 
 test('personal routine can save a dedication added before its bundled template finishes loading', async ({ page }) => {
@@ -148,6 +149,7 @@ for (const failFirstSave of [false, true]) test(`bowing principal settlement pre
   await page.clock.install({ time: now });
   await page.setViewportSize({ width: 390, height: 844 });
   await useNativeApiWithLocalBackend(page);
+  await deferStartupNotification(page);
   const headers = { 'access-control-allow-origin': new URL(baseURL || 'http://localhost:8787').origin, 'access-control-allow-credentials': 'true' };
   await page.addInitScript(() => {
     localStorage.setItem('tutam_locale', 'vi');
@@ -176,7 +178,7 @@ for (const failFirstSave of [false, true]) test(`bowing principal settlement pre
     } })
     : route.fulfill({ headers, json: new URL(route.request().url()).pathname === '/api/session' ? accounts[phase] : [] }));
   const initialSession = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session');
-  await page.goto('/tu-tap');
+  await page.goto('/tu-tap', { waitUntil: 'domcontentloaded' });
   expect(await (await initialSession).json()).toEqual(accounts.a);
   await page.waitForSelector('[data-mounted="1"]');
   await page.clock.runFor(32);

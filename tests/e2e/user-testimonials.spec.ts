@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { userTestimonials } from '../../src/lib/i18n/user-testimonials';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 
 for (const theme of ['light', 'dark'] as const) {
   test(`full user stories preserve separate authors and personal navigation (${theme})`, async ({ page }, testInfo) => {
+    await deferStartupNotification(page);
     await page.setViewportSize({ width: 375, height: 900 });
     await page.addInitScript(({ theme }) => {
       localStorage.setItem('tutam_locale', 'vi');

@@ -46,20 +46,26 @@ export function createPracticeFabController(
   let startTop = 0;
   let fitX = 0;
   let fitY = 0;
+  const bottomNav = element.ownerDocument?.querySelector<HTMLElement>('.qts-bottom-nav');
+
+  function availableViewport() {
+    const nav = bottomNav?.getBoundingClientRect();
+    return {
+      width: window.innerWidth,
+      height: nav && nav.height > 0 ? Math.min(nav.top, window.innerHeight) : window.innerHeight
+    };
+  }
 
   function setFitOffset(x: number, y: number): void {
     fitX = x;
     fitY = y;
-    element.style.marginLeft = x ? `${x}px` : '';
-    element.style.marginTop = y ? `${y}px` : '';
+    element.style.translate = x || y ? `${x}px ${y}px` : '';
   }
 
-  function fitExpandedPanel(): void {
+  function fitToViewport(): void {
     const rect = element.getBoundingClientRect();
     const base = { x: rect.left - fitX, y: rect.top - fitY };
-    const next = element.classList.contains('panel-open')
-      ? clampPracticeFabPosition(base, { width: window.innerWidth, height: window.innerHeight }, rect)
-      : base;
+    const next = clampPracticeFabPosition(base, availableViewport(), rect);
     setFitOffset(next.x - base.x, next.y - base.y);
   }
 
@@ -69,10 +75,7 @@ export function createPracticeFabController(
     element.style.bottom = 'auto';
     element.style.transform = 'none';
     const rect = element.getBoundingClientRect();
-    const next = clampPracticeFabPosition(position, {
-      width: window.innerWidth,
-      height: window.innerHeight
-    }, {
+    const next = clampPracticeFabPosition(position, availableViewport(), {
       width: rect.width || 60,
       height: rect.height || 200
     });
@@ -154,7 +157,7 @@ export function createPracticeFabController(
 
   function onResize(): void {
     if (element.classList.contains('panel-open')) {
-      fitExpandedPanel();
+      fitToViewport();
       return;
     }
     const rect = element.getBoundingClientRect();
@@ -166,14 +169,14 @@ export function createPracticeFabController(
   window.addEventListener('pointerup', finishDrag, true);
   window.addEventListener('pointercancel', finishDrag, true);
   element.addEventListener('click', onClick, true);
-  // A panel can grow after the user parked its collapsed button at an edge.
-  // Offset the visible panel without moving the saved anchor.
-  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitExpandedPanel);
+  // Keep the controls above the bottom navigation as the panel or navigation resizes.
+  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitToViewport);
   observer?.observe(element);
+  if (bottomNav) observer?.observe(bottomNav);
   window.addEventListener('resize', onResize);
   const initialFrame = initialPosition
     ? requestAnimationFrame(() => {
-      if (element.classList.contains('panel-open')) fitExpandedPanel();
+      if (element.classList.contains('panel-open')) fitToViewport();
       else {
         const clamped = apply(initialPosition);
         if (clamped.x !== initialPosition.x || clamped.y !== initialPosition.y) onSave(clamped);

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { principalStorageKey } from '../../src/lib/browser/principal-storage';
-import { loginAsAdmin, settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
+import { deferStartupNotification, loginAsAdmin, settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
 
 const customKey = 'tt_custom_rosary_phrases_v1';
 const logsKey = principalStorageKey(null, 'tt_practice_logs_v1');
@@ -320,6 +320,7 @@ test('unsettled restored custom count keeps its readable phrase and type instead
 });
 
 test('principal invalidation clears custom choices and the owner draft before a guest adds a phrase', async ({ page }) => {
+  await deferStartupNotification(page);
   await page.clock.install();
   const fetchLocal = await useNativeApiWithLocalBackend(page);
   await page.route('https://quangtu.vn/api/session', async route => {

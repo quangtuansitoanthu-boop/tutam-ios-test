@@ -150,7 +150,7 @@ for (const width of [375, 1440]) for (const dark of [false, true]) {
       })).toBe(true);
       const drawing = await page.evaluate(() => (window as unknown as { __approvedQuoteText: { text: string; font: string; align: string; x: number; y: number }[] }).__approvedQuoteText);
       expect(drawing.some(row => row.font.includes('Bookerly') && row.font.includes('italic'))).toBe(true);
-      expect(drawing.some(row => row.text.includes('Tu tập'))).toBe(true);
+      expect(drawing.some(row => row.text === 'Tu Tập Phật Pháp')).toBe(true);
       expect(drawing.map(row => row.text).join('')).toContain('“');
       expect(drawing.map(row => row.text).join('')).toContain('”');
       await info.attach('canvas-drawing-observations', { body: JSON.stringify(drawing, null, 2), contentType: 'application/json' });

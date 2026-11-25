@@ -323,7 +323,7 @@ for (const width of [375, 1440]) test(`idle completion respects composition and 
 test('finishing a passage with Enter advances once and preserves the completed draft', async ({ page }) => {
   const requests: string[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname === '/api/practice/copying') requests.push(request.method()); });
-  await page.goto('/tu-tap/chep-kinh');
+  await page.goto('/tu-tap/chep-kinh', { waitUntil: 'domcontentloaded' });
   await beginScriptureCopying(page);
   const input = page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true });
   const completed = normalizeCopyText(book.chapters[0].blocks[0]);

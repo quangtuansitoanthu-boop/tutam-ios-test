@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 for (const mode of [
   { name: 'phone light', width: 375, height: 812, dark: false },
@@ -97,7 +99,7 @@ test(`scripture preview and navigation follow the same theme with saved ${savedB
   await expect(preview).toHaveCSS('background-color', lightColor!);
   await page.screenshot({ path: testInfo.outputPath('practice-light.png'), animations: 'disabled' });
 
-  await page.locator('.tt-theme-btn').click();
+  await page.locator('.qts-nav .nav-theme-btn').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(preview).toHaveAttribute('data-read-bg', 'dark');
   await expect(preview).toHaveCSS('background-color', 'rgb(21, 18, 13)');
@@ -105,7 +107,7 @@ test(`scripture preview and navigation follow the same theme with saved ${savedB
     await expect.poll(() => page.evaluate(() => ['tt_bg', 'tutam_read_bg', 'tutam_read_bg_dark'].map(key => localStorage.getItem(key)))).toEqual(['dark', 'dark', 'dark']);
   await page.screenshot({ path: testInfo.outputPath('practice-dark.png'), animations: 'disabled' });
 
-  await page.locator('.tt-theme-btn').click();
+  await page.locator('.qts-nav .nav-theme-btn').click();
   await expect(preview).toHaveAttribute('data-read-bg', lightBackground);
   await expect(preview).toHaveCSS('background-color', lightColor!);
   // Unified app/paper selection persists the active palette into every legacy paper key.
@@ -131,7 +133,7 @@ for (const savedBackground of ['dark', 'cream', 'gray', 'white', 'purple']) {
     await page.goto('/tu-tap?article=tt_1780910773084');
   await settleClient(page);
     const preview = page.locator('.tt-preview');
-    const toggle = page.locator('.tt-theme-btn');
+    const toggle = page.locator('.qts-nav .nav-theme-btn');
     await expect(preview).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await expect(preview).toHaveAttribute('data-read-bg', 'dark');

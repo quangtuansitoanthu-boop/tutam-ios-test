@@ -1,9 +1,11 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { loginAsMember, settleClient, TEST_MEMBER_ID } from './runtime-helpers';
+import { deferStartupNotification, loginAsMember, settleClient, TEST_MEMBER_ID } from './runtime-helpers';
 import { useLocalMindfulPostResponses } from './helpers/mindful-local-response';
 import { closeReflectionSubmissionNotice, reflectionSubmissionNotice } from './helpers/reflection-submission-notice';
 import { changePersonalSyncState, initialPersonalSyncState, PERSONAL_SYNC_INTERVAL_MS } from '../../src/lib/domain/practice/personal-sync-policy';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 const prefix = `quangtu_principal_v1:${TEST_MEMBER_ID}:`;
 const communityPath = '/api/practice/mindful-posts';
@@ -306,7 +308,7 @@ async function openPersonal(page: Page) {
 }
 
 async function openHub(page: Page) {
-  if (!await page.locator('.tt-mode-card--reflection').isVisible()) await page.locator('.tt-topbar .tt-back-btn').click();
+  if (!await page.locator('.tt-mode-card--reflection').isVisible()) await page.locator('.qts-nav .nav-back-circle-btn').click();
   await expect(page.locator('.tt-mode-card--reflection')).toBeVisible();
 }
 
@@ -382,7 +384,9 @@ test('new mobile cards share the companion grid and private reflection saves wit
   const requests = contentRequests(page);
   const entry = publicReflection(`Ghi chép riêng E2E ${Date.now()}`);
   await page.getByRole('textbox', { name: 'Nhìn lại lỗi lầm & sám hối', exact: true }).fill(entry);
+  await page.locator('#tab-good-deed').click();
   await page.getByRole('textbox', { name: 'Việc thiện lành đã làm', exact: true }).fill('Nội dung thiện lành giữ riêng.');
+  await page.locator('#tab-repentance').click();
   await page.getByRole('button', { name: 'Lưu riêng tư', exact: true }).first().click();
   const saved = page.locator('dialog.app-dialog');
   await expect(saved).toContainText('Đã lưu riêng trên thiết bị.');
@@ -399,9 +403,6 @@ test('new mobile cards share the companion grid and private reflection saves wit
 });
 
 test('sharing and template reaction each send one mutation without a feed refetch', async ({ page, baseURL }) => {
-  await page.addLocatorHandler(page.getByRole('dialog', { name: 'Thông báo tu tập', exact: true }), async dialog => {
-    await dialog.getByRole('button', { name: 'Để sau', exact: true }).click();
-  });
   const readLocal = await useLocalMindfulPostResponses(page, baseURL!);
   await loginAsMember(page);
   await page.setViewportSize({ width: 375, height: 844 });

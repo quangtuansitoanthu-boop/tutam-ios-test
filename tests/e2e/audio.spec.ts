@@ -1,10 +1,18 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { principalStorageKey } from '../../src/lib/browser/principal-storage';
 import { readFileSync } from 'node:fs';
 import { loginAsMember, loginAsAdmin, settleClient, logoutThroughAccount, useNativeApiWithLocalBackend } from './runtime-helpers';
 
 const memberStorageKey = (key: string) => principalStorageKey('e2e-member', key);
 const offlineTalks = JSON.parse(readFileSync('src/lib/data/offline-talks.json', 'utf8')) as Array<{ id: string; tieu_de: string }>;
+const dreamStories = 'Các câu chuyện được kể trong album này đều từ những giấc mơ độ vong của chị Hoa và các anh thầy pháp, đây đều là các trải nghiệm cá nhân, không khẳng định tất cả đều là sự thực, do đó quý vị tin thì suy ngẫm, không tin xem giải trí, mong quý vị tôn trọng và không phỉ báng các nội dung có trong sách ạ';
+const journeys = 'Sách này dựa trên trải nghiệm cá nhân trong các giấc mộng của cư sĩ Dương Sinh ở Thánh Hiền đường, không khẳng định tất cả đều là sự thực, do đó quý vị tin thì suy ngẫm, không tin xem giải trí, mong quý vị tôn trọng và không phỉ báng các nội dung có trong sách ạ';
+const hueHienDreams = 'Các câu chuyện được kể trong album này đều từ những giấc mơ của cư sĩ Thích Nữ Huệ Hiền, đây đều là các trải nghiệm cá nhân, không khẳng định tất cả đều là sự thực, do đó quý vị tin thì suy ngẫm, không tin xem giải trí, mong quý vị tôn trọng và không phỉ báng các nội dung có trong sách ạ';
+async function dismissFirstRunNotification(page: Page): Promise<void> {
+  const prompt = page.getByRole('dialog', { name: 'Thông báo tu tập' });
+  await prompt.getByRole('button', { name: 'Để sau', exact: true }).click();
+  await expect(prompt).toHaveCount(0);
+}
 // Logout revokes the real session; each configured project owns its fixture.
 const audioPrincipalSessions = new Map([
   ['mobile-390-light', 'e2e-audio-logout-mobile-390-light-session-token'],
@@ -15,9 +23,9 @@ const audioPrincipalSessions = new Map([
 
 test.describe('Pháp Thoại public and download contracts', () => {
   for (const [bookId, title, message] of [
-    ['tt_1781452671270', 'ĐỊA NGỤC DU KÝ', 'Sách này dựa trên trải nghiệm cá nhân trong các giấc mộng của cư sĩ Dương Sinh ở Thánh Hiền đường, quý vị tin thì suy ngẫm, không tin xem giải trí'],
-    ['tt_1781517395283', 'LUÂN HỒI DU KÝ', 'Sách này dựa trên trải nghiệm cá nhân trong các giấc mộng của cư sĩ Dương Sinh ở Thánh Hiền đường, quý vị tin thì suy ngẫm, không tin xem giải trí'],
-    ['tt_1781081372340_1_xqcxo', 'SỨ MỆNH ĐỘ VONG', 'Các câu chuyện được kể trong album này đều từ những giấc mơ độ vong của chị Hoa và các anh thầy pháp, đây đều là các trải nghiệm cá nhân, do đó quý vị tin thì quý vị suy ngẫm, không tin xem giải trí ạ'],
+    ['tt_1781452671270', 'ĐỊA NGỤC DU KÝ', journeys],
+    ['tt_1781517395283', 'LUÂN HỒI DU KÝ', journeys],
+    ['tt_1781081372340_1_xqcxo', 'SỨ MỆNH ĐỘ VONG', dreamStories],
   ]) {
     test(`approved book notice keeps the reader open after ten seconds: ${title}`, async ({ page }) => {
       await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -28,6 +36,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
       await settleClient(page);
       const card = page.locator('.art-card').filter({ hasText: title });
       await expect(card).toHaveCount(1);
+      await dismissFirstRunNotification(page);
       await page.clock.install({ time: new Date('2026-11-18T08:00:00Z') });
       await page.clock.pauseAt(new Date('2026-11-18T08:00:01Z'));
       await card.locator('.art-card__open').click();
@@ -53,12 +62,11 @@ test.describe('Pháp Thoại public and download contracts', () => {
     });
   }
 
-  const dreamStories = 'Các câu chuyện được kể trong album này đều từ những giấc mơ độ vong của chị Hoa và các anh thầy pháp, đây đều là các trải nghiệm cá nhân, do đó quý vị tin thì quý vị suy ngẫm, không tin xem giải trí ạ';
   for (const [albumId, noticeText] of [
     ['pt_drive_c435791b562e6f6e9d345b414df4a273', dreamStories],
     ['pt_drive_f72e42f4cbb7db4312f96f4a1f28e2b4', dreamStories],
-    ['pt_drive_74959767068eaae1db4846f62b62eda8', 'Sách này dựa trên trải nghiệm cá nhân trong các giấc mộng của cư sĩ Dương Sinh ở Thánh Hiền đường, quý vị tin thì suy ngẫm, không tin xem giải trí'],
-    ['pt_1781961851755', 'Các câu chuyện được kể trong album này đều từ những giấc mơ của cư sĩ Thích Nữ Huệ Hiền, đây đều là các trải nghiệm cá nhân, do đó quý vị tin thì quý vị suy ngẫm, không tin xem giải trí ạ'],
+    ['pt_drive_74959767068eaae1db4846f62b62eda8', journeys],
+    ['pt_1781961851755', hueHienDreams],
   ]) {
   test(`shows the approved justified Bookerly story notice without adding API requests: ${albumId}`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -67,6 +75,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await page.route(/\/api\/talks(?:\?|$)/u, route => route.fulfill({ json: [album] }));
     await page.goto('/phap-thoai');
     await settleClient(page);
+    await dismissFirstRunNotification(page);
     const withSavedPosition = albumId === 'pt_drive_f72e42f4cbb7db4312f96f4a1f28e2b4';
     if (withSavedPosition) {
       await page.evaluate(({ key, id }) => {
@@ -592,6 +601,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await loginAsMember(page);
     await page.goto('/phap-thoai');
     await settleClient(page);
+    await dismissFirstRunNotification(page);
 
     const albumName = 'Pháp thoại kiểm thử E2E';
     const card = page.locator('.pt-card').filter({ hasText: albumName });
@@ -785,7 +795,11 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await page.goto('/');
     await settleClient(page);
 
-    await page.getByRole('button', { name: 'Đăng nhập ngay', exact: true }).click();
+    const login = page.getByRole('button', { name: 'Đăng nhập ngay', exact: true });
+    const notification = page.getByRole('dialog', { name: 'Thông báo tu tập' });
+    await expect(login.or(notification)).toBeVisible();
+    if (await notification.isVisible()) await dismissFirstRunNotification(page);
+    await login.click();
     await expect(page).toHaveURL(/\/ca-nhan\?tab=account/);
     await expect(page.getByRole('button', { name: 'Đăng nhập bằng Google', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Đăng nhập bằng Facebook', exact: true })).toHaveCount(0);
@@ -796,7 +810,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await page.getByRole('button', { name: 'Mở album Pháp thoại kiểm thử E2E' }).click();
     const albumDialog = page.getByRole('dialog', { name: 'Pháp thoại kiểm thử E2E' });
     await expect(albumDialog).toBeVisible();
-    await page.evaluate(() => window.dispatchEvent(new CustomEvent('quangtu:login-required')));
+    await albumDialog.getByRole('button', { name: 'Tải Tiếng mõ kiểm thử', exact: true }).click();
     await expect(page).toHaveURL(/\/ca-nhan\?tab=account/);
     await expect(page.getByRole('button', { name: 'Đăng nhập bằng Google', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Đăng nhập bằng Facebook', exact: true })).toHaveCount(0);

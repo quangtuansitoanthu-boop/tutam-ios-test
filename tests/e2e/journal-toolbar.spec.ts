@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
-import { deferJournalNotifications, openJournalSection } from './helpers/journal-controls';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+import { openJournalSection } from './helpers/journal-controls';
 
 for (const width of [375, 1440]) for (const dark of [false, true]) {
   test(`journal icon tools preserve the other field and require confirmation ${width} ${dark}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
-    await deferJournalNotifications(page);
+    await deferStartupNotification(page);
     await page.addInitScript(() => {
       localStorage.setItem('tt_reflection_guide_seen_v1', '1');
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
