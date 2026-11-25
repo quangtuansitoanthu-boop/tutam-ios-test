@@ -1635,20 +1635,20 @@
   .personal-summary-text span { color: var(--text2); font-size: var(--font-size-label); line-height: 1.6; }
   .personal-edit-btn { min-width: var(--touch-target-size); min-height: calc(var(--touch-target-size) + var(--dialog-action-gap) / 2); padding: var(--dialog-action-gap) var(--dialog-action-space); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--card); color: var(--text); font: inherit; font-size: var(--font-size-body); font-weight: 600; cursor: pointer; }
   .personal-editor-actions { display: flex; flex-direction: column; gap: var(--dialog-action-gap); }
-  .personal-edit-done { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
+  .personal-edit-done { background: var(--gold); border: 0; border-radius: 12px; color: var(--on-gold); font-weight: 800; }
   .personal-inline-summary .personal-edit-btn { touch-action: manipulation; }
   .personal-inline-editor { display: flex; flex-direction: column; gap: var(--dialog-action-space); min-width: 0; }
   .personal-inline-row1, .personal-inline-row3 { display: flex; flex-direction: column; min-width: 0; }
-  .personal-mode-segmented, .personal-frequency-segmented { display: flex; padding: calc(var(--dialog-action-gap) / 2); gap: calc(var(--dialog-action-gap) / 2); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--card); }
-  .personal-mode-btn, .personal-frequency-btn { flex: 1; min-width: 0; min-height: var(--touch-target-size); padding: var(--dialog-action-gap); border: 0; border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; font-size: var(--font-size-body); font-weight: 600; cursor: pointer; }
-  .personal-mode-btn.active { background: var(--gold); background: color-mix(in srgb, var(--gold) 88%, var(--on-gold)); color: var(--on-gold); box-shadow: inset 0 0 0 1px var(--on-gold); font-weight: 700; }
+  .personal-mode-segmented, .personal-frequency-segmented { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; gap: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg2); }
+  .personal-mode-btn, .personal-frequency-btn { min-width: 0; min-height: var(--touch-target-size); padding: 8px; border: 1.5px solid transparent; border-radius: 9px; background: transparent; color: var(--text2); font: inherit; font-weight: 600; cursor: pointer; }
+  .personal-mode-btn.active { background: var(--gold); border-color: var(--gold); color: var(--on-gold); font-weight: 700; box-shadow: 0 2px 8px color-mix(in srgb, var(--gold) 28%, transparent); }
   .personal-frequency { display: flex; flex-direction: column; gap: var(--dialog-action-gap); }
-  .personal-frequency-btn[aria-pressed='true'] { background: var(--gold-light); color: var(--text); }
+  .personal-frequency-btn[aria-pressed='true'] { background: var(--card); border-color: var(--gold); color: var(--brown); font-weight: 700; box-shadow: var(--shadow-sm); }
   .personal-inline-row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--dialog-action-space); align-items: start; }
   .personal-pill-col { display: flex; flex-direction: column; gap: var(--dialog-action-gap); min-width: 0; }
   .personal-col-label, .personal-name-label { color: var(--text2); font-size: var(--font-size-body); line-height: 1.6; }
   .personal-name-label { margin-bottom: var(--dialog-action-gap); font-weight: 600; }
-  .personal-select-sm, .personal-type-select, .personal-inline-title-input { box-sizing: border-box; width: 100%; min-width: 0; min-height: calc(var(--touch-target-size) + var(--dialog-action-gap) / 2); padding: var(--dialog-action-gap); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--card); color: var(--text); font: inherit; font-size: var(--font-size-input); }
+  .personal-select-sm, .personal-type-select, .personal-inline-title-input { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--touch-target-size); padding: 9px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text); font: inherit; font-size: var(--font-size-input); }
   .personal-select-sm:disabled { background: var(--bg3); color: var(--text2); cursor: not-allowed; }
   .personal-inline-footer { min-width: 0; }
   .personal-conversion-badge { color: var(--text2); font-size: var(--font-size-body); line-height: 1.6; overflow-wrap: anywhere; }

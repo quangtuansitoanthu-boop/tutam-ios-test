@@ -77,7 +77,17 @@
   let query = $state('');
   let openSectionIds = $state<Set<string>>(new Set(['dung-web', 'cai-app']));
   let openFaqIds = $state(new Set<string>());
+  const GUIDE_FONT_SCALE_KEY = 'tutam_guide_font_scale_v1';
+  let guideFontScale = $state(1);
   const searchResults = $derived(searchGuideTargets(searchTargets, query));
+
+  function stepFontScale(delta: number): void {
+    const next = Math.max(0.85, Math.min(1.35, Number((guideFontScale + delta).toFixed(2))));
+    guideFontScale = next;
+    if (browser) {
+      try { localStorage.setItem(GUIDE_FONT_SCALE_KEY, String(next)); } catch { /* ignore storage errors */ }
+    }
+  }
 
   function setOpen(set: Set<string>, id: string, open: boolean): Set<string> {
     const next = new Set(set);
@@ -131,6 +141,10 @@
   });
 
   onMount(() => {
+    try {
+      const saved = Number(localStorage.getItem(GUIDE_FONT_SCALE_KEY));
+      if (Number.isFinite(saved) && saved >= 0.85 && saved <= 1.35) guideFontScale = saved;
+    } catch { /* ignore storage errors */ }
     if (isNativeApp()) {
       openSectionIds = new Set(['dung-web']);
     }
@@ -151,24 +165,6 @@
 </svelte:head>
 
 <main class="guide-page">
-  <div class="guide-top-nav">
-    <button
-      type="button"
-      class="guide-back-btn"
-      onclick={() => {
-        if (typeof window !== 'undefined' && window.history.length > 1) {
-          window.history.back();
-        } else {
-          void goto('/ca-nhan');
-        }
-      }}
-      aria-label="Quay lại"
-    >
-      <span aria-hidden="true">←</span>
-      <span>{isEn ? 'Back' : 'Quay lại'}</span>
-    </button>
-  </div>
-
   <header class="guide-hero">
     <div class="guide-hero__badge" aria-hidden="true">
       <span>☸</span> {isEn ? 'Practice Handbook & Guides' : 'Cẩm Nang Tu Học & Hướng Dẫn'}
@@ -244,7 +240,16 @@
     {/if}
   </section>
 
-  <div class="guide-sections">
+  <div class="guide-font-bar" role="group" aria-label={isEn ? 'Adjust text size' : 'Chỉnh cỡ chữ hướng dẫn'}>
+    <span class="guide-font-label">{isEn ? 'Text size' : 'Cỡ chữ'}</span>
+    <div class="guide-font-actions">
+      <button type="button" class="guide-font-btn" aria-label={isEn ? 'Decrease text size' : 'Giảm cỡ chữ'} disabled={guideFontScale <= 0.85} onclick={() => stepFontScale(-0.1)}>A−</button>
+      <span class="guide-font-value" aria-live="polite">{Math.round(guideFontScale * 100)}%</span>
+      <button type="button" class="guide-font-btn" aria-label={isEn ? 'Increase text size' : 'Tăng cỡ chữ'} disabled={guideFontScale >= 1.35} onclick={() => stepFontScale(0.1)}>A+</button>
+    </div>
+  </div>
+
+  <div class="guide-sections" style={`--guide-font-scale:${guideFontScale}`}>
     {#if !inApp && !isStudy}
       <GuideInstallSection
         open={openSectionIds.has('cai-app')}
@@ -262,7 +267,7 @@
     {/each}
   </div>
 
-  <p class="guide-closing">{t.closingQuote}</p>
+  <p class="guide-closing" style={`--guide-font-scale:${guideFontScale}`}>{t.closingQuote}</p>
 
   <GuideConfirmModal />
 </main>

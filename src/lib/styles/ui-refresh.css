@@ -1,29 +1,5 @@
-/* Presentation only: palette and layout share the existing feature owners. */
-:root .tt-mode-card--thien { --mode-tint:var(--practice-meditation-tint); --mode-end:var(--practice-meditation-tint); --mode-ink:var(--practice-meditation-ink); }
-:root .tt-mode-card--chuoi { --mode-tint:var(--practice-scripture-copy-card-start); --mode-end:var(--practice-scripture-copy-card-end); --mode-ink:var(--practice-card-ink-strong); }
-:root .tt-mode-card--le-phat { --mode-tint:var(--practice-scripture-copy-card-start); --mode-end:var(--practice-scripture-copy-card-end); --mode-ink:var(--practice-scripture-copy-card-ink); }
-:root .tt-mode-card--precepts { --mode-tint:var(--practice-card-blue-start); --mode-end:var(--practice-card-blue-end); --mode-ink:color-mix(in srgb,var(--practice-card-blue-ink) 65%,var(--on-gold)); }
-:root .tt-mode-card--eight-precepts { --mode-tint:var(--practice-name-copy-start); --mode-end:var(--practice-name-copy-end); --mode-ink:var(--practice-name-copy-ink); }
-:root .tt-mode-card--thanh-tinh { --mode-tint:var(--practice-card-mint-start); --mode-end:var(--practice-card-mint-end); --mode-ink:var(--practice-card-mint-ink); }
-:root .tt-mode-card--kinh { --mode-tint:color-mix(in srgb,var(--practice-flower-icon) 65%,var(--card)); --mode-end:color-mix(in srgb,var(--practice-flower-icon) 25%,var(--card)); --mode-ink:var(--practice-card-ink-strong); }
-:root .tt-mode-card--tri-chu { --mode-tint:var(--practice-card-blue-start); --mode-end:var(--practice-card-blue-end); --mode-ink:var(--practice-card-blue-ink); }
-:root .tt-mode-card--name-copying { --mode-tint:var(--practice-name-copy-start); --mode-end:var(--practice-name-copy-end); --mode-ink:var(--practice-name-copy-ink); }
-:root .tt-mode-card--copying { --mode-tint:var(--practice-card-mint-start); --mode-end:var(--practice-card-mint-end); --mode-ink:color-mix(in srgb,var(--practice-card-mint-ink) 75%,var(--on-gold)); }
-:root .tt-mode-card--continue { --mode-tint:var(--practice-meditation-tint); --mode-end:var(--practice-mantra-tint); --mode-ink:var(--text); }
-:root .tt-mode-card--nghi-thuc { --mode-tint:var(--practice-scripture-copy-card-end); --mode-end:var(--practice-scripture-copy-card-start); --mode-ink:var(--practice-card-ink-strong); }
-:root .tt-mode-card--rec { --mode-tint:color-mix(in srgb,var(--practice-flower-icon) 65%,var(--card)); --mode-end:color-mix(in srgb,var(--practice-flower-icon) 25%,var(--card)); --mode-ink:var(--practice-card-ink-strong); }
-:root .tt-mode-card--tracker { --mode-tint:var(--practice-card-blue-start); --mode-end:var(--practice-card-blue-end); --mode-ink:var(--practice-card-blue-ink); }
-:root .tt-mode-card--community { --mode-tint:var(--practice-name-copy-card-start); --mode-end:var(--practice-name-copy-card-end); --mode-ink:var(--practice-name-copy-card-ink); }
-:root .tt-mode-card { background:linear-gradient(120deg,var(--mode-tint,var(--card)),var(--mode-end,var(--mode-tint,var(--card)))); color:var(--mode-ink,var(--text)); border:1px solid color-mix(in srgb,var(--mode-ink,var(--border)) 16%,transparent); border-radius:var(--radius-card); box-shadow:none; min-height:100px; }
-:root .tt-mode-card:hover { box-shadow:var(--shadow); transform:translateY(-2px); }
-:root .tt-mode-card .tt-mode-title { color:inherit; font-size:var(--font-size-card-title); }
-:root .tt-mode-card .tt-mode-desc { color:inherit; opacity:1; font-size:var(--font-size-body); line-height:1.5; }
-:root .tt-mode-card .tt-mode-icon-wrap,:root .tt-mode-card .tt-mode-arrow { background:color-mix(in srgb,var(--card) 65%,transparent); color:inherit; }
-:root .tt-mode-card--continue :is(.tt-mode-icon-wrap,.tt-mode-arrow) { background:color-mix(in srgb,currentColor 12%,transparent); }
-:root .tt-mode-card .tt-mode-icon-wrap { width:50px; height:50px; border-radius:15px; }
-:root .tt-hub-section--companion .tt-mode-card { min-height:96px; }
-:root .tt-hub-section--companion .tt-mode-icon-wrap { width:48px; height:48px; border-radius:14px; }
-:root .tt-hub-section--companion .tt-mode-desc { font-size:var(--font-size-body); line-height:1.35; }
+/* Presentation only: palette and layout share the existing feature owners.
+   Bảng màu 17 thẻ .tt-mode-card--* được quản lý duy nhất tại src/lib/styles/practice-theme.css. */
 :root .tt-hub-header { text-align:left; }
 :root .tt-hub-title { font-family:var(--font-app); font-size:var(--font-size-section-title); }
 :root .tt-hero { padding:24px 16px 8px; }
@@ -31,22 +7,6 @@
 :root .tt-hub-section--companion { margin-bottom:24px; }
 :root .tt-beginner-guide-wrap { margin-top:28px; }
 :root .tt-event-banner { margin-top:16px; }
-:root[data-theme='dark'] .tt-mode-card--thien { --mode-tint:#231a30; --mode-end:#35264a; --mode-ink:#e2d5f7; }
-:root[data-theme='dark'] .tt-mode-card--chuoi { --mode-tint:#2d1f14; --mode-end:#3d2817; --mode-ink:#f5d5b5; }
-:root[data-theme='dark'] .tt-mode-card--le-phat { --mode-tint:#292110; --mode-end:#3b2e12; --mode-ink:#fae8a7; }
-:root[data-theme='dark'] .tt-mode-card--precepts { --mode-tint:#112338; --mode-end:#18314e; --mode-ink:#c5e1ff; }
-:root[data-theme='dark'] .tt-mode-card--eight-precepts { --mode-tint:#2d1d28; --mode-end:#3d2536; --mode-ink:#f5d3eb; }
-:root[data-theme='dark'] .tt-mode-card--thanh-tinh { --mode-tint:#0d2826; --mode-end:#133835; --mode-ink:#c0eee9; }
-:root[data-theme='dark'] .tt-mode-card--kinh { --mode-tint:#2e1418; --mode-end:#3e1920; --mode-ink:#fcd2d8; }
-:root[data-theme='dark'] .tt-mode-card--copying { --mode-tint:#122b28; --mode-end:#193a36; --mode-ink:#c3f0ea; }
-:root[data-theme='dark'] .tt-mode-card--tri-chu { --mode-tint:#112238; --mode-end:#172d4a; --mode-ink:#c2ddfa; }
-:root[data-theme='dark'] .tt-mode-card--nghi-thuc { --mode-tint:#25211b; --mode-end:#332d24; --mode-ink:#e8ded0; }
-:root[data-theme='dark'] .tt-mode-card--name-copying { --mode-tint:#112730; --mode-end:#183742; --mode-ink:#c4eef5; }
-:root[data-theme='dark'] .tt-mode-card--tracker { --mode-tint:#1c2538; --mode-end:#26344d; --mode-ink:#cadcff; }
-:root[data-theme='dark'] .tt-mode-card--rec { --mode-tint:#331d24; --mode-end:#452530; --mode-ink:#ffd2dc; }
-:root[data-theme='dark'] .tt-mode-card--community { --mode-tint:#1a2b16; --mode-end:#243d1f; --mode-ink:#ccebc4; }
-:root[data-theme='dark'] .tt-mode-card :is(.tt-mode-icon-wrap,.tt-mode-arrow) { background:rgba(255,255,255,.12); color:inherit; }
-:root .tt-mode-card--vegan :is(.tt-mode-icon-wrap,.tt-mode-arrow) { background:color-mix(in srgb,currentColor 16%,transparent); }
 .qts-bottom-nav__item[data-nav='personal'] { --nav-accent:#725b91; }
 .inline-account-notice:empty { display:none; }
 .inline-account-notice > * + * { margin-top:14px; }
@@ -203,4 +163,382 @@
 /* Shell đã chừa chỗ cho thanh điều hướng; màn chọn kinh không cộng lại lần nữa. */
 :root body .copy-page:not(.copy-writing) {
   padding-bottom: var(--space-page);
+}
+
+/* ==================== CHẤT LIỆU NỔI KHỐI 3D PHA LÊ ĐỒNG BỘ TOÀN APP (GIỮ NGUYÊN MÀU, ẢNH & NỀN ĐỌC) ==================== */
+
+/* 1. Bottom Nav active pill & các nút tròn điều hướng / công cụ (circle-3d) */
+html:root body .qts-bottom-nav__item[aria-current='page'] .qts-bottom-nav__icon {
+  border: 1px solid color-mix(in srgb, var(--tab-color, var(--gold)) 28%, var(--border));
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.78),
+    inset 0 -2px 0 rgba(60, 40, 10, 0.15),
+    0 4px 10px -2px rgba(60, 40, 10, 0.2);
+}
+html:root[data-theme='dark'] body .qts-bottom-nav__item[aria-current='page'] .qts-bottom-nav__icon {
+  border-color: color-mix(in srgb, var(--tab-color-dark, var(--gold2)) 32%, var(--border));
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.45),
+    0 4px 12px -2px rgba(0, 0, 0, 0.45);
+}
+
+html:root body :is(
+  .nav-theme-btn,
+  .notification-bell-btn,
+  .greeting-btn,
+  .pt-fp-collapse-btn,
+  .pt-fp-close-btn,
+  .pt-fp-ctrl-btn,
+  .strip-arrow-btn,
+  .recipe-back
+) {
+  background: linear-gradient(145deg, var(--card), var(--bg2));
+  border: 1px solid var(--border);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.88),
+    inset 0 -2px 0 rgba(60, 40, 10, 0.12),
+    0 4px 10px -2px rgba(60, 40, 10, 0.14);
+  transition: transform 0.12s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+html:root[data-theme='dark'] body :is(
+  .nav-theme-btn,
+  .notification-bell-btn,
+  .greeting-btn,
+  .pt-fp-collapse-btn,
+  .pt-fp-close-btn,
+  .pt-fp-ctrl-btn,
+  .strip-arrow-btn,
+  .recipe-back
+) {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.46),
+    0 5px 12px -2px rgba(0, 0, 0, 0.45);
+}
+
+/* 2. Bề mặt thẻ 3D Pha lê sáng/tối (surface-3d) — không đụng vùng đọc kinh (.reader-*, .ttp-body, .pdf-*) */
+html:root body :is(
+  .weekly-lunar-strip,
+  .art-card,
+  .library-disclosure > summary,
+  .library-options,
+  .quotes-filters,
+  .quotes-list > article,
+  .pt-card,
+  .pt-as-track-list-wrap,
+  .cn-personal-shortcuts > a,
+  .cn-big-tab-card,
+  .cn-card,
+  .cn-author-card,
+  .cn-channel-card,
+  .settings-section,
+  .privacy-card,
+  .guide-search,
+  .guide-section,
+  .tt-rosary__meta,
+  .meditation-sound-picker__tile:not(.selected),
+  .meditation-volume-card,
+  .vegan .card,
+  .vegan nav.glass
+) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0) 46%),
+    linear-gradient(155deg, var(--card) 0%, var(--bg2) 100%);
+  border-color: var(--border);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.92),
+    inset 0 -3px 0 rgba(60, 40, 10, 0.1),
+    0 8px 18px -6px rgba(60, 40, 10, 0.14),
+    0 2px 6px rgba(60, 40, 10, 0.06);
+}
+html:root[data-theme='dark'] body :is(
+  .weekly-lunar-strip,
+  .art-card,
+  .library-disclosure > summary,
+  .library-options,
+  .quotes-filters,
+  .quotes-list > article,
+  .pt-card,
+  .pt-as-track-list-wrap,
+  .cn-personal-shortcuts > a,
+  .cn-big-tab-card,
+  .cn-card,
+  .cn-author-card,
+  .cn-channel-card,
+  .settings-section,
+  .privacy-card,
+  .guide-search,
+  .guide-section,
+  .tt-rosary__meta,
+  .meditation-sound-picker__tile:not(.selected),
+  .meditation-volume-card,
+  .vegan .card,
+  .vegan nav.glass
+) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 46%),
+    linear-gradient(155deg, var(--card) 0%, var(--bg2) 100%);
+  border-color: var(--border);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.46),
+    0 10px 22px -6px rgba(0, 0, 0, 0.5),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Thanh "Thư viện của bạn" ở Kinh sách dạng khối 3D bo tròn */
+html:root body .library-disclosure > summary {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding-inline: 14px;
+  margin-block: 6px;
+}
+
+/* 3. Bề mặt 3D ánh kim kem-vàng (gold-surface-3d) */
+html:root body :is(
+  .daily-dhammapada-card,
+  .library-my-quotes,
+  .pt-page-header,
+  .pt-as-album-banner,
+  .pt-mini-player,
+  .pt-options,
+  .pt-as-track-item.active,
+  .cn-welcome-banner,
+  .cn-big-tab-icon-wrap,
+  .meditation-sound-picker__tile.selected
+) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.04) 48%),
+    linear-gradient(145deg, var(--gold-light) 0%, var(--gold-muted) 100%);
+  border-color: color-mix(in srgb, var(--gold) 35%, var(--border));
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -3px 0 rgba(140, 96, 24, 0.16),
+    0 8px 18px -6px rgba(168, 120, 36, 0.22),
+    0 2px 5px rgba(60, 40, 10, 0.06);
+}
+html:root[data-theme='dark'] body :is(
+  .daily-dhammapada-card,
+  .library-my-quotes,
+  .pt-page-header,
+  .pt-as-album-banner,
+  .pt-mini-player,
+  .pt-options,
+  .pt-as-track-item.active,
+  .cn-welcome-banner,
+  .cn-big-tab-icon-wrap,
+  .meditation-sound-picker__tile.selected
+) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 48%),
+    linear-gradient(145deg, var(--gold-light) 0%, var(--gold-muted) 100%);
+  border-color: color-mix(in srgb, var(--gold) 38%, var(--border));
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.48),
+    0 10px 22px -6px rgba(0, 0, 0, 0.52);
+}
+
+/* Header tím dịu 3D của hộp thoại Chọn Thiền định */
+html:root body .meditation-chooser .meditation-chooser__dialog > header {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: linear-gradient(145deg, var(--practice-meditation-tint, #eee6fa), color-mix(in srgb, var(--practice-meditation-tint, #eee6fa) 76%, #7a56a8));
+  border: 1px solid color-mix(in srgb, #7a56a8 28%, var(--border));
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.72),
+    inset 0 -3px 0 rgba(40, 20, 70, 0.14),
+    0 8px 18px -5px rgba(90, 60, 140, 0.2);
+}
+html:root[data-theme='dark'] body .meditation-chooser .meditation-chooser__dialog > header {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.45),
+    0 10px 22px -6px rgba(0, 0, 0, 0.5);
+}
+
+/* 4. Chip lọc / nút viên thuốc trung tính 3D (btn-neutral-3d) — chống co ép & tràn chữ */
+html:root body :is(
+  .pt-tab:not(.active),
+  .library-options-toggle,
+  .filter-toggle,
+  .filter-reset,
+  .top-ten-trigger,
+  .pt-as-back,
+  .pt-as-action-btn:not(.active),
+  .pt-fp-pill-btn,
+  .create-quote-image,
+  .strip-expand-btn,
+  .guide-jump-bar a,
+  .tt-rosary__options-bar button,
+  .vegan .days button:not([aria-pressed='true']),
+  .vegan .dish-view
+) {
+  flex-shrink: 0;
+  background: linear-gradient(155deg, var(--card), var(--bg2));
+  border: 1px solid var(--border);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.88),
+    inset 0 -2px 0 rgba(60, 40, 10, 0.11),
+    0 3px 8px -2px rgba(60, 40, 10, 0.12) !important;
+}
+html:root[data-theme='dark'] body :is(
+  .pt-tab:not(.active),
+  .library-options-toggle,
+  .filter-toggle,
+  .filter-reset,
+  .top-ten-trigger,
+  .pt-as-back,
+  .pt-as-action-btn:not(.active),
+  .pt-fp-pill-btn,
+  .create-quote-image,
+  .strip-expand-btn,
+  .guide-jump-bar a,
+  .tt-rosary__options-bar button,
+  .vegan .days button:not([aria-pressed='true']),
+  .vegan .dish-view
+) {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.44),
+    0 4px 10px -2px rgba(0, 0, 0, 0.4) !important;
+}
+html:root body :is(.pt-tab, .library-options-toggle, .filter-toggle, .filter-reset) {
+  white-space: nowrap;
+  padding-inline: 14px;
+}
+
+/* Nút công cụ trên nền giấy của PracticeSession (dùng --bg / --border của giấy) */
+html:root body :is(.ttp-rbar-btn:not(.active):not(.ttp-settings-trigger), .ttp-sheet-select) {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 0 rgba(60, 40, 10, 0.1),
+    0 3px 8px -2px rgba(60, 40, 10, 0.1);
+}
+
+/* 5. Nút Vàng 3D & Chip đang chọn (btn-gold-3d) — chữ --on-gold (#24180c) sắc nét */
+html:root body :is(
+  .pt-tab.active:not(.pt-tab-offline),
+  .pt-card-play-btn,
+  .pt-as-play-all-btn,
+  .pt-fp-play-btn,
+  .tt-rosary__count-button,
+  .day-col.is-selected,
+  .month-day-cell.is-selected,
+  .ttp-settings-trigger,
+  .meditation-chooser__actions .primary
+) {
+  background: linear-gradient(145deg, var(--gold2) 0%, var(--gold) 60%, #b5832c 100%);
+  color: var(--on-gold);
+  border-color: rgba(255, 255, 255, 0.42);
+  font-weight: 800;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.62),
+    inset 0 -3px 0 rgba(90, 56, 8, 0.26),
+    0 6px 14px -3px color-mix(in srgb, var(--gold) 45%, transparent);
+}
+html:root body .pt-tab.active:not(.pt-tab-offline) small {
+  background: rgba(36, 24, 12, 0.14);
+  color: var(--on-gold);
+}
+html:root body :is(.day-col.is-selected, .month-day-cell.is-selected) :is(.day-weekday, .day-solar-num, .day-lunar-num) {
+  color: var(--on-gold);
+}
+
+/* Nút Ăn chay đang chọn (rừng xanh 3D) */
+html:root body .vegan button[aria-pressed='true'] {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.38),
+    inset 0 -2.5px 0 rgba(0, 0, 0, 0.28),
+    0 6px 14px -3px rgba(14, 62, 43, 0.38);
+}
+
+/* 6. Khung ảnh bìa sách / album nổi khối 3D */
+html:root body :is(.art-thumb, .pt-card-thumb, .pt-as-banner-cover) {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.38),
+    0 8px 18px -4px rgba(0, 0, 0, 0.2);
+}
+html:root body .pt-fp-artwork-box {
+  border: 1.5px solid rgba(255, 255, 255, 0.42);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.5),
+    0 18px 36px -8px rgba(60, 40, 10, 0.32);
+}
+html:root[data-theme='dark'] body .pt-fp-artwork-box {
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    0 18px 38px -8px rgba(0, 0, 0, 0.65);
+}
+
+/* 7. Nâng tương phản chữ phụ trên nền 3D sáng/tối (thay --muted nhạt bằng --text2 sắc nét) */
+html:root body :is(
+  .cn-big-tab-desc,
+  .art-author,
+  .art-date,
+  .art-excerpt,
+  .pt-card-meta-item,
+  .pt-fp-subtitle,
+  .pt-fp-times,
+  .pt-as-meta,
+  .pt-as-album-desc,
+  .tt-rosary__meta > div > span,
+  .tt-rosary__hint
+) {
+  color: var(--text2);
+  font-weight: 500;
+}
+
+/* 8. Trang Chính sách bảo mật: ẩn nút Quay lại cũ (đã lên SiteHeader) & căn giữa tiêu đề */
+html:root body .privacy-container > .top-nav {
+  display: none;
+}
+html:root body .privacy-card > .header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Phản hồi nhấn vật lý (:active) đồng bộ */
+html:root body :is(
+  .nav-theme-btn,
+  .notification-bell-btn,
+  .greeting-btn,
+  .pt-tab,
+  .pt-card-play-btn,
+  .pt-as-play-all-btn,
+  .pt-as-action-btn,
+  .pt-fp-ctrl-btn,
+  .pt-fp-play-btn,
+  .pt-fp-pill-btn,
+  .cn-big-tab-card,
+  .cn-personal-shortcuts > a,
+  .tt-rosary__count-button
+):active:not(:disabled) {
+  transform: translateY(1.5px) scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:root body :is(
+    .pbb-compact,
+    .nav-theme-btn,
+    .notification-bell-btn,
+    .greeting-btn,
+    .pt-tab,
+    .pt-card-play-btn,
+    .pt-as-play-all-btn,
+    .pt-as-action-btn,
+    .pt-fp-ctrl-btn,
+    .pt-fp-play-btn,
+    .pt-fp-pill-btn,
+    .cn-big-tab-card,
+    .cn-personal-shortcuts > a,
+    .tt-rosary__count-button
+  ) {
+    transition: none;
+    transform: none;
+  }
 }

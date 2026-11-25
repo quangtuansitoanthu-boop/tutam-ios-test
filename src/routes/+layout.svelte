@@ -437,8 +437,8 @@
 <svelte:head>
   <title>{LEGACY_MASTER_LAYOUT_CONTRACT.documentTitle}</title>
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/assets/branding/tu-tap-logo.png" type="image/png" />
-  <link rel="apple-touch-icon" href="/assets/branding/tu-tap-logo.png" />
+  <link rel="icon" sizes="48x48" href="/assets/branding/temple-favicon.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/assets/branding/temple-maskable-512.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

@@ -506,9 +506,9 @@ button:focus-visible,input:focus-visible{outline:3px solid color-mix(in srgb,#72
   .meditation-chooser .meditation-chooser__dialog > header h2,.meditation-chooser .meditation-chooser__dialog > header p{color:inherit}
   header p,legend,.meditation-chooser fieldset>small,.meditation-chooser__custom,.meditation-chooser__check,.meditation-chooser__range{color:inherit}
   fieldset{border-color:var(--border2)}
-  .meditation-chooser__tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--radius-sm);padding-bottom:var(--radius-control)}
-  .meditation-chooser__tabs button{min-width:0;min-height:44px;padding:var(--radius-sm);border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:inherit;font:inherit;font-size:var(--font-size-meta);line-height:1.5;white-space:normal;overflow-wrap:break-word}
-  .meditation-chooser__tabs button[aria-selected='true']{border-bottom-color:var(--gold);color:var(--gold);font-weight:700}
+  .meditation-chooser__tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:4px;margin-bottom:var(--radius-control);background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-control)}
+  .meditation-chooser__tabs button{min-width:0;min-height:44px;padding:var(--radius-sm) 4px;border:1px solid transparent;border-radius:calc(var(--radius-control) - 4px);background:transparent;color:var(--text2);font:inherit;font-size:var(--font-size-body);font-weight:600;line-height:1.3;white-space:normal;overflow-wrap:break-word;cursor:pointer;transition:background-color var(--motion-press) var(--ease-standard),border-color var(--motion-press) var(--ease-standard),color var(--motion-press) var(--ease-standard)}
+  .meditation-chooser__tabs button[aria-selected='true']{background:linear-gradient(145deg,var(--gold2) 0%,var(--gold) 65%,color-mix(in srgb,var(--gold) 85%,var(--on-gold)) 100%);border-color:color-mix(in srgb,var(--card) 42%,var(--gold));color:var(--on-gold);font-weight:700;box-shadow:inset 0 1px 0 color-mix(in srgb,var(--card) 45%,transparent),var(--shadow-sm)}
   .meditation-chooser__panels{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:var(--radius-sm)}
   .meditation-chooser__panels .meditation-sound-picker__grid{overflow:visible;overscroll-behavior:auto}
   .meditation-chooser__panel-note{margin:0 0 var(--radius-control);font-size:.75rem;line-height:1.5}

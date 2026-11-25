@@ -148,9 +148,21 @@ export interface OfflineLibrarySnapshot {
   albums: OfflineAlbum[];
   bytes: number;
   trackCounts: Record<string, number>;
+  trackUrlsByAlbum: Map<string, Set<string>>;
 }
 
 export type OfflineAlbumStatus = 'none' | 'partial' | 'downloaded';
+
+export function offlineCatalogProgress(snapshot: OfflineLibrarySnapshot | null, album: { id: string; tracks: readonly { url: string }[] }): {
+  count: number; status: OfflineAlbumStatus;
+} {
+  const urls = snapshot?.trackUrlsByAlbum.get(album.id);
+  if (!snapshot || !urls) return { count: 0, status: 'none' };
+  let count = 0;
+  for (const track of album.tracks) if (urls.has(track.url)) count++;
+  const complete = count > 0 && count === album.tracks.length && snapshot.albums.some(saved => saved.id === album.id);
+  return { count, status: complete ? 'downloaded' : count ? 'partial' : 'none' };
+}
 
 let databasePromise: Promise<IDBDatabase> | undefined;
 
@@ -351,16 +363,21 @@ export async function readOfflineLibrarySnapshot(access?: OfflineAudioAccess): P
   const allowed = await Promise.all(raw.albums.map(album => readableAlbum(album, raw.tracks, context)));
   const albums = allowed.filter((album): album is OfflineAlbum => Boolean(album));
 
-  const trackCounts: Record<string, number> = {};
+  const trackUrlsByAlbum = new Map<string, Set<string>>();
   for (const album of albums) {
-    trackCounts[album.id] = (await albumTracks(album.id, album, raw.tracks, context)).length;
+    const tracks = await albumTracks(album.id, album, raw.tracks, context);
+    trackUrlsByAlbum.set(album.id, new Set(tracks.map(track => track.url)));
   }
-  const completeIds = new Set(Object.keys(trackCounts));
+  const completeIds = new Set(trackUrlsByAlbum.keys());
   for (const track of raw.tracks) {
     const readable = await readableTrack(track, context);
-    if (readable && !completeIds.has(readable.albumId)) trackCounts[readable.albumId] = (trackCounts[readable.albumId] ?? 0) + 1;
+    if (!readable || completeIds.has(readable.albumId)) continue;
+    const urls = trackUrlsByAlbum.get(readable.albumId) ?? new Set<string>();
+    urls.add(readable.url);
+    trackUrlsByAlbum.set(readable.albumId, urls);
   }
+  const trackCounts = Object.fromEntries([...trackUrlsByAlbum].map(([id, urls]) => [id, urls.size]));
   // Quota là bytes vật lý, kể cả bản cũ đang chờ bằng chứng quyền; không xóa media.
   const bytes = raw.tracks.reduce((total, track) => total + (track.blob?.size ?? 0), 0);
-  return { albums, bytes, trackCounts };
+  return { albums, bytes, trackCounts, trackUrlsByAlbum };
 }

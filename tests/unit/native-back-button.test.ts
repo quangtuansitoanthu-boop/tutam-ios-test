@@ -133,7 +133,8 @@ it.each([
   '.tt-section-view .tt-back-btn',
   '#copy-options .panel-heading button',
   '.copy-writing .issues-heading button',
-  '.copy-writing .writing-back, .copy-writing .writing-bar > .icon-button',
+  '.copy-writing .writing-back',
+  '.copy-writing .writing-bar > .icon-button',
   '.tt-topbar .tt-back-btn',
 ])('hardware Back activates the visible practice control %s before history', async (selector) => {
   let handler: (value: {canGoBack:boolean}) => void = () => {};
@@ -196,6 +197,34 @@ it.each([
     expect(dismiss).toHaveBeenCalledOnce();
     expect(parentClose).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
+    expect(historyBack).not.toHaveBeenCalled();
+  } finally { dom.window.close(); }
+});
+
+
+it.each([
+  ['narrow copying editor with its desktop toolbar hidden', '/tu-tap/chep-kinh', '<div class="copy-writing"><header class="writing-bar" hidden><button class="icon-button">Back</button></header><button class="writing-back" data-target>Đổi kinh hoặc phẩm</button></div>'],
+  ['practice chapter reader', '/tu-tap', '<nav class="qts-nav qts-nav--subpage"><button class="nav-back-circle-btn" data-custom-back="1">Back</button></nav><div class="tt-preview"><div class="tt-chapter-reader"><button class="tt-reader-back-btn" data-target>Quay lại</button></div></div>'],
+  ['practice preview unified header', '/tu-tap', '<nav class="qts-nav qts-nav--subpage"><button class="nav-back-circle-btn" data-custom-back="1" data-target>Back</button></nav><div class="tt-preview"></div>'],
+  ['practice route back unified header', '/tu-tap', '<nav class="qts-nav qts-nav--subpage"><button class="nav-back-circle-btn" data-custom-back="1" data-target>Back</button></nav><section data-practice-route-back></section>'],
+  ['personal subtab unified header', '/ca-nhan', '<nav class="qts-nav qts-nav--subpage"><button class="nav-back-circle-btn" data-custom-back="1" data-target>Back</button></nav><main></main>'],
+])('hardware Back activates %s instead of exiting via history.back', async (_name, pathname, html) => {
+  const dom = new JSDOM(html);
+  const target = dom.window.document.querySelector<HTMLButtonElement>('[data-target]')!;
+  dom.window.document.querySelectorAll('button').forEach(btn => Object.defineProperty(btn, 'offsetParent', { value: btn.closest('[hidden]') ? null : {} }));
+  const click = vi.fn(), historyBack = vi.fn();
+  target.addEventListener('click', click);
+  let handler: (value: { canGoBack: boolean }) => void = () => {};
+  vi.stubGlobal('document', dom.window.document);
+  vi.stubGlobal('window', {
+    Capacitor: { Plugins: { App: { addListener: async (_name: string, callback: typeof handler) => { handler = callback; } } } },
+    location: { pathname, search: '' }, history: { back: historyBack }, dispatchEvent: () => true,
+  });
+  const { initializeNativeBackButton } = await import('$lib/browser/native-back-button');
+  try {
+    await initializeNativeBackButton();
+    handler({ canGoBack: true });
+    expect(click).toHaveBeenCalledOnce();
     expect(historyBack).not.toHaveBeenCalled();
   } finally { dom.window.close(); }
 });

@@ -20,7 +20,7 @@ vi.mock('$lib/browser/offline-audio-database', async importOriginal => {
 vi.mock('$lib/browser/media-session', () => ({ configureMediaSession: () => () => {}, updateMediaSessionMetadata() {}, updateMediaSessionPositionState() {}, updateMediaSessionPlaybackState() {} }));
 import { AudioPlayerController } from '../../../src/lib/browser/audio-player-controller';
 import { getOfflineTrack, getOfflineTracksForAlbum } from '../../../src/lib/browser/offline-audio-database';
-import { fetchTalkAlbums } from '../../../src/lib/browser/content-catalogs';
+import { fetchTalkAlbums, restoreLocalTalkAlbum } from '../../../src/lib/browser/content-catalogs';
 import publicTalkStreams from '$lib/data/public-talk-streams.json';
 import { markVerifiedTalkCatalog } from '$lib/browser/talk-catalog-proof';
 
@@ -198,6 +198,59 @@ it('recovers a Báo Ứng Hiện Đời queue already playing on Drive with its 
   expect(bridge.plugin.setQueue).not.toHaveBeenCalled();
 });
 
+it('restores catalog URLs and video controls from a native queue and can play the next part', async () => {
+  await controller.ready;
+  controller.destroy();
+  await vi.waitFor(() => expect(bridge.plugin.stop).toHaveBeenCalled());
+  bridge.plugin.stop.mockClear();
+  const id = 'video-recovery';
+  const tracks = [1, 2].map(part => ({ title: `Part ${part}`, url: `/api/audio/drive/video-${part}`, media_type: 'video' as const }));
+  localStorage.setItem('quangtu_cached_talk_catalog_v1', JSON.stringify([{ id, tieu_de: 'Video', visibility: 'public', tracks }]));
+  const nativeTracks = tracks.map(({ title, url }) => ({ title, url: `https://quangtu.vn${url}` }));
+  bridge.plugin.peek.mockResolvedValueOnce({ ...state, album: { id, title: 'Video', description: '', tracks: nativeTracks },
+    position: 57, trackIndex: 0, playing: true, playWhenReady: true });
+
+  controller = new AudioPlayerController();
+  await controller.ready;
+  expect(controller.snapshot.album?.tracks).toEqual(tracks);
+  expect(controller.audio.src).toBe(nativeTracks[0].url);
+  expect(controller.snapshot.currentTime).toBe(57);
+  expect(bridge.plugin.setQueue).not.toHaveBeenCalled();
+  await controller.next();
+  expect(controller.snapshot).toMatchObject({ playing: true, trackIndex: 1, album: { id } });
+});
+
+it('honors a next-track tap immediately after the recovered mini player becomes visible', async () => {
+  await controller.ready;
+  controller.destroy();
+  await vi.waitFor(() => expect(bridge.plugin.stop).toHaveBeenCalled());
+  bridge.plugin.stop.mockClear();
+  const id = 'restored-on-first-tap';
+  const tracks = [1, 2].map(part => ({ title: `Part ${part}`, url: `/api/audio/drive/part-${part}` }));
+  localStorage.setItem('quangtu_cached_talk_catalog_v1', JSON.stringify([{ id, visibility: 'public', tracks }]));
+  bridge.plugin.peek.mockResolvedValueOnce({ ...state, album: { ...album, id,
+    tracks: tracks.map(track => ({ ...track, url: `https://quangtu.vn${track.url}` })) } });
+  controller = new AudioPlayerController();
+  let next: Promise<void> | undefined;
+  const unsubscribe = controller.subscribe(snapshot => {
+    if (!next && snapshot.album?.id === id) next = controller.next();
+  });
+  await controller.ready;
+  await next;
+  unsubscribe();
+  expect(controller.snapshot).toMatchObject({ playing: true, trackIndex: 1, album: { id, tracks } });
+});
+
+it('keeps a different host or reordered native queue distinct from the cached album', async () => {
+  await controller.ready;
+  const tracks = [{ title: 'Part 1', url: '/api/audio/drive/one' }, { title: 'Part 2', url: '/api/audio/drive/two' }];
+  localStorage.setItem('quangtu_cached_talk_catalog_v1', JSON.stringify([{ id: album.id, visibility: 'public', tracks }]));
+  const session = { authenticated: false, csrfToken: null, user: null };
+  const external = tracks.map(track => ({ ...track, url: `https://media.example${track.url}` }));
+  expect(await restoreLocalTalkAlbum({ ...album, tracks: external }, session)).toBeUndefined();
+  expect(await restoreLocalTalkAlbum({ ...album, tracks: [...tracks].reverse() }, session)).toBeUndefined();
+});
+
 it('uses a finite root lease for rosary without repeating the completion bells', async () => {
   await controller.ready;
   const onState = vi.fn(), interrupted = vi.fn();
@@ -217,6 +270,31 @@ it('restores repeat, speed and volume from the running service rather than reset
   expect(bridge.plugin.setQueue).not.toHaveBeenCalled();
   controller.cycleRepeat();
   await vi.waitFor(() => expect(bridge.plugin.options).toHaveBeenCalledWith({ repeat: 0 }));
+});
+
+it('reflects widget repeat changes and protects newer app or widget input from stale native acknowledgements', async () => {
+  await controller.ready;
+  publish(state = { ...state, repeat: 0, observedAtMs: 10 });
+  expect(controller.snapshot.repeat).toBe(0);
+  publish(state = { ...state, repeat: undefined, observedAtMs: 11 });
+  expect(controller.snapshot.repeat).toBe(0);
+
+  let finishFirst!: (value: NativeAudioState) => void;
+  let finishSecond!: (value: NativeAudioState) => void;
+  bridge.plugin.options.mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; }));
+  bridge.plugin.options.mockImplementationOnce(() => new Promise(resolve => { finishSecond = resolve; }));
+  controller.cycleRepeat();
+  publish(state = { ...state, repeat: 0, observedAtMs: 12 });
+  expect(controller.snapshot.repeat).toBe(1);
+  controller.cycleRepeat();
+  await vi.waitFor(() => expect(finishFirst).toBeTypeOf('function'));
+  finishFirst({ ...state, repeat: 1, observedAtMs: 13 });
+  await vi.waitFor(() => expect(finishSecond).toBeTypeOf('function'));
+  expect(controller.snapshot.repeat).toBe(2);
+  publish(state = { ...state, repeat: 0, observedAtMs: 15 });
+  finishSecond({ ...state, repeat: 2, observedAtMs: 14 });
+  await vi.waitFor(() => expect(controller.snapshot.repeat).toBe(0));
+  expect(bridge.plugin.options.mock.calls).toEqual([[{ repeat: 1 }], [{ repeat: 2 }]]);
 });
 
 it('does not migrate a private album into the guest native queue', async () => {

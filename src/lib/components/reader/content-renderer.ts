@@ -49,9 +49,17 @@ function prepareRitualLayout(html: string): string {
   });
 }
 
+function stripLeadingDuplicatePlainHeading(raw: string): string {
+  return raw.replace(
+    /^(\s*\{align:center\|\*\*([^*\n{}]+)\*\*\})\s*\n+[ \t]*([^\n]+)[ \t]*(?=\n|$)/u,
+    (full, alignedHeading: string, titleText: string, nextLine: string) =>
+      nextLine.trim() === titleText.trim() ? alignedHeading : full,
+  );
+}
+
 export function renderReaderContent(raw: string): string {
   if (!raw) return '';
-  const sanitized = prepareRitualLayout(sanitizeStoredHtml(raw));
+  const sanitized = prepareRitualLayout(sanitizeStoredHtml(stripLeadingDuplicatePlainHeading(raw)));
   if (!HTML_ELEMENT_PATTERN.test(sanitized)) {
     return resolveMobileIllustrations(sanitizeStoredHtml(renderPracticeContent(sanitized)));
   }

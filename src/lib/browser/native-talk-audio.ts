@@ -86,6 +86,7 @@ export class NativeTalkAudio extends EventTarget {
   error: { code: number; message: string } | null = null;
   private position = 0;
   private pendingSeek?: { position: number };
+  private pendingRepeat?: symbol;
   private rate = 1;
   private loudness = 1;
   private silent = false;
@@ -177,6 +178,7 @@ export class NativeTalkAudio extends EventTarget {
       if (confirmedSeek) this.fire('timeupdate');
       return;
     }
+    const previous = this.latestState;
     this.latestState = state;
     const trackChanged = state.trackIndex !== this.trackIndex;
     if (trackChanged) this.pendingSeek = undefined;
@@ -199,6 +201,9 @@ export class NativeTalkAudio extends EventTarget {
     if (!wasPaused && this.paused) this.fire('pause');
     if (!wasPlaying && state.playing) this.fire('playing');
     if (!this.paused && !state.playing) this.fire('waiting');
+    if (!this.pendingRepeat && previous && state.repeat !== undefined && state.repeat !== previous.repeat) {
+      this.dispatchEvent(new CustomEvent('nativerepeat', { detail: state.repeat }));
+    }
     this.dispatchEvent(new CustomEvent('nativesleep', { detail: state }));
     this.fire('timeupdate');
     if (state.error && state.error !== this.error?.message) this.report(state.error);
@@ -255,7 +260,22 @@ export class NativeTalkAudio extends EventTarget {
   async pause() {
     if (this.queueId) await this.command(() => this.plugin.pause()).catch(cause => this.report(cause));
   }
-  setRepeat(repeat: number) { if (this.queueId) this.send(() => this.plugin.options({ repeat })); }
+  setRepeat(repeat: number) {
+    const queue = this.queueId;
+    if (!queue) return;
+    const request = this.pendingRepeat = Symbol();
+    void this.command(() => this.plugin.options({ repeat }), undefined, () => this.queueId === queue)
+      .catch(cause => { if (this.pendingRepeat === request && this.queueId === queue) this.report(cause); })
+      .finally(() => {
+        if (this.pendingRepeat !== request) return;
+        this.pendingRepeat = undefined;
+        // A newer widget event can arrive before the response to the last app tap.
+        const actual = this.latestState?.repeat;
+        if (!this.disposed && this.queueId === queue && actual !== undefined && actual !== repeat) {
+          this.dispatchEvent(new CustomEvent('nativerepeat', { detail: actual }));
+        }
+      });
+  }
   setSleep(remainingMs: number, atEnd: boolean) { if (this.queueId) this.send(() => this.plugin.sleep({ remainingMs, atEnd })); }
   removeAttribute(name: string) {
     if (name !== 'src') return;

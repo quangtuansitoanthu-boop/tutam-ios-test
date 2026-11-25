@@ -55,6 +55,16 @@ export function getEnglishBookMeta(id: string): LocalizedBookMeta | null {
   );
 }
 
+const REVISED_VI_TITLE_IDS = new Set(['tt_1780910773084']);
+
+/** Trả về tiêu đề tiếng Việt chuẩn, ưu tiên bản đã hiệu đính khi D1/cache còn tiêu đề cũ. */
+export function resolveVietnameseArticleTitle(id: string, currentTitle?: string, originalTitle?: string): string {
+  const canonicalVi = getCanonicalVietnameseArticle(id);
+  const rawId = String(id ?? '').replace(/^book_/u, '');
+  if (REVISED_VI_TITLE_IDS.has(rawId) && canonicalVi?.title) return canonicalVi.title;
+  return originalTitle || canonicalVi?.title || currentTitle || '';
+}
+
 /**
  * Trả về thông tin bài viết / cuốn sách đã được bản địa hóa theo ngôn ngữ hiện tại.
  * - Nếu ngôn ngữ là 'en' và sách có trong từ điển offlineBooksEn, sử dụng tiêu đề, tóm tắt và tác giả tiếng Anh.
@@ -83,7 +93,7 @@ export function getLocalizedArticle(article: LibraryArticle | null | undefined, 
   // Chế độ tiếng Việt (locale !== 'en'):
   // Đảm bảo khôi phục lại tiêu đề, tóm tắt và tác giả tiếng Việt gốc
   const canonicalVi = getCanonicalVietnameseArticle(article.id);
-  const targetTitle = article.originalTitle || canonicalVi?.title || article.title;
+  const targetTitle = resolveVietnameseArticleTitle(article.id, article.title, article.originalTitle);
   // This title's revised description supersedes metadata cached before the wording change.
   const revisedSummary = ['tt_1781081372340_1_xqcxo', 'tuyen-tap-phap-facebook-quang-tu'].includes(String(article.id).replace(/^book_/u, ''))
     ? canonicalVi?.summary

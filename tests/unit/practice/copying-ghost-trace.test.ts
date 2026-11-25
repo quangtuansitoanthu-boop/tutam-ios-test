@@ -115,6 +115,10 @@ describe('reconcileGhostInput & canonicalizeGhostPrefix (IME & accent auto-snap)
     });
   });
 
+  it.each(['Con lễ Phật. Dòng riêng', 'con le phat...'])('keeps a saved draft beyond the end of the model when enabling tracing: %s', draft => {
+    expect(canonicalizeGhostPrefix('Con lễ Phật.', draft)).toEqual({ text: draft, matched: false });
+  });
+
   it('advances past trailing punctuation and newline when pressing Enter so lines never stick together', () => {
     const multiLine = 'Nam Mô A Di Đà Phật.\nCon thành tâm đảnh lễ.';
     const beforePeriod = 'Nam Mô A Di Đà Phật';
@@ -153,5 +157,19 @@ describe('reconcileGhostInput & canonicalizeGhostPrefix (IME & accent auto-snap)
     const opacityMatch = tokensSrc.match(/--copy-ghost-opacity:\s*([0-9.]+)/);
     expect(opacityMatch).not.toBeNull();
     expect(Number(opacityMatch![1])).toBeLessThanOrEqual(0.35);
+  });
+
+  it('continues matching canonical words after optional parenthetical notes or minor earlier divergence', () => {
+    const scripture = 'Nam mô A Di Đà Phật.\nCon thành tâm.';
+    expect(canonicalizeGhostPrefix(scripture, 'Nam mô (3 lần) A Di Đà')).toEqual({
+      text: 'Nam mô (3 lần) A Di Đà',
+      matched: true,
+    });
+
+    const afterNote = reconcileGhostInput(scripture, 'Nam mô (3 lần) ', { incoming: 'a di da phat' });
+    expect(afterNote).toEqual({ text: 'Nam mô (3 lần) A Di Đà Phật', mismatch: false });
+
+    const afterSkipped = reconcileGhostInput(scripture, 'Nam mô Di Đà ', { incoming: 'phat' });
+    expect(afterSkipped).toEqual({ text: 'Nam mô Di Đà Phật', mismatch: false });
   });
 });

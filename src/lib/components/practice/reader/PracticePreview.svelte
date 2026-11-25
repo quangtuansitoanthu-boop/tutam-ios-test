@@ -155,6 +155,10 @@
   );
 
   const isReadingChapter = $derived(currentChapterIndex !== null && chapters.length > 0);
+  const orderedChapters = $derived(orderPracticeChapters(chapters, article.category));
+  const chapterPosition = $derived(orderedChapters.findIndex((chapter) => chapter.index === currentChapterIndex));
+  const previousChapter = $derived(chapterPosition > 0 ? orderedChapters[chapterPosition - 1] : null);
+  const nextChapter = $derived(chapterPosition >= 0 && chapterPosition < orderedChapters.length - 1 ? orderedChapters[chapterPosition + 1] : null);
   const isSingleTextScripture = $derived(chapters.length === 0 && !article.hasTableOfContents);
   const rawChapterTitle = $derived(
     chapterContent?.title || (currentChapterIndex !== null ? chapters[currentChapterIndex]?.title : '') || article.title
@@ -465,8 +469,8 @@
   function updateRouteHeader(active: boolean): void {
     document.dispatchEvent(new CustomEvent('qts:practice-header', {
       detail: active
-        ? { active: true, backLabel: isEn ? 'Back' : 'Quay lại', onBack: handlePreviewBack, title: article.title }
-        : { active: false }
+        ? { active: true, owner: 'practice-preview', backLabel: isEn ? 'Back' : 'Quay lại', onBack: handlePreviewBack, title: article.title }
+        : { active: false, owner: 'practice-preview' }
     }));
   }
 
@@ -751,25 +755,29 @@
       {#if chapters.length > 1}
         <nav class="chapter-nav" aria-label={localeStore.current === 'en' ? 'Chapter navigation' : 'Điều hướng phẩm'}>
           <button
-            class:hidden={currentChapterIndex === null || currentChapterIndex <= 0}
+            class="chapter-nav-arrow"
+            class:hidden={!previousChapter}
             type="button"
             aria-label={localeStore.current === 'en' ? 'Previous chapter' : 'Bài trước'}
-            disabled={currentChapterIndex === null || currentChapterIndex <= 0}
-            onclick={() => currentChapterIndex !== null && onChapterOpen(currentChapterIndex - 1)}
+            title={localeStore.current === 'en' ? 'Previous chapter' : 'Bài trước'}
+            disabled={!previousChapter}
+            onclick={() => previousChapter && onChapterOpen(previousChapter.index)}
           >
-            ← {localeStore.current === 'en' ? 'Previous' : 'Bài trước'}
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
           </button>
           <span class="chapter-nav-title">
-            {currentChapterIndex !== null ? `${currentChapterIndex + 1}. ` : ''}{currentChapterTitle}
+            {chapterPosition >= 0 ? `${chapterPosition + 1}. ` : ''}{currentChapterTitle}
           </span>
           <button
-            class:hidden={currentChapterIndex === null || currentChapterIndex >= chapters.length - 1}
+            class="chapter-nav-arrow"
+            class:hidden={!nextChapter}
             type="button"
             aria-label={localeStore.current === 'en' ? 'Next chapter' : 'Bài tiếp'}
-            disabled={currentChapterIndex === null || currentChapterIndex >= chapters.length - 1}
-            onclick={() => currentChapterIndex !== null && onChapterOpen(currentChapterIndex + 1)}
+            title={localeStore.current === 'en' ? 'Next chapter' : 'Bài tiếp'}
+            disabled={!nextChapter}
+            onclick={() => nextChapter && onChapterOpen(nextChapter.index)}
           >
-            {localeStore.current === 'en' ? 'Next' : 'Bài tiếp'} →
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
           </button>
         </nav>
       {/if}
@@ -834,10 +842,10 @@
   .tt-preview{min-height:100vh;padding-top:58px;background:var(--bg);color:var(--text);font-family:var(--font-app)}
   .tt-preview--reading{padding-top:58px}
   .tt-preview__wrap{max-width:720px;margin:0 auto;padding:28px 20px 120px}
-  .tt-preview__header{display:grid;justify-items:start;gap:12px;margin:0 0 16px;padding:0;background:transparent}
+  .tt-preview__header{display:grid;justify-items:center;gap:12px;margin:0 0 16px;padding:0;background:transparent;text-align:center}
   .tt-preview__category{display:inline-block;padding:3px 10px;border-radius:12px;background:var(--gold-light);color:var(--gold);font-size:11px;font-weight:700;letter-spacing:.5px;line-height:1.6}
-  .tt-preview__header h1{width:100%;margin:0;color:var(--text);font:700 clamp(20px,4vw,26px)/1.4 var(--font-app);text-align:center;text-transform:uppercase}
-  .tt-preview__meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin:0;padding:0;color:var(--muted);font-size:12px}
+  .tt-preview__header h1{width:100%;margin:0;color:var(--text);font:700 clamp(20px,4vw,26px)/1.4 var(--font-app);text-align:center;text-transform:uppercase;text-wrap:balance;overflow-wrap:anywhere}
+  .tt-preview__meta{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px 12px;margin:0;padding:0;color:var(--muted);font-size:12px}
   .tt-preview__start-card{margin:0 0 10px;padding:20px;border:1.5px solid var(--gold-muted);border-radius:18px;background:var(--gold-light);text-align:center}
   .tt-preview__start{display:inline-flex;align-items:center;gap:10px;padding:14px 28px;border:0;border-radius:36px;background:linear-gradient(135deg,var(--gold) 0%,var(--practice-start-end,#b8843a) 100%);box-shadow:0 4px 20px color-mix(in srgb,var(--gold) 40%,transparent);color:#fff;cursor:pointer;font:700 16px/1.6 var(--font-app);letter-spacing:.3px;transition:transform .18s,box-shadow .18s}
   .tt-preview__start span{font-size:22px}
@@ -989,7 +997,7 @@
     .chapter-nav button{padding:5px 10px;font-size:12px}
   }
 
-  .tt-preview{padding-top:var(--practice-topbar-height,calc(64px + var(--app-safe-top,env(safe-area-inset-top,0px))))}
+  .tt-preview{padding-top:var(--practice-topbar-height,12px)}
   .tt-preview__header h1.tt-ritual-heading{font-size:clamp(16px,4.6vw,24px);line-height:1.5;text-align:center}
   .tt-ritual-heading span{display:block;white-space:nowrap}
   .tt-reader-top-bar{
@@ -1001,6 +1009,8 @@
   button{min-height:44px}
 
   /* Giữ tiêu đề ở cột co giãn, hai nút chuyển phẩm ở cùng một hàng. */
+  .chapter-nav button.chapter-nav-arrow{width:44px;height:44px;min-width:44px;min-height:44px;padding:0;justify-content:center;border-radius:50%;border:1px solid var(--border);background:linear-gradient(155deg,var(--card),var(--bg2));color:var(--text2);box-shadow:inset 0 1.5px 0 color-mix(in srgb,var(--card) 88%,transparent),inset 0 -2px 0 rgba(60,40,10,.1),var(--shadow-sm)}
+  .chapter-nav button.chapter-nav-arrow:hover:not(:disabled){border-color:var(--gold);background:var(--gold-light);color:var(--brown)}
   .chapter-nav{grid-template-columns:auto minmax(0,1fr) auto}
   .chapter-nav button:first-child{grid-column:1;grid-row:1;justify-self:start}
   .chapter-nav-title{grid-column:2;grid-row:1;min-width:0;max-width:100%}

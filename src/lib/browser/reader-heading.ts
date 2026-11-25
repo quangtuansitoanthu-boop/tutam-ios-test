@@ -17,14 +17,15 @@ export function startsWithReaderHeading(html: string, title: string): boolean {
   }
   const heading = first;
   const semanticHeading = /^H[1-6]$/u.test(heading.tagName);
-  // Sách nhập từ PDF còn có tiêu đề là đoạn riêng, không có class/căn giữa.
-  // So khớp toàn bộ đoạn ở dưới, không coi tiền tố của văn xuôi là tiêu đề.
-  const sourceHeading = heading.tagName === 'P';
+  // Sách nhập từ PDF hoặc định dạng {align:center|...} còn có tiêu đề là đoạn/dòng riêng.
+  // So khớp toàn bộ đoạn/dòng ở dưới, không coi tiền tố của văn xuôi là tiêu đề.
+  const sourceHeading = heading.tagName === 'P'
+    || (heading.tagName === 'SPAN' && heading.classList.contains('tt-content__line'));
   if (!semanticHeading && !sourceHeading) return false;
   if ([...heading.querySelectorAll('*')].some(node => !['STRONG', 'B', 'EM', 'I', 'SPAN', 'BR', 'U'].includes(node.tagName))) return false;
   const headingText = normalizedTitle(heading.textContent ?? '');
   const bannerText = normalizedTitle(title);
   if (headingText === bannerText) return true;
-  const unnumberedBanner = bannerText.replace(/^\d+\.\s+/u, '').trim();
+  const unnumberedBanner = bannerText.replace(/^(?:\d+\.\s+|CÂU CHUYỆN\s+\d+\s*:\s*|STORY\s+\d+\s*:\s*)/u, '').trim();
   return Boolean(unnumberedBanner) && unnumberedBanner !== bannerText && headingText === unnumberedBanner;
 }

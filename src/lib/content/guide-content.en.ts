@@ -533,6 +533,7 @@ export const enSoftwareGuideSections: GuideSection[] = [
           "automatic rhythm",
           "wooden fish",
           "108 beads",
+          "20 bpm",
           "30 bpm",
           "40 bpm",
           "60 bpm",

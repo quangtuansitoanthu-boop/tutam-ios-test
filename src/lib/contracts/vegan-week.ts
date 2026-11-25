@@ -12,8 +12,9 @@ export function matchesVeganRegion(region: VeganRegion | undefined, filter: stri
 export const VEGAN_PACKAGE_MAX_BYTES = 512 * 1024;
 export const REGIONAL_VEGAN_FIRST_WEEK = '2026-11-09';
 export const ROTATING_VEGAN_VERSION = 5;
-export const VEGAN_ROTATION_REVISION = 1;
-export const VEGAN_RECIPE_REVISION = 1;
+export const LEGACY_ROTATING_RECIPE_COUNT = 190;
+export const VEGAN_ROTATION_REVISION = 2;
+export const VEGAN_RECIPE_REVISION = 3;
 
 export interface RecipeIngredient {
   name: string;
@@ -104,9 +105,9 @@ function recipe(value: unknown): value is OfflineRecipe {
 
 export function isVeganWeek(value: unknown, week: string): value is VeganWeek {
   if (!DATE_PATTERN.test(week) || !record(value) || value.week !== week) return false;
-  const count = value.version === 1 ? 100 : value.version === 2 ? 150 : value.version === ROTATING_VEGAN_VERSION ? 190 : 0;
   const rotating = value.version === ROTATING_VEGAN_VERSION;
-  if (!count || !Array.isArray(value.recipes) || value.recipes.length !== count || !value.recipes.every(recipe)
+  const sizes = rotating ? [LEGACY_ROTATING_RECIPE_COUNT, 250] : value.version === 1 ? [100] : value.version === 2 ? [150] : [];
+  if (!Array.isArray(value.recipes) || !sizes.includes(value.recipes.length) || !value.recipes.every(recipe)
     || (value.version !== 1 && value.recipes.some(item => !item.region))
     || !Array.isArray(value.days) || value.days.length !== 7) return false;
   const ids = new Set(value.recipes.map(item => item.id));
@@ -191,102 +192,157 @@ export function veganRecipeScore(key: string): number {
 }
 
 const quickBreakfastMinutes = 20;
-const savorySides = new Set(['dish_103', 'dish_265', 'dish_266']);
-const isDessert = (recipe: OfflineRecipe) => recipe.group === 'sides' && !savorySides.has(recipe.id);
+const savorySides = new Set(['dish_103', 'dish_265', 'dish_266', 'dish_379', 'dish_381', 'dish_402']);
+export const isVeganDessert = (recipe: OfflineRecipe) => recipe.group === 'sides' && !savorySides.has(recipe.id);
 const isBreakfast = (recipe: OfflineRecipe) => recipe.group === 'breakfast' || recipe.group === 'porridge';
-const isWeekdayBreakfast = (day: number, slot: number) => day % 7 < 5 && slot < 3;
+const isWeekdayBreakfast = (day: number, slot: number) => day % 7 < 5 && slot < 2;
+
+export function hasDessertRotation(week: VeganWeek): boolean {
+  if (week.version !== ROTATING_VEGAN_VERSION || week.recipes.length === LEGACY_ROTATING_RECIPE_COUNT) return false;
+  const eligible = week.recipes.filter(recipe => recipe.id !== 'dish_201');
+  const desserts = eligible.filter(isVeganDessert).length;
+  return desserts >= 63 && eligible.length - desserts >= 126;
+}
 
 export function rotatingVeganDays(catalog: OfflineRecipe[], week: string, region: VeganMealRegion = ''): string[][] {
   const cycleDays = 21;
   // The legacy large-batch xôi stays in Menu món, outside the meal rotation.
-  const pool = catalog.filter(recipe => recipe.id !== 'dish_201')
-    .sort((a, b) => veganRecipeScore(a.id) - veganRecipeScore(b.id) || a.id.localeCompare(b.id));
-  if (pool.length !== cycleDays * 9) throw new Error('Invalid vegan rotation size');
+  const basePool = catalog.filter(recipe => recipe.id !== 'dish_201');
+  if (basePool.length < cycleDays * 9) throw new Error('Invalid vegan rotation size');
+
+  const regionWeight = (item: OfflineRecipe) => (region && item.region === region ? 0 : 1);
+  const byPrepAndRegion = (a: OfflineRecipe, b: OfflineRecipe) =>
+    regionWeight(a) - regionWeight(b)
+    || a.minutes - b.minutes
+    || veganRecipeScore(a.id) - veganRecipeScore(b.id)
+    || a.id.localeCompare(b.id);
+  const byScoreAndRegion = (a: OfflineRecipe, b: OfflineRecipe) =>
+    regionWeight(a) - regionWeight(b)
+    || veganRecipeScore((region || 'all') + ':' + a.id) - veganRecipeScore((region || 'all') + ':' + b.id)
+    || a.id.localeCompare(b.id);
+
+  // Separate desserts (63 dishes = 21 days × 3 meals/day) from savory/main dishes.
+  const dessertPool = basePool.filter(isVeganDessert).sort((a, b) =>
+    a.minutes - b.minutes
+    || regionWeight(a) - regionWeight(b)
+    || veganRecipeScore(a.id) - veganRecipeScore(b.id)
+    || a.id.localeCompare(b.id)
+  );
+  if (dessertPool.length < cycleDays * 3) throw new Error('Not enough dessert recipes for all meals');
+
+  // Distribute desserts evenly: quick fruits/cakes for breakfast & dinner, rich chè/jelly for lunch & dinner.
+  const selectedDesserts = dessertPool.slice(0, cycleDays * 3);
+  const breakfastDessert = Array<OfflineRecipe>(cycleDays);
+  const lunchDessert = Array<OfflineRecipe>(cycleDays);
+  const dinnerDessert = Array<OfflineRecipe>(cycleDays);
+  for (let d = 0; d < cycleDays; d++) {
+    breakfastDessert[d] = selectedDesserts[d];
+    lunchDessert[d] = selectedDesserts[cycleDays + ((d * 2) % cycleDays)];
+    dinnerDessert[d] = selectedDesserts[cycleDays * 2 + d];
+  }
+  // Spread regional desserts across the 21 days when a region is active.
+  if (region) {
+    const spreadDesserts = (arr: OfflineRecipe[]) => {
+      const reg = arr.filter(r => r.region === region);
+      const other = arr.filter(r => r.region !== region);
+      const out = Array<OfflineRecipe>(cycleDays);
+      let ri = 0, oi = 0;
+      const step = reg.length ? Math.max(1, Math.floor(cycleDays / reg.length)) : cycleDays;
+      for (let d = 0; d < cycleDays; d++) {
+        if (ri < reg.length && d % step === 0) out[d] = reg[ri++];
+        else if (oi < other.length) out[d] = other[oi++];
+        else out[d] = reg[ri++];
+      }
+      return out;
+    };
+    const bSpread = spreadDesserts(breakfastDessert);
+    const lSpread = spreadDesserts(lunchDessert);
+    const dSpread = spreadDesserts(dinnerDessert);
+    for (let d = 0; d < cycleDays; d++) {
+      breakfastDessert[d] = bSpread[d];
+      lunchDessert[d] = lSpread[d];
+      dinnerDessert[d] = dSpread[d];
+    }
+  }
+
+  // Remaining pool for 6 savory/main slots per day (21 × 6 = 126 dishes).
+  const pool = basePool.filter(r => !isVeganDessert(r)).sort(byScoreAndRegion);
 
   function take(groups: VeganGroup[], prefer?: (recipe: OfflineRecipe) => boolean) {
     return Array.from({ length: cycleDays }, () => {
-      const firstChoice = prefer ? pool.findIndex(prefer) : -1;
-      const preferred = firstChoice < 0 ? pool.findIndex(recipe => groups.includes(recipe.group)) : firstChoice;
-      return pool.splice(Math.max(0, preferred), 1)[0];
+      let idx = prefer ? pool.findIndex(prefer) : -1;
+      if (idx < 0) idx = pool.findIndex(recipe => groups.includes(recipe.group));
+      if (idx < 0) idx = 0;
+      return pool.splice(idx, 1)[0];
     });
   }
 
-  // Allocate the main dishes before sides so a side cannot exhaust a main group.
-  const byPreparationTime = (a: OfflineRecipe, b: OfflineRecipe) => a.minutes - b.minutes
-    || veganRecipeScore(a.id) - veganRecipeScore(b.id) || a.id.localeCompare(b.id);
-  const combined = [...pool]
-    .sort((a, b) => Number(isBreakfast(b)) - Number(isBreakfast(a)) || byPreparationTime(a, b))
-    .slice(0, cycleDays * 2)
-    .sort(byPreparationTime);
-  for (const recipe of combined) pool.splice(pool.indexOf(recipe), 1);
-  const quickDishes = combined.slice(0, 30);
-  const weekendDishes = combined.slice(30);
-  const breakfast = Array<OfflineRecipe>(cycleDays);
-  const breakfastSecond = Array<OfflineRecipe>(cycleDays);
   const weekdayIndices = Array.from({ length: cycleDays }, (_, i) => i).filter(i => i % 7 < 5);
   const weekendIndices = Array.from({ length: cycleDays }, (_, i) => i).filter(i => i % 7 >= 5);
+
+  // Breakfast slots (breakfast, breakfastSecond): prioritize quick weekday breakfasts (<= 20m).
+  const breakfastCandidates = [...pool]
+    .sort((a, b) => Number(isBreakfast(b)) - Number(isBreakfast(a)) || byPrepAndRegion(a, b))
+    .slice(0, cycleDays * 2)
+    .sort((a, b) => a.minutes - b.minutes || byScoreAndRegion(a, b));
+  for (const item of breakfastCandidates) pool.splice(pool.indexOf(item), 1);
+
+  const quickBreakfasts = breakfastCandidates.slice(0, 30);
+  const weekendBreakfasts = breakfastCandidates.slice(30);
+  const breakfast = Array<OfflineRecipe>(cycleDays);
+  const breakfastSecond = Array<OfflineRecipe>(cycleDays);
   weekdayIndices.forEach((day, idx) => {
-    // Spread the shortest dishes across all three weeks instead of using
-    // them up before the last Monday.
-    breakfast[day] = quickDishes[idx];
-    breakfastSecond[day] = quickDishes[quickDishes.length - 1 - idx];
+    breakfast[day] = quickBreakfasts[idx];
+    breakfastSecond[day] = quickBreakfasts[quickBreakfasts.length - 1 - idx];
   });
   weekendIndices.forEach((day, idx) => {
-    breakfast[day] = weekendDishes[idx * 2];
-    breakfastSecond[day] = weekendDishes[idx * 2 + 1];
+    breakfast[day] = weekendBreakfasts[idx * 2];
+    breakfastSecond[day] = weekendBreakfasts[idx * 2 + 1];
   });
-  const breakfastSideRaw = take(['steamed']);
-  breakfastSideRaw.sort(byPreparationTime);
-  const breakfastSide = Array<OfflineRecipe>(cycleDays);
-  const quickBreakfastSides = breakfastSideRaw.slice(0, 15);
-  const weekendBreakfastSides = breakfastSideRaw.slice(15);
-  weekdayIndices.forEach((day, idx) => {
-    breakfastSide[day] = quickBreakfastSides[idx];
-  });
-  weekendIndices.forEach((day, idx) => {
-    breakfastSide[day] = weekendBreakfastSides[idx];
-  });
-  // Scratch-made bánh and giò can take over an hour. Offer quick noodle
-  // and rice dishes in their place on weekdays, keeping every dish in the cycle.
+
+  // Ensure weekday breakfasts meet the <= 20m / <= 45m speed constraints.
   for (const day of weekdayIndices) {
-    const slots = [breakfast, breakfastSecond, breakfastSide].sort((a, b) => a[day].minutes - b[day].minutes);
-    for (const [index, slot] of slots.entries()) {
-      const limit = index < 2 ? quickBreakfastMinutes : 45;
-      if (slot[day].minutes <= limit) continue;
-      const candidates = pool.filter(item => (item.group === 'noodles' || item.group === 'rice') && item.minutes <= limit);
-      // Keep the fastest substitutes for days that still need a 20-minute option.
-      candidates.sort(byPreparationTime);
-      const replacement = candidates[candidates.length - 1];
+    const slots = [breakfast, breakfastSecond].sort((a, b) => a[day].minutes - b[day].minutes);
+    for (const slot of slots) {
+      if (slot[day].minutes <= quickBreakfastMinutes) continue;
+      const candidates = pool.filter(item =>
+        (item.group === 'breakfast' || item.group === 'porridge' || item.group === 'noodles' || item.group === 'steamed' || item.group === 'rice')
+        && item.minutes <= quickBreakfastMinutes
+      ).sort(byPrepAndRegion);
+      const replacement = candidates[0];
       if (replacement) {
         pool[pool.indexOf(replacement)] = slot[day];
         slot[day] = replacement;
       }
     }
   }
-  const lunch = take(['noodles']);
-  const dinner = take(['rice']);
-  const lunchSide = take(['sides'], isDessert);
-  const dinnerSide = take(['sides', 'steamed'], isDessert);
-  const lunchSecond = take(['rice', 'noodles']);
-  const dinnerSecond = take(['rice', 'steamed', 'sides']);
-  const slots = [breakfast, breakfastSecond, breakfastSide, lunch, lunchSecond, lunchSide, dinner, dinnerSecond, dinnerSide];
+
+  // Lunch & Dinner main + side slots (diverse groups, no duplicate noodle/rice style in same meal).
+  const lunch = take(['noodles', 'rice']);
+  const dinner = take(['rice', 'noodles']);
+  const lunchSecond = take(['steamed', 'sides', 'rice']);
+  const dinnerSecond = take(['steamed', 'sides', 'rice']);
+
+  const slots = [
+    breakfast, breakfastSecond, breakfastDessert,
+    lunch, lunchSecond, lunchDessert,
+    dinner, dinnerSecond, dinnerDessert,
+  ];
   const cycle = Array.from({ length: cycleDays }, (_, day) => slots.map(slot => slot[day]));
+
   if (region) {
+    // Balance regional specialties evenly across all 21 days within same slot type.
     const regionalCount = Array<number>(cycleDays).fill(0);
-    const byGroup = new Map<string, Array<{ day: number; slot: number; item: OfflineRecipe }>>();
+    const byBucket = new Map<string, Array<{ day: number; slot: number; item: OfflineRecipe }>>();
     cycle.forEach((day, dayIndex) => day.forEach((item, slot) => {
-      // Regional swaps can only trade weekday breakfasts of similar speed
-      // and cannot replace a dessert with a savory side.
-      const time = isWeekdayBreakfast(dayIndex, slot)
-        ? item.minutes <= quickBreakfastMinutes ? 'quick' : 'long'
-        : 'regular';
-      const key = [item.group, time, isDessert(item)].join(':');
-      const position = { day: dayIndex, slot, item };
-      const group = byGroup.get(key);
-      if (group) group.push(position);
-      else byGroup.set(key, [position]);
+      if (isVeganDessert(item)) return;
+      const speed = isWeekdayBreakfast(dayIndex, slot) ? (item.minutes <= quickBreakfastMinutes ? 'quick' : 'long') : 'regular';
+      const key = `${slot >= 3 ? 'main' : 'bf'}:${speed}`;
+      const list = byBucket.get(key) ?? [];
+      list.push({ day: dayIndex, slot, item });
+      byBucket.set(key, list);
     }));
-    for (const positions of byGroup.values()) {
+    for (const positions of byBucket.values()) {
       const regional = positions.filter(({ item }) => item.region === region);
       const remaining = positions.filter(({ item }) => item.region !== region)
         .sort((a, b) => veganRecipeScore(region + ':' + a.item.id) - veganRecipeScore(region + ':' + b.item.id)
@@ -295,14 +351,15 @@ export function rotatingVeganDays(catalog: OfflineRecipe[], week: string, region
         positions.sort((a, b) => regionalCount[a.day] - regionalCount[b.day]
           || veganRecipeScore(region + ':' + item.id + ':' + a.day + ':' + a.slot)
           - veganRecipeScore(region + ':' + item.id + ':' + b.day + ':' + b.slot));
-        const position = positions.shift()!;
-        cycle[position.day][position.slot] = item;
-        regionalCount[position.day]++;
+        const pos = positions.shift()!;
+        cycle[pos.day][pos.slot] = item;
+        regionalCount[pos.day]++;
       }
       positions.sort((a, b) => a.day - b.day || a.slot - b.slot);
       positions.forEach(({ day, slot }, index) => { cycle[day][slot] = remaining[index].item; });
     }
   }
+
   const firstDay = Math.round((Date.parse(week) - Date.parse(REGIONAL_VEGAN_FIRST_WEEK)) / DAY_MS);
   return Array.from({ length: 7 }, (_, index) => cycle[((firstDay + index) % cycleDays + cycleDays) % cycleDays].map(item => item.id));
 }
@@ -310,7 +367,7 @@ export function rotatingVeganDays(catalog: OfflineRecipe[], week: string, region
 export function veganMealPlan(week: VeganWeek, region: VeganMealRegion = ''): OfflineRecipe[][][] {
   if (week.version === ROTATING_VEGAN_VERSION) {
     const recipes = new Map(week.recipes.map(item => [item.id, item]));
-    const days = region || (week.rotationRevision ?? 0) < VEGAN_ROTATION_REVISION
+    const days = (region || (week.rotationRevision ?? 0) < VEGAN_ROTATION_REVISION) && hasDessertRotation(week)
       ? rotatingVeganDays(week.recipes, week.week, region)
       : week.days;
     return days.map(day => [0, 3, 6].map(start =>

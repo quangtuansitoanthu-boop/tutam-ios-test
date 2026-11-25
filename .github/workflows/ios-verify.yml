@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.test_suite == 'full' && '["guest","extended","reminders","snapshots"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
+        suite: ${{ fromJSON(github.event_name == 'push' && '["guest","extended","reminders","snapshots","audio"]' || inputs.test_suite == 'full' && '["guest","extended","reminders","snapshots"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     runs-on: macos-15
     timeout-minutes: 70
     env:

@@ -434,7 +434,7 @@
     --home-section-gap: 24px;
     max-width: 960px;
     margin: 0 auto;
-    padding: 20px 20px 48px;
+    padding: 20px 20px 24px;
     display: flex;
     flex-direction: column;
     gap: var(--home-section-gap);
@@ -460,7 +460,7 @@
     .home-calendar{grid-template-columns:minmax(0,1fr);gap:16px}
     .home-container {
       --home-section-gap: 20px;
-      padding: 20px 16px 36px;
+      padding: 20px 16px 12px;
     }
     .admin-notice {
       right: 16px;

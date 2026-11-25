@@ -333,6 +333,55 @@ it('retains an existing noncanonical draft when typing with ghost mode enabled',
   edit(view.editor, 'insertText', '?');
   expect(view.text()).toBe('My! own draft?');
 });
+
+const noteReference = [{ text: 'Nam mô A Di Đà Phật.', bold: false, align: 'left' as const, line: 0 }];
+it('renders the actual saved optional note and resumes tracing after it', () => {
+  const initial = 'Nam mô (3 lần) ';
+  const view = setup({ initial, showGhost: true, ghostRuns: noteReference });
+  expect(richCopyText(view.editor)).toBe(initial);
+  edit(view.editor, 'insertText', 'a');
+  expect(view.text()).toBe(initial + 'A');
+  expect(richCopyText(view.editor)).toBe(view.text());
+});
+
+it('accepts an optional note typed manually in ghost mode, then resumes tracing', () => {
+  const view = setup({ initial: 'Nam mô ', showGhost: true, ghostRuns: noteReference });
+  for (const letter of '(3 lần) ') edit(view.editor, 'insertText', letter);
+  expect(richCopyText(view.editor)).toBe('Nam mô (3 lần) ');
+  edit(view.editor, 'insertText', 'a');
+  expect(view.text()).toBe('Nam mô (3 lần) A');
+});
+
+it('rejects a mismatching IME commit even after its provisional spelling changes page tracing eligibility', async () => {
+  const initial = 'Nam mô ';
+  const view = setup({ initial, showGhost: true, ghostRuns: noteReference });
+  view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  view.editor.textContent = initial + 'sai';
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'sai', bubbles: true })); flushSync();
+  expect(view.text()).toBe(initial + 'sai');
+  view.editor.dispatchEvent(new CompositionEvent('compositionend', { data: 'sai', bubbles: true })); flushSync();
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(view.text()).toBe(initial);
+  expect(richCopyText(view.editor)).toBe(initial);
+  edit(view.editor, 'insertText', 'a');
+  expect(view.text()).toBe(initial + 'A');
+});
+
+it.each(['insertReplacementText', 'insertText'])('restores ink and caret after non-cancelable keyboard input %s', inputType => {
+  const initial = 'Nam mô ';
+  const view = setup({ initial, showGhost: true, ghostRuns: noteReference });
+  for (const word of ['sai', 'a']) {
+    view.editor.dispatchEvent(new InputEvent('beforeinput', { inputType, data: word, bubbles: true, cancelable: false }));
+    view.editor.textContent = initial + word;
+    setRichCopySelection(view.editor, initial.length + word.length, initial.length + word.length);
+    view.editor.dispatchEvent(new InputEvent('input', { inputType, data: word, bubbles: true }));
+    flushSync();
+    const expected = word === 'sai' ? initial : initial + 'A';
+    expect(view.text()).toBe(expected);
+    expect(richCopyText(view.editor)).toBe(expected);
+    expect(richCopySelection(view.editor)).toEqual([expected.length, expected.length]);
+  }
+});
 it('keeps a pointer-established selection when the editor receives focus', () => {
   const view = setup({ initial: 'Nam mô Phật' });
   view.editor.blur();
@@ -643,4 +692,39 @@ it('keeps ghost aligned to live composed text while composing and snaps to canon
   const hiddenAfterCommit = Array.from(ghostEl.querySelectorAll<HTMLElement>('span, strong'))
     .filter(el => el.style.visibility === 'hidden').map(el => el.textContent).join('');
   expect(hiddenAfterCommit).toBe('TỊNH');
+});
+
+it('traces Space and non-composing keys immediately after compositionend and keeps remaining ghost words intact while composing Telex', () => {
+  const ghostRuns = [
+    { text: 'TỊNH KHẨU NGHIỆP CHƠN NGÔN', bold: true, align: 'center' as const, line: 0 },
+  ];
+  const view = setup({ showGhost: true, ghostRuns });
+  view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  const node1 = view.editor.querySelector('[data-copy-typed]')!.firstChild as Text;
+  node1.appendData('tịnh');
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'tịnh', bubbles: true }));
+  view.editor.dispatchEvent(new CompositionEvent('compositionend', { data: 'tịnh', bubbles: true }));
+
+  // Immediately press Space + 'k' BEFORE setTimeout(0) flushes compositionCommitTimer
+  edit(view.editor, 'insertText', ' ');
+  edit(view.editor, 'insertText', 'k');
+  expect(view.text()).toBe('TỊNH K');
+
+  // Re-start composition for a longer raw Telex string "nghieepj" after "TỊNH KHẨU "
+  edit(view.editor, 'insertText', 'h');
+  edit(view.editor, 'insertText', 'a');
+  edit(view.editor, 'insertText', 'u');
+  edit(view.editor, 'insertText', ' ');
+  expect(view.text()).toBe('TỊNH KHẨU ');
+
+  view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  const node2 = view.editor.querySelector('[data-copy-typed]')!.firstChild as Text;
+  node2.appendData('nghieepj');
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'nghieepj', bubbles: true }));
+  flushSync();
+
+  const ghostEl = document.querySelector('.rich-copy-ghost')!;
+  const visibleGhostTail = Array.from(ghostEl.querySelectorAll<HTMLElement>('span, strong'))
+    .filter(el => el.style.visibility !== 'hidden').map(el => el.textContent).join('');
+  expect(visibleGhostTail).toBe(' CHƠN NGÔN');
 });

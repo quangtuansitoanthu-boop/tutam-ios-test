@@ -14,6 +14,8 @@ import { normalizeCoverSrc } from '$lib/domain/cover-url';
 import { resolvePdfUrl } from '$lib/utils/pdf-url';
 import { isNativeApp } from './native-platform';
 import { isHtmlResponse, resolveApiUrl } from './native-api';
+import { NATIVE_BACKEND_ORIGINS } from './native-backend-origin';
+import type { AudioAlbum, AudioPlayerSession } from './audio-player-controller';
 import { getOfflineTalks, resolveOfflineBundledResponse } from './offline-bundled-resolver';
 import { getBrowserSessionSnapshot } from '$lib/stores/session.svelte';
 import type { PageSessionDTO } from '$lib/server/auth/types';
@@ -26,6 +28,7 @@ import {
   getTalkCatalogMeta,
   recordTalkCatalogSyncTime,
   captureTalkCatalogScope,
+  currentTalkCatalogScope,
   assertTalkCatalogScope,
   type TalkCatalogScope,
   type CachedTalkAlbumRow,
@@ -347,6 +350,23 @@ function mapTalkAlbum(row: TalkAlbumRow): TalkAlbum {
     created_at: row.created_at == null ? null : String(row.created_at),
     tracks: normalizeTracks(id, row.tracks)
   };
+}
+
+/** Native keeps transport URLs. Restore catalog metadata only for the same complete playlist. */
+export async function restoreLocalTalkAlbum(queue: AudioAlbum, session: AudioPlayerSession): Promise<AudioAlbum | undefined> {
+  const scope = currentTalkCatalogScope(session.user?.id ?? null, session.user?.role ?? 'guest');
+  const cached = await readCachedTalkCatalog(scope);
+  const row = cached?.rows.find(item => item.id === queue.id)
+    ?? (await getOfflineTalks()).find(item => item.id === queue.id && item.visibility === 'public');
+  if (!row || !isContentAvailable(row) || (row.visibility !== 'public' && !(row.visibility === 'private' && scope?.role === 'admin'))) return;
+  const tracks = normalizeTracks(queue.id, row.tracks);
+  if (!tracks.length || tracks.length !== queue.tracks.length) return;
+  const matches = tracks.every((track, index) => {
+    const url = queue.tracks[index].url;
+    return url === track.url || (track.url.startsWith('/api/') && NATIVE_BACKEND_ORIGINS.some(origin => url === origin + track.url));
+  });
+  if (!matches) return;
+  return markVerifiedTalkCatalog<AudioAlbum>({ ...queue, visibility: row.visibility, tracks }, session);
 }
 
 async function fetchTalkAlbumRows(fetcher: typeof fetch, signal?: AbortSignal): Promise<TalkAlbumRow[]> {

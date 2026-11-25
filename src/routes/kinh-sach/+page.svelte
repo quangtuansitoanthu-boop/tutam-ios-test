@@ -251,6 +251,7 @@
   $effect(() => {
     if (checkedInitialUrl || (loading && !articles.length)) return;
     if (typeof window === 'undefined') return;
+    checkedInitialUrl = true;
     const params = new URLSearchParams(window.location.search);
     const searchQuery = params.get('q') || params.get('search');
     if (searchQuery && !query) {
@@ -266,7 +267,6 @@
     }
     const targetId = params.get('article') || params.get('book') || params.get('id') || params.get('bai-viet') || params.get('bai_viet') || params.get('sach') || params.get('doc') || params.get('slug');
     if (targetId) {
-      checkedInitialUrl = true;
       const normalizedTarget = targetId.toLowerCase().trim();
       const found = localizedArticles.find((a) =>
         a.id === targetId ||

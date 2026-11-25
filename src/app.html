@@ -16,7 +16,7 @@
         window.addEventListener('popstate', normalizeFragment);
       })();
     </script>
-    <link rel="icon" href="/assets/branding/tu-tap-logo.png" />
+    <link rel="icon" sizes="48x48" href="/assets/branding/temple-favicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" media="print" onload="this.media='all'" />
@@ -183,7 +183,7 @@
         });
       }
       // A recoverable startup error must never leave a permanent cover over the app.
-      window.setTimeout(function() { var screen = document.getElementById('app-startup'); if (screen) screen.remove(); }, 15000);
+      window.setTimeout(function() { var screen = document.getElementById('app-startup'); if (screen) screen.remove(); }, 30000);
     </script>
     <div style="display: contents">%sveltekit.body%</div>
   </body>

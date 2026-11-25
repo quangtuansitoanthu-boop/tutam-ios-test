@@ -19,12 +19,12 @@ export async function initializeNativeBackButton(): Promise<void> {
         notificationClose.click();
         return;
       }
-      for (const selector of ['#copy-options .panel-heading button', '.copy-writing .issues-heading button', '.copy-writing .writing-back, .copy-writing .writing-bar > .icon-button']) {
+      for (const selector of ['#copy-options .panel-heading button', '.copy-writing .issues-heading button', '.copy-writing .writing-back', '.copy-writing .writing-bar > .icon-button']) {
         const close = document.querySelector<HTMLElement>(selector);
         if (close && close.offsetParent !== null) { close.click(); return; }
       }
       const routeBack = document.querySelector('[data-practice-route-back]')
-        ? document.querySelector<HTMLElement>('.tt-topbar .tt-back-btn') : null;
+        ? (document.querySelector<HTMLElement>('.tt-topbar .tt-back-btn') ?? document.querySelector<HTMLElement>('.qts-nav .nav-back-circle-btn')) : null;
       if (routeBack && routeBack.offsetParent !== null) { routeBack.click(); return; }
       const readerPanelClose = document.querySelector<HTMLElement>('.pdf-bookmark-panel [aria-label="Đóng danh sách đánh dấu"], .reader-tools-panel.open .sheet-close-btn');
       if (readerPanelClose && readerPanelClose.offsetParent !== null) {
@@ -108,10 +108,14 @@ export async function initializeNativeBackButton(): Promise<void> {
       }
       const categoryBack = document.querySelector<HTMLElement>('.tt-section-view .tt-back-btn');
       if (categoryBack && categoryBack.offsetParent !== null) { categoryBack.click(); return; }
+      const chapterReaderBack = document.querySelector<HTMLElement>('.tt-chapter-reader .tt-reader-back-btn');
+      if (chapterReaderBack && chapterReaderBack.offsetParent !== null) { chapterReaderBack.click(); return; }
       if (document.querySelector('.tt-preview')) {
-        const previewBack = document.querySelector<HTMLElement>('.tt-topbar .tt-back-btn');
+        const previewBack = document.querySelector<HTMLElement>('.tt-topbar .tt-back-btn, .qts-nav .nav-back-circle-btn');
         if (previewBack && previewBack.offsetParent !== null) { previewBack.click(); return; }
       }
+      const customHeaderBack = document.querySelector<HTMLElement>('.qts-nav .nav-back-circle-btn[data-custom-back]');
+      if (customHeaderBack && customHeaderBack.offsetParent !== null) { customHeaderBack.click(); return; }
 
       // 4. Nếu đang ở các trang con (Tu tập, Pháp thoại, Hướng dẫn, Cá nhân, Admin, v.v.) và có thể lùi
       if (window.location.pathname !== '/') {

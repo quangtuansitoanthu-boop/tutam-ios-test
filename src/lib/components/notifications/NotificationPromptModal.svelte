@@ -52,9 +52,11 @@
     const evaluation = evaluateNotificationPromptRequirement(permission, exactPermission);
     missingPermission = evaluation.missing;
 
-    const hasBlockingOverlay = Boolean(document.querySelector(
-      'dialog[open], .reader-modal, .tt-preview, .tt-practice, .pdf-shell, .notification-popover',
-    ));
+    const overlaySelector = 'dialog[open], [role="dialog"][aria-modal="true"], .reader-modal, .tt-preview, .tt-practice, .pdf-shell, .notification-popover';
+    const hasBlockingOverlay = Array.from(document.querySelectorAll<HTMLElement>(overlaySelector)).some(overlay =>
+      !overlay.closest('[hidden], [inert], [aria-hidden="true"]')
+      && overlay.getClientRects().length > 0 && getComputedStyle(overlay).visibility === 'visible',
+    );
     if (
       !shouldPresentNotificationPromptDialog({
         blocked,

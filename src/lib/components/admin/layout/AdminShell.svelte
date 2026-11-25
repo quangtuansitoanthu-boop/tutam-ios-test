@@ -8,8 +8,10 @@
   import { getThemeContext } from '$lib/stores/theme.svelte';
   import AdminSidebar from './AdminSidebar.svelte';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
+  import { createInterfaceTranslator } from '$lib/i18n/interface';
   import { participationCopy } from '$lib/i18n/participation';
   const locale = getLocaleContext();
+  const localizeUi = createInterfaceTranslator();
 
   interface Props {
     children: Snippet;
@@ -139,7 +141,7 @@
         <h1 class="admin-topbar__title">{title}</h1>
       </div>
       <div class="admin-topbar__actions">
-        <button class="admin-topbar__theme" type="button" aria-label={theme.value === 'dark' ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'} onclick={() => theme.toggle()}>
+        <button class="admin-topbar__theme" type="button" aria-label={localizeUi(theme.value === 'dark' ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối')} onclick={() => theme.toggle()}>
           {#if theme.value === 'dark'}
             <Sun aria-hidden="true" size={18} strokeWidth={1.8} />
           {:else}

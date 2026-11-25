@@ -71,7 +71,8 @@
     ENGLISH_TRANSLATION_NOTICE,
     prepareLocalizedReadingContent,
     localizeChapterTitle,
-    offlineBooksEn
+    offlineBooksEn,
+    resolveVietnameseArticleTitle
   } from '$lib/domain/library/localized-article';
 
   interface Chapter { id:string; tieu_de:string; tom_tat:string; noi_dung:string; so_thu_tu:number; contentLoaded?:boolean; }
@@ -448,7 +449,7 @@
   const localizedBookTitle = $derived(
     localeStore.current === 'en' && article
       ? (getEnglishBookMeta(article.id)?.title || article.title)
-      : (article?.originalTitle || (article ? getCanonicalVietnameseArticle(article.id)?.title : null) || article?.title || '')
+      : (article ? resolveVietnameseArticleTitle(article.id, article.title, article.originalTitle) : '')
   );
   const localizedAuthor = $derived(
     localeStore.current === 'en' && article

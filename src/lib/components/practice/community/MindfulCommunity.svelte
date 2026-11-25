@@ -9,7 +9,7 @@
   import { MINDFUL_REACTION_TEMPLATES, type MindfulPost, type MindfulPostPage } from '$lib/contracts/mindful-community';
   import type { MindfulNotification, MindfulNotificationPage, MindfulPostContext } from '$lib/contracts/mindful-notifications';
   import { COMMUNITY_BLOCKS_CHANGED_EVENT, type CommunityBlocksChangedDetail } from '$lib/contracts/community-moderation';
-  import { fetchMindfulPostContext, fetchMindfulPosts, sendMindfulReaction, deleteMindfulPost, MINDFUL_COMMUNITY_QUERY_POLICY } from '$lib/browser/mindful-community-client';
+  import { fetchMindfulPostContext, fetchMindfulPosts, sendMindfulReaction, deleteMindfulPost, MindfulCommunityError, MINDFUL_COMMUNITY_QUERY_POLICY } from '$lib/browser/mindful-community-client';
   import { serverStateKeys } from '$lib/browser/server-state';
   import { getVietnamIsoDate } from '$lib/domain/practice/stats';
   import { countReflectionWords } from '$lib/domain/practice/personal-practice';
@@ -18,8 +18,8 @@
   import MindfulReactions from './MindfulReactions.svelte';
   import MindfulReviewNotice from '../personal/MindfulReviewNotice.svelte';
   import { isMindfulPostPublic, mindfulPostPublishedAt } from '$lib/domain/practice/mindful-post-review';
-  let { principalId = null, nickname = '', active = true, targetPostId = null, targetReactionId = null, targetIntent = 0, targetOnly = false, targetVisible = true, onTargetClose = () => {}, onSignIn = () => {} }: {
-    principalId?: string | null; nickname?: string; active?: boolean; targetPostId?: string | null;
+  let { principalId = null, canModerate = false, nickname = '', active = true, targetPostId = null, targetReactionId = null, targetIntent = 0, targetOnly = false, targetVisible = true, onTargetClose = () => {}, onSignIn = () => {} }: {
+    principalId?: string | null; canModerate?: boolean; nickname?: string; active?: boolean; targetPostId?: string | null;
     targetReactionId?: string | null; targetIntent?: number; targetOnly?: boolean; targetVisible?: boolean; onTargetClose?: () => void; onSignIn?: (button: EventTarget | null) => void;
   } = $props();
   const locale = getLocaleContext();
@@ -35,6 +35,8 @@
   let reactionNotice = $state<{ postId: string; reason: 'guest' | 'nickname' } | null>(null);
   let selected = $state<MindfulPost | null>(null);
   let deleting = $state<MindfulPost | null>(null);
+  const withdrawing = $derived(deleting?.status === 'hidden' && deleting.reviewState === 'pending');
+  const removingRejected = $derived(deleting?.status === 'hidden' && deleting.reviewState === 'rejected');
   let viewing = $state<MindfulPost | null>(null);
   let templateId = $state('');
   let busy = $state(false);
@@ -145,9 +147,29 @@
     selected = post;
     templateId = MINDFUL_REACTION_TEMPLATES[post.kind][0].id;
   }
+  function removalAction(post: MindfulPost): 'withdraw' | 'delete' | null {
+    if (!principalId || !post.isOwn) return null;
+    if (post.status === 'hidden') {
+      if (post.reviewState === 'pending') return 'withdraw';
+      if (post.reviewState === 'rejected') return 'delete';
+    }
+    return canModerate && isMindfulPostPublic(post) ? 'delete' : null;
+  }
+  function requestRemoval(post: MindfulPost) {
+    if (busy || !online) return;
+    if (!removalAction(post)) { message = t.removeUnavailable; return; }
+    message = '';
+    deleting = post;
+  }
   async function mutate(remove = false) {
-    const post = remove ? deleting : selected;
-    if (!post || !principalId || busy || !online || (!remove && !isMindfulPostPublic(post))) return;
+    if (!principalId || busy || !online) return;
+    const post = remove ? items.find(item => item.id === deleting?.id) : selected;
+    if (remove && (!post || removalAction(post) !== (withdrawing ? 'withdraw' : 'delete'))) {
+      deleting = null;
+      message = t.removeUnavailable;
+      return;
+    }
+    if (!post || (!remove && !isMindfulPostPublic(post))) return;
     const captured = principalId;
     const revision = generation;
     const operation = new AbortController(); controller = operation; busy = true; message = '';
@@ -180,8 +202,12 @@
         void queryClient.invalidateQueries({ queryKey: serverStateKeys.mindfulCommunity.reactions(scope, post.id), exact: true, refetchType: 'none' });
       }
       selected = null; deleting = null;
-    } catch {
-      if (captured === principalId && revision === generation && !operation.signal.aborted) message = t.failed;
+    } catch (error) {
+      if (captured !== principalId || revision !== generation || operation.signal.aborted) return;
+      if (remove && error instanceof MindfulCommunityError && [403, 404, 409].includes(error.status)) {
+        deleting = null;
+        message = t.removeUnavailable;
+      } else message = t.failed;
     } finally { if (captured === principalId && revision === generation) busy = false; }
   }
   $effect(() => { scope; generation++; reactionNotice = null; selected = null; deleting = null; viewing = null; message = ''; busy = false; controller?.abort(); });
@@ -285,7 +311,7 @@
       <span>🌸 {t.guest}</span>
     </div>
   {/if}
-  {#if message}
+  {#if message && !deleting}
     <p class="error-banner" role="alert">{message}</p>
   {/if}
   {#if !enabled}
@@ -310,6 +336,8 @@
   {/if}
 
   {#each items as post (post.id)}
+    {@const publicPost = isMindfulPostPublic(post)}
+    {@const action = removalAction(post)}
     <article class="post-card post-card--{post.kind}">
       <header class="post-header">
         <div class="author-info">
@@ -357,52 +385,54 @@
         </div>
       {/if}
 
-      {#if isMindfulPostPublic(post)}
+      {#if !publicPost && (!post.reviewState || post.reviewState === 'legacy')}
+        <p class="hidden-notice">{t.hidden}</p>
+      {/if}
+      {#if publicPost || action}
         <footer class="post-footer actions">
-          <div class="reaction-group">
-            <button
-              type="button"
-              class="react-action-btn react"
-              class:react-action-btn--reacted={post.viewerReacted}
-              disabled={post.viewerReacted || busy || !online}
-              onclick={event => chooseReaction(post, event.currentTarget)}
-            >
-              {#if post.viewerReacted}
-                <span class="btn-icon" aria-hidden="true">✓</span>
-                <span>{post.kind === 'good_deed' ? t.rejoiced : t.prayed}</span>
-              {:else}
-                <span class="btn-icon" aria-hidden="true">{post.kind === 'good_deed' ? '🌸' : '🙏'}</span>
-                <span>{post.kind === 'good_deed' ? t.rejoice : t.pray}</span>
-              {/if}
-            </button>
+          {#if publicPost}
+            <div class="reaction-group">
+              <button
+                type="button"
+                class="react-action-btn react"
+                class:react-action-btn--reacted={post.viewerReacted}
+                disabled={post.viewerReacted || busy || !online}
+                onclick={event => chooseReaction(post, event.currentTarget)}
+              >
+                {#if post.viewerReacted}
+                  <span class="btn-icon" aria-hidden="true">✓</span>
+                  <span>{post.kind === 'good_deed' ? t.rejoiced : t.prayed}</span>
+                {:else}
+                  <span class="btn-icon" aria-hidden="true">{post.kind === 'good_deed' ? '🌸' : '🙏'}</span>
+                  <span>{post.kind === 'good_deed' ? t.rejoice : t.pray}</span>
+                {/if}
+              </button>
 
-            <button
-              type="button"
-              class="reaction-count-chip"
-              disabled={!online}
-              onclick={() => viewing = post}
-              title={post.kind === 'good_deed' ? t.rejoices : t.prayers}
-            >
-              <span class="count-icon" aria-hidden="true">💬</span>
-              <span>{post.reactionCount} {post.kind === 'good_deed' ? t.rejoices : t.prayers}</span>
-            </button>
-          </div>
+              <button
+                type="button"
+                class="reaction-count-chip"
+                disabled={!online}
+                onclick={() => viewing = post}
+                title={post.kind === 'good_deed' ? t.rejoices : t.prayers}
+              >
+                <span class="count-icon" aria-hidden="true">💬</span>
+                <span>{post.reactionCount} {post.kind === 'good_deed' ? t.rejoices : t.prayers}</span>
+              </button>
+            </div>
+          {/if}
 
-          {#if post.isOwn}
+          {#if action}
             <button
               class="remove-post-btn remove"
               type="button"
               disabled={busy || !online}
-              onclick={() => deleting = post}
-              title={t.delete}
+              onclick={() => requestRemoval(post)}
             >
               <span class="remove-icon" aria-hidden="true">🗑️</span>
-              <span>{t.delete}</span>
+              <span>{action === 'withdraw' ? t.withdraw : t.delete}</span>
             </button>
           {/if}
         </footer>
-      {:else if !post.reviewState || post.reviewState === 'legacy'}
-        <p class="hidden-notice">{t.hidden}</p>
       {/if}
 
       {#if reactionNotice?.postId === post.id}
@@ -423,7 +453,12 @@
 <PracticeConfirmDialog open={Boolean(selected)} title={selected?.kind === 'good_deed' ? t.rejoice : t.pray} description={t.once} cancelLabel={t.cancel} confirmLabel={t.send} {busy} onCancel={() => { if (!busy) selected = null; }} onConfirm={() => void mutate()}>
   {#snippet children()}<RosarySelect label={t.select} accessibleLabel={t.select} value={templateId} options={templates} onChange={value => { templateId = value; }} />{#if message}<p class="error" role="alert">{message}</p>{/if}{/snippet}
 </PracticeConfirmDialog>
-<PracticeConfirmDialog open={Boolean(deleting)} title={t.deleteTitle} description={t.deleteDescription} cancelLabel={t.cancel} confirmLabel={t.delete} {busy} onCancel={() => { if (!busy) deleting = null; }} onConfirm={() => void mutate(true)} />
+<PracticeConfirmDialog open={Boolean(deleting)} title={withdrawing ? t.withdrawTitle : t.deleteTitle}
+  description={withdrawing ? t.withdrawDescription : removingRejected ? t.deleteRejectedDescription : t.deleteDescription}
+  cancelLabel={t.cancel} confirmLabel={withdrawing ? t.withdraw : t.delete}
+  {busy} onCancel={() => { if (!busy) deleting = null; }} onConfirm={() => void mutate(true)}>
+  {#snippet children()}{#if message}<p class="error" role="alert">{message}</p>{/if}{/snippet}
+</PracticeConfirmDialog>
 {#if viewing}<MindfulReactions post={viewing} principalId={scope} {online} onClose={() => viewing = null} />{/if}
 {#if targetMode && targetOpen && targetPostId}
   <MindfulReactions post={targetPost} principalId={scope} requestedPostId={targetPostId} showPost={true} {online}
@@ -759,7 +794,7 @@
   }
   .expand-post-btn {
     margin-top: 8px;
-    min-height: 40px;
+    min-height: var(--touch-target-size);
     padding: 4px 0;
     background: transparent;
     border: none;
@@ -849,6 +884,7 @@
   }
   .remove-post-btn {
     min-height: 44px;
+    margin-inline-start: auto;
     padding: 6px 10px;
     background: transparent;
     border: 1px solid transparent;

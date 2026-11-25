@@ -7,7 +7,6 @@
   import '../../styles/interaction-performance.css';
   import '../../styles/ui-refresh.css';
   import MobileBottomNav from './MobileBottomNav.svelte';
-  import SiteFooter from './SiteFooter.svelte';
   import SiteHeader from './SiteHeader.svelte';
   import EnglishPackDownload from './EnglishPackDownload.svelte';
   import AudioMiniPlayer from '$lib/components/audio/AudioMiniPlayer.svelte';
@@ -178,7 +177,6 @@
     <EnglishPackDownload />
     {@render children()}
   </main>
-  {#if !isAdminArea && showFooter && currentPath.startsWith('/huong-dan')}<SiteFooter />{/if}
   <AudioMiniPlayer />
   <MobileBottomNav {currentPath} {theme} {onThemeToggle} {session} />
 </div>

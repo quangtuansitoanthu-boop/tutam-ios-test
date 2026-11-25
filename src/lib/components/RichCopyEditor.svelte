@@ -20,16 +20,16 @@
   let pendingSelection: [number, number] | null = null;
   let rememberedSelection: [number, number] | null = null;
   let renderedRuns = '';
+  let nativeEditRevision = $state(0);
   let renderedGhostRuns = '';
   const canonicalGhostSource = $derived(canonicalGhostRuns.length > 0 ? canonicalGhostRuns : ghostRuns);
   const canonicalGhost = $derived(showGhost && canonicalGhostSource.length > 0 ? canonicalGhostSource.map(r => r.text).join('') : '');
-  const canonicalMatched = $derived(Boolean(showGhost && traceCanonical && canonicalGhost && canonicalizeGhostPrefix(canonicalGhost, value).matched));
   const alignedGhost = $derived(
     !showGhost
       ? null
-      : !composing && canonicalMatched
-        ? canonicalGhostSource
-        : alignGhostRuns(canonicalGhostSource, value)
+      : canonicalGhostRuns.length > 0
+        ? ghostRuns
+        : canonicalGhost.startsWith(value) ? canonicalGhostSource : alignGhostRuns(canonicalGhostSource, value)
   );
   function focused() {
     if (element && !selecting) {
@@ -130,6 +130,7 @@
     });
   });
   $effect(() => {
+    void nativeEditRevision;
     const target = element, content = value, formatted = runs, reference = alignedGhost ?? ghostRuns;
     const tracing = showGhost && canonicalGhost && alignedGhost !== null;
     if (!target || composing || selecting) return;
@@ -190,7 +191,9 @@
   }
   function changed(event: Event) {
     if (!element) return;
-    let next = richCopyText(element);
+    const nativeText = richCopyText(element);
+    let next = nativeText;
+    let rejectedWord: string | undefined;
     const previous = beforeEdit?.value;
     const atEnd = !beforeEdit || beforeEdit.selection.every(offset => offset >= Math.min(previous?.length ?? 0, next.length));
     if (compositionReference && previous !== undefined && next.startsWith(previous) && !compositionReference.startsWith(compositionKey(next))) {
@@ -202,7 +205,8 @@
         if (!composing) pendingSelection = [next.length, next.length];
       }
     }
-    if (!composing && showGhost && traceCanonical && canonicalGhost && previous !== undefined && atEnd) {
+    const opensNote = previous !== undefined && next.startsWith(previous) && /^[(（]/u.test(next.slice(previous.length));
+    if (!composing && showGhost && (traceCanonical || compositionReference) && canonicalGhost && previous !== undefined && atEnd && !opensNote) {
       const prefix = canonicalizeGhostPrefix(canonicalGhost, previous);
       if (prefix.matched) {
         const prevNfc = previous.normalize('NFC');
@@ -213,7 +217,7 @@
             next = prefix.text;
             renderedRuns = '';
             pendingSelection = [next.length, next.length];
-            onmismatch?.(res.expectedWord ?? '');
+            rejectedWord = res.expectedWord ?? '';
           } else {
             next = res.text;
             renderedRuns = '';
@@ -231,7 +235,7 @@
             next = prefix.text;
             renderedRuns = '';
             pendingSelection = [next.length, next.length];
-            onmismatch?.(nextExpectedGhostWord(canonicalGhost, prefix.text.length));
+            rejectedWord = nextExpectedGhostWord(canonicalGhost, prefix.text.length);
           }
         }
       }
@@ -239,7 +243,11 @@
     if (!composing && next.length > maxlength) {
       next = next.slice(0, maxlength);
     }
-    commit(next, (event as InputEvent).inputType ?? ''); oncaret();
+    // A rejected native edit may leave the state unchanged while the DOM and caret changed.
+    if (!composing && nativeText !== next && next === value) nativeEditRevision++;
+    commit(next, (event as InputEvent).inputType ?? '');
+    if (rejectedWord !== undefined) onmismatch?.(rejectedWord);
+    oncaret();
   }
   function startComposition() {
     flushPendingComposition();
@@ -248,7 +256,7 @@
     beforeEdit = { value: effectiveValue, selection: currentSelection ?? [effectiveValue.length, effectiveValue.length] };
     const domLen = element ? richCopyText(element).length : effectiveValue.length;
     const atEnd = beforeEdit.selection.every(offset => offset >= Math.min(effectiveValue.length, domLen));
-    compositionReference = showGhost && atEnd && canonicalizeGhostPrefix(canonicalGhost, effectiveValue).matched ? compositionKey(canonicalGhost) : '';
+    compositionReference = showGhost && traceCanonical && atEnd && canonicalizeGhostPrefix(canonicalGhost, effectiveValue).matched ? compositionKey(canonicalGhost) : '';
     composing = true; oncomposing(true);
   }
   function endComposition(event: CompositionEvent) {
@@ -264,7 +272,7 @@
   function before(event: InputEvent) {
     onbeforeinput(event);
     if (event.defaultPrevented || !element) return;
-    if (compositionCommitTimer !== undefined && (event.inputType === 'insertParagraph' || event.inputType === 'insertLineBreak' || event.inputType === 'deleteContentBackward')) {
+    if (compositionCommitTimer !== undefined && !event.isComposing && event.inputType !== 'insertCompositionText' && event.inputType !== 'insertFromComposition') {
       flushPendingComposition();
     }
     if (composing || event.isComposing) return;
@@ -274,6 +282,7 @@
     const currentValue = lastCommitted ?? value;
     const selection = pendingSelection ?? richCopySelection(element);
     beforeEdit = { value: currentValue, selection: selection ?? [currentValue.length, currentValue.length] };
+    if (!event.cancelable) return;
     const prefix = showGhost && traceCanonical && canonicalGhost ? canonicalizeGhostPrefix(canonicalGhost, currentValue) : { text: currentValue, matched: false };
     // Only trace at the end of an unchanged canonical prefix. Existing drafts
     // and edits within the text retain the browser's normal selection behavior.

@@ -57,12 +57,7 @@
     const trimmed = value.trim();
     if (!trimmed || trimmed.length > 40 || /[\u0000-\u001f\u007f]/u.test(trimmed)) return;
     try {
-      const saved = storage.saveNickname(trimmed);
-      nickname = saved;
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('tt_community_nickname_v1', saved);
-        localStorage.setItem('tt_last_community_nickname', saved);
-      }
+      if (storage.getNickname() !== trimmed) storage.saveNickname(trimmed);
     } catch {
       // Bỏ qua lỗi tạm thời khi người dùng đang gõ dở
     }
@@ -150,19 +145,9 @@
       const entry = owner.getReflections().find(item => item.date === selectedDate);
       repentance = entry?.repentance ?? ''; goodDeeds = entry?.goodDeeds ?? '';
       reflectionBaseline = JSON.stringify([selectedDate, entry?.repentance ?? '', entry?.goodDeeds ?? '']);
-      // Tự động nạp biệt danh đã lưu từ storage hoặc khôi phục từ localStorage
-      const savedNick = owner.getNickname();
-      if (savedNick) {
-        nickname = savedNick;
-      } else if (typeof localStorage !== 'undefined') {
-        const fallback = localStorage.getItem('tt_community_nickname_v1') || localStorage.getItem('tt_last_community_nickname') || '';
-        if (fallback) {
-          nickname = fallback;
-          try { owner.saveNickname(fallback); } catch {}
-        }
-      }
+      nickname = owner.getNickname();
     } catch { failed = true; status = untrack(() => copy.notReady); }
-    return () => { revision += 1; };
+    return () => { clearTimeout(nicknameDebounceTimer); revision += 1; };
   });
   $effect(() => { storage; blockedReceipt = null; });
 

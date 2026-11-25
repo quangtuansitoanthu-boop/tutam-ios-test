@@ -1,0 +1,275 @@
+name: Verify Android native app on emulator
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'codex/qa-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-native-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Build, JVM tests and Pixel 7 API 36 emulator instrumentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TUTAM_BUNDLE_SYNCED: '1'
+      ANDROID_SERIAL: emulator-5554
+      QA_PACKAGE: vn.quangtu.tutam.securityqa
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply QA audit source overlay if present
+        run: |
+          if [ -f .github/qa-audit-overlay.tar.gz ]; then
+            tar -xzf .github/qa-audit-overlay.tar.gz
+            rm -f .github/qa-audit-overlay.tar.gz
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Check TypeScript contracts
+        run: npm run check
+      - name: Build Android web assets and sync Capacitor
+        run: npm run build:mobile -- --platform android
+      - name: Run Android JVM unit tests and build isolated QA APKs
+        run: |
+          set -euo pipefail
+          mkdir -p build/android-device-evidence
+          bash android/gradlew -p android --no-daemon -Dorg.gradle.jvmargs=-Xmx4096m \
+            -PqaApplicationIdSuffix=.securityqa \
+            :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Verify Android JVM test results
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, xml.etree.ElementTree as ET
+          results_dir = pathlib.Path('android/app/build/test-results/testDebugUnitTest')
+          xml_files = sorted(results_dir.glob('TEST-*.xml'))
+          assert xml_files, 'No Android JVM JUnit XML files produced'
+          total = failures = errors = skipped = 0
+          suites = []
+          for f in xml_files:
+              root = ET.parse(f).getroot()
+              t = int(root.attrib.get('tests', 0))
+              fl = int(root.attrib.get('failures', 0))
+              er = int(root.attrib.get('errors', 0))
+              sk = int(root.attrib.get('skipped', 0))
+              total += t
+              failures += fl
+              errors += er
+              skipped += sk
+              suites.append({'name': root.attrib.get('name', f.name), 'tests': t, 'failures': fl, 'errors': er, 'skipped': sk})
+          summary = {'totalTests': total, 'failures': failures, 'errors': errors, 'skipped': skipped, 'suites': suites}
+          pathlib.Path('build/android-device-evidence/android-jvm-summary.json').write_text(json.dumps(summary, indent=2))
+          print('Android JVM tests:', total, 'total,', failures, 'failures,', errors, 'errors,', skipped, 'skipped')
+          assert total > 0, 'Expected at least 1 Android JVM test'
+          assert failures == 0 and errors == 0 and skipped == 0, 'Android JVM test failures/errors/skips detected'
+          PY
+      - name: Prepare and boot headless Pixel 7 API 36 emulator
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sdk="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          test -x "$sdk/cmdline-tools/latest/bin/sdkmanager" || { echo "Missing sdkmanager at $sdk"; exit 1; }
+          test -x "$sdk/cmdline-tools/latest/bin/avdmanager" || { echo "Missing avdmanager at $sdk"; exit 1; }
+          test -e /dev/kvm || { echo "Hosted runner KVM device is missing"; exit 1; }
+          sudo chmod a+rw /dev/kvm
+          avd_home="$RUNNER_TEMP/tutam-ci-avd"
+          emu_home="$RUNNER_TEMP/tutam-ci-emulator"
+          mkdir -p "$avd_home" "$emu_home" build/android-device-evidence
+          echo "ANDROID_AVD_HOME=$avd_home" >> "$GITHUB_ENV"
+          echo "ANDROID_EMULATOR_HOME=$emu_home" >> "$GITHUB_ENV"
+          echo "ADB=$sdk/platform-tools/adb" >> "$GITHUB_ENV"
+          echo "CI_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          export ANDROID_AVD_HOME="$avd_home"
+          export ANDROID_EMULATOR_HOME="$emu_home"
+          printf 'y\n%.0s' {1..100} | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses > build/android-device-evidence/sdk-licenses.log
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" emulator platform-tools 'system-images;android-36;google_apis;x86_64' > build/android-device-evidence/sdk-image.log
+          test -x "$sdk/emulator/emulator" || { echo "Emulator package did not install"; exit 1; }
+          printf 'no\n' | "$sdk/cmdline-tools/latest/bin/avdmanager" create avd --name Pixel_7 --package 'system-images;android-36;google_apis;x86_64' --device pixel_7
+          "$sdk/platform-tools/adb" start-server
+          if "$sdk/platform-tools/adb" devices | grep -q '^emulator-'; then
+            echo 'Refusing a second emulator'
+            exit 1
+          fi
+          "$sdk/emulator/emulator" -avd Pixel_7 -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+            > build/android-device-evidence/emulator.log 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/tutam-ci-emulator.pid"
+      - name: Wait for boot and enforce offline isolation
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess, time
+          adb = os.environ['ADB']
+          serial = os.environ['ANDROID_SERIAL']
+          def run(*args):
+              return subprocess.run([adb, '-s', serial, *args], capture_output=True, text=True, check=True, timeout=30).stdout
+          subprocess.run([adb, '-s', serial, 'wait-for-device'], check=True, timeout=180)
+          for _ in range(180):
+              if run('shell', 'getprop', 'sys.boot_completed').strip() == '1':
+                  break
+              time.sleep(1)
+          else:
+              raise RuntimeError('Emulator did not complete boot')
+          assert run('emu', 'avd', 'name').splitlines()[0] == 'Pixel_7'
+          run('shell', 'settings', 'put', 'global', 'window_animation_scale', '0')
+          run('shell', 'settings', 'put', 'global', 'transition_animation_scale', '0')
+          run('shell', 'settings', 'put', 'global', 'animator_duration_scale', '0')
+          run('shell', 'cmd', 'connectivity', 'airplane-mode', 'enable')
+          run('shell', 'svc', 'wifi', 'disable')
+          run('shell', 'svc', 'data', 'disable')
+          run('shell', 'settings', 'put', 'global', 'mobile_data', '0')
+          run('shell', 'input', 'keyevent', '82')
+          for _ in range(40):
+              connectivity = run('shell', 'dumpsys', 'connectivity')
+              state = {k: run('shell', 'settings', 'get', 'global', k).strip() for k in ['airplane_mode_on', 'wifi_on', 'mobile_data']}
+              if 'Active default network: none' in connectivity and state == {'airplane_mode_on': '1', 'wifi_on': '0', 'mobile_data': '0'}:
+                  break
+              time.sleep(0.5)
+          else:
+              pathlib.Path('build/android-device-evidence/connectivity-failed.txt').write_text(connectivity)
+              pathlib.Path('build/android-device-evidence/offline-state-failed.json').write_text(json.dumps(state, indent=2))
+              raise RuntimeError('Unable to prove offline emulator: ' + json.dumps(state))
+          pathlib.Path('build/android-device-evidence/connectivity-before.txt').write_text(connectivity)
+          pathlib.Path('build/android-device-evidence/offline-state.json').write_text(json.dumps(state, indent=2))
+          PY
+      - name: Install isolated QA app and instrumentation APK
+        id: install
+        run: |
+          set -euo pipefail
+          qa_apk="android/app/build/outputs/apk/debug/app-debug.apk"
+          qa_test_apk="android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+          test -f "$qa_apk" && test -f "$qa_test_apk"
+          aapt=$(find "$CI_SDK_ROOT/build-tools" -maxdepth 2 -name aapt -type f | sort | tail -1)
+          test -n "$aapt"
+          "$aapt" dump badging "$qa_apk" > build/android-device-evidence/app-badging.txt
+          "$aapt" dump badging "$qa_test_apk" > build/android-device-evidence/test-badging.txt
+          grep -m1 -F "name='$QA_PACKAGE'" build/android-device-evidence/app-badging.txt
+          grep -m1 -F "name='${QA_PACKAGE}.test'" build/android-device-evidence/test-badging.txt
+          "$ADB" -s "$ANDROID_SERIAL" install -r "$qa_apk"
+          "$ADB" -s "$ANDROID_SERIAL" install -r "$qa_test_apk"
+          "$ADB" -s "$ANDROID_SERIAL" shell pm grant "$QA_PACKAGE" android.permission.POST_NOTIFICATIONS
+          "$ADB" -s "$ANDROID_SERIAL" shell appops set "$QA_PACKAGE" SCHEDULE_EXACT_ALARM allow
+      - name: Run Android instrumentation tests and verify strict zero-failure summary
+        timeout-minutes: 25
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          root = pathlib.Path('build/android-device-evidence')
+          pkg = os.environ['QA_PACKAGE']
+          command = [
+              os.environ['ADB'], '-s', os.environ['ANDROID_SERIAL'],
+              'shell', 'am', 'instrument', '-w', '-r',
+              '-e', 'exportPickerPreviews', 'true',
+              f'{pkg}.test/androidx.test.runner.AndroidJUnitRunner'
+          ]
+          timed_out = False
+          with (root / 'instrumentation.log').open('w') as output:
+              try:
+                  process = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, timeout=1400)
+                  exit_code = process.returncode
+              except subprocess.TimeoutExpired:
+                  timed_out = True
+                  exit_code = 124
+          text = (root / 'instrumentation.log').read_text(errors='replace')
+          status = {}
+          terminal = []
+          declared = []
+          codes = []
+          for line in text.splitlines():
+              if line.startswith('INSTRUMENTATION_STATUS: '):
+                  key, sep, value = line[len('INSTRUMENTATION_STATUS: '):].partition('=')
+                  if sep:
+                      status[key] = value
+              elif line.startswith('INSTRUMENTATION_STATUS_CODE: '):
+                  code = int(line.rsplit(':', 1)[1].strip())
+                  if status.get('numtests'):
+                      declared.append(int(status['numtests']))
+                  if code != 1:
+                      terminal.append({
+                          'class': status.get('class'),
+                          'test': status.get('test'),
+                          'code': code,
+                          'stack': status.get('stack'),
+                      })
+                  status = {}
+              elif line.startswith('INSTRUMENTATION_CODE: '):
+                  codes.append(int(line.rsplit(':', 1)[1].strip()))
+          passed = sum(x['code'] == 0 for x in terminal)
+          failed = sum(x['code'] in (-1, -2) for x in terminal)
+          skipped = sum(x['code'] in (-3, -4) for x in terminal)
+          result = {
+              'passedTests': passed,
+              'failedTests': failed,
+              'skippedTests': skipped,
+              'totalTestCount': len(terminal),
+              'declaredCounts': sorted(set(declared)),
+              'adbExitCode': exit_code,
+              'timedOut': timed_out,
+              'instrumentationCodes': codes,
+              'cases': terminal,
+          }
+          (root / 'instrumentation-summary.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps({k: v for k, v in result.items() if k != 'cases'}, indent=2))
+          assert not timed_out and exit_code == 0, f'Instrumentation failed/timed out (exit={exit_code}, timedOut={timed_out})'
+          assert codes == [-1], f'Expected Android Activity.RESULT_OK (-1), got {codes}'
+          assert len(set(declared)) == 1 and declared[0] > 0, f'Unexpected declared test count: {declared}'
+          assert len(terminal) == declared[0], f'Expected {declared[0]} completed tests, got {len(terminal)}'
+          assert failed == 0 and skipped == 0, f'Instrumentation failures={failed}, skipped={skipped}'
+          assert all(x['class'] and x['test'] and x['code'] == 0 for x in terminal), 'Non-passing test case found'
+          assert not any(marker in text for marker in ['FAILURES!!!', 'INSTRUMENTATION_FAILED', 'Process crashed', 'shortMsg=']), 'Crash/failure marker found in instrumentation log'
+          PY
+      - name: Capture emulator evidence
+        if: always()
+        run: |
+          mkdir -p build/android-device-evidence
+          if [[ -n "${ADB:-}" ]]; then
+            "$ADB" -s "$ANDROID_SERIAL" logcat -d -v threadtime > build/android-device-evidence/logcat-final.txt 2>&1 || true
+            "$ADB" -s "$ANDROID_SERIAL" logcat -d -b crash > build/android-device-evidence/crash-final.txt 2>&1 || true
+            "$ADB" -s "$ANDROID_SERIAL" exec-out screencap -p > build/android-device-evidence/device-final.png || true
+            "$ADB" -s "$ANDROID_SERIAL" shell dumpsys connectivity > build/android-device-evidence/connectivity-final.txt 2>&1 || true
+          fi
+      - name: Stop and clean up temporary CI emulator
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, shutil, subprocess, time
+          adb = os.environ.get('ADB')
+          if adb:
+              subprocess.run([adb, '-s', os.environ['ANDROID_SERIAL'], 'shell', 'am', 'force-stop', os.environ['QA_PACKAGE']], timeout=15, check=False)
+              subprocess.run([adb, '-s', os.environ['ANDROID_SERIAL'], 'emu', 'kill'], timeout=15, check=False)
+          temp = pathlib.Path(os.environ['RUNNER_TEMP']).resolve()
+          pidfile = temp / 'tutam-ci-emulator.pid'
+          if pidfile.exists():
+              pid = int(pidfile.read_text().strip())
+              for _ in range(30):
+                  try:
+                      os.kill(pid, 0)
+                  except ProcessLookupError:
+                      break
+                  time.sleep(0.5)
+          for d in [temp / 'tutam-ci-avd', temp / 'tutam-ci-emulator']:
+              if d.exists():
+                  shutil.rmtree(d, ignore_errors=True)
+          PY
+      - name: Upload Android emulator verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-emulator-verify-${{ github.run_number }}
+          path: |
+            build/android-device-evidence/
+            android/app/build/test-results/testDebugUnitTest/*.xml
+          retention-days: 7
+          if-no-files-found: error

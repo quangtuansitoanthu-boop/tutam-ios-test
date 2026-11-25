@@ -631,7 +631,7 @@ textarea {
   width: 32px;
   height: 32px;
   flex-shrink: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   object-fit: cover;
   border: 1px solid var(--border2);
   opacity: 0.92;
@@ -1077,17 +1077,21 @@ textarea {
 :root:has(.reader-modal.bg-purple) .qts-bottom-nav__item { --tab-color-dark:var(--tab-color); --tab-bg-dark:var(--tab-bg); color:var(--reading-footer-ink); }
 :root:has(.reader-modal.bg-purple) .qts-bottom-nav__item[aria-current='page'] { color:var(--reading-footer-ink); }
 
+:root:has(.tt-practice, .tt-chapter-reader) .qts-nav {
+  display: none !important;
+}
+
 /* Reading surfaces align sibling chrome with the shared paper palette. */
 :root:has(.reader-modal.bg-white) .qts-bottom-nav { --reading-footer-paper:var(--reading-paper-white); --reading-footer-ink:var(--reading-paper-white-ink); }
-:root:has(.tt-preview[data-read-bg='white']) .tt-topbar { --reading-chrome-paper:var(--reading-paper-white); --reading-chrome-ink:var(--reading-paper-white-ink); }
+:root:has(.tt-preview[data-read-bg='white']) :is(.tt-topbar, .qts-nav) { --reading-chrome-paper:var(--reading-paper-white); --reading-chrome-ink:var(--reading-paper-white-ink); }
 :root:has(.reader-modal.bg-cream) .qts-bottom-nav { --reading-footer-paper:var(--reading-paper-reader-cream); --reading-footer-ink:var(--reading-paper-reader-cream-ink); }
-:root:has(.tt-preview[data-read-bg='cream']) .tt-topbar { --reading-chrome-paper:var(--reading-paper-reader-cream); --reading-chrome-ink:var(--reading-paper-reader-cream-ink); }
+:root:has(.tt-preview[data-read-bg='cream']) :is(.tt-topbar, .qts-nav) { --reading-chrome-paper:var(--reading-paper-reader-cream); --reading-chrome-ink:var(--reading-paper-reader-cream-ink); }
 :root:has(.reader-modal.bg-gray) .qts-bottom-nav { --reading-footer-paper:var(--reading-paper-gray); --reading-footer-ink:var(--reading-paper-reader-gray-ink); }
-:root:has(.tt-preview[data-read-bg='gray']) .tt-topbar { --reading-chrome-paper:var(--reading-paper-gray); --reading-chrome-ink:var(--reading-paper-reader-gray-ink); }
+:root:has(.tt-preview[data-read-bg='gray']) :is(.tt-topbar, .qts-nav) { --reading-chrome-paper:var(--reading-paper-gray); --reading-chrome-ink:var(--reading-paper-reader-gray-ink); }
 :root:has(.reader-modal.bg-dark) .qts-bottom-nav { --reading-footer-paper:var(--reading-paper-dark); --reading-footer-ink:var(--reading-paper-dark-ink); }
-:root:has(.tt-preview[data-read-bg='dark']) .tt-topbar { --reading-chrome-paper:var(--reading-paper-dark); --reading-chrome-ink:var(--reading-paper-dark-ink); }
+:root:has(.tt-preview[data-read-bg='dark']) :is(.tt-topbar, .qts-nav) { --reading-chrome-paper:var(--reading-paper-dark); --reading-chrome-ink:var(--reading-paper-dark-ink); }
 :root:has(.reader-modal.bg-purple) .qts-bottom-nav { --reading-footer-paper:var(--reading-paper-purple); --reading-footer-ink:var(--reading-paper-purple-ink); }
-:root:has(.tt-preview[data-read-bg='purple']) .tt-topbar { --reading-chrome-paper:var(--reading-paper-purple); --reading-chrome-ink:var(--reading-paper-purple-ink); }
+:root:has(.tt-preview[data-read-bg='purple']) :is(.tt-topbar, .qts-nav) { --reading-chrome-paper:var(--reading-paper-purple); --reading-chrome-ink:var(--reading-paper-purple-ink); }
 
 :root:has(.reader-modal[class*='bg-']) .qts-bottom-nav { background:var(--reading-footer-paper);color:var(--reading-footer-ink); }
 :root:has(.reader-modal[class*='bg-']) .qts-bottom-nav__item,
@@ -1099,7 +1103,7 @@ textarea {
 @media (hover: hover) and (pointer: fine) {
   :root:has(.reader-modal.bg-dark) .qts-bottom-nav__item:hover .qts-bottom-nav__icon { background:var(--tab-bg-dark); }
 }
-:root:has(.tt-preview[data-read-bg]) .tt-topbar { --bg:var(--reading-chrome-paper);--bg2:var(--reading-chrome-paper);--card:var(--reading-chrome-paper);--text:var(--reading-chrome-ink);--text2:var(--reading-chrome-ink);--gold:var(--reading-chrome-ink);--gold2:var(--reading-chrome-ink);background:var(--reading-chrome-paper);color:var(--reading-chrome-ink); }
+:root:has(.tt-preview[data-read-bg]) :is(.tt-topbar, .qts-nav) { --bg:var(--reading-chrome-paper);--bg2:var(--reading-chrome-paper);--card:var(--reading-chrome-paper);--text:var(--reading-chrome-ink);--text2:var(--reading-chrome-ink);--gold:var(--reading-chrome-ink);--gold2:var(--reading-chrome-ink);background:var(--reading-chrome-paper);color:var(--reading-chrome-ink); }
 :root:has(.tt-preview[data-read-bg]) .tt-topbar :is(.tt-topbar-title,button) { color:var(--reading-chrome-ink); }
 :root:has(.tt-preview[data-read-bg]) .tt-topbar .tt-back-btn { background:var(--reading-chrome-paper);border-color:var(--reading-chrome-ink); }
 :root:has(.tt-preview[data-read-bg]) .tt-topbar button:focus-visible { outline:2px solid var(--reading-chrome-ink);outline-offset:2px; }

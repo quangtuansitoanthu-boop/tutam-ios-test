@@ -134,17 +134,7 @@
 
 <main class="practice-community-public practice-theme" data-practice="community" aria-busy={leaderboardQuery.isFetching || campaignsQuery.isFetching}>
   <header>
-    <div>
-      <a
-        href="/tu-tap"
-        class="tt-back-btn"
-        onclick={(event) => {
-          if (typeof window !== 'undefined' && window.history.length > 1) {
-            event.preventDefault();
-            window.history.back();
-          }
-        }}
-      ><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m15 19-7-7 7-7" stroke-linecap="round" stroke-linejoin="round" /></svg><span>{isEn ? 'Back to Practice' : 'Về trang Tu tập'}</span></a>
+    <div class="practice-community-public__intro">
       <span>{isEn ? 'VOLUNTARY SANGHA COMMUNITY' : 'CỘNG ĐỒNG TỰ NGUYỆN'}</span>
       <h1>{isEn ? 'Diligent Practice Together' : 'Cùng nhau tinh tấn'}</h1>
       <p>{isEn ? 'Only members who voluntarily opt into public sharing appear here. Personal logs and individual progress remain private.' : 'Chỉ những thành viên chủ động bật chia sẻ mới xuất hiện. Nhật ký và tiến độ riêng không được hiển thị ở đây.'}</p>
@@ -169,13 +159,12 @@
 </main>
 
 <style>
-  .practice-community-public{--pc-space-1:4px;--pc-space-2:8px;--pc-space-3:12px;--pc-space-4:16px;--pc-space-5:24px;--pc-space-6:32px;--pc-space-7:48px;--pc-space-8:64px;--pc-radius-xs:4px;--pc-radius:10px;--pc-radius-lg:16px;--pc-radius-pill:999px;--pc-type-0:11px;--pc-type-1:13px;--pc-type-2:16px;--pc-type-3:20px;--pc-type-4:24px;--pc-type-5:40px;--pc-ease:cubic-bezier(.25,1,.5,1);display:grid;width:min(1080px,calc(100% - 48px));margin:0 auto;padding:var(--pc-space-7) 0 var(--pc-space-5);gap:var(--pc-space-7);color:var(--text);font-family:var(--font-app)}
-  .practice-community-public>header{display:grid;align-items:end;padding-bottom:var(--pc-space-6);border-bottom:1px solid var(--border);grid-template-columns:minmax(0,1.4fr) minmax(300px,.6fr);gap:var(--pc-space-7)}
-  header>div>a{display:inline-flex;min-height:44px;align-items:center;color:var(--brown);font-size:var(--pc-type-1);font-weight:700;text-decoration:none;transition:transform .2s var(--pc-ease),color .2s var(--pc-ease)}header>div>a:hover{color:var(--brown);transform:translateX(-2px)}header>div>a:active{transform:translateX(-4px)}header>div>a:focus-visible,button:focus-visible{outline:3px solid color-mix(in srgb,var(--gold) 48%,transparent);outline-offset:3px}
-  header>div>span{display:block;margin-top:var(--pc-space-5);color:var(--brown);font-size:var(--font-size-meta);font-weight:800;letter-spacing:.12em}h1{margin:var(--pc-space-2) 0 0;color:var(--brown-dark);font-size:var(--pc-type-5);line-height:1.12;letter-spacing:-.02em;text-wrap:balance}:global([data-theme="dark"]) h1{color:var(--text)}header>div>p{max-width:64ch;overflow-wrap:anywhere;margin:var(--pc-space-3) 0 0;color:var(--muted);font-size:var(--pc-type-2);line-height:1.65;text-wrap:pretty}
-  aside{display:grid;padding:var(--pc-space-5);border:1px solid var(--border2);border-radius:var(--pc-radius-lg);background:var(--card);gap:var(--pc-space-3)}aside>:global(svg){color:var(--gold)}aside>div{display:grid;gap:var(--pc-space-1)}aside strong{font-size:var(--font-size-label)}aside small{color:var(--muted);font-size:var(--font-size-meta);line-height:1.55}button{min-height:44px;padding:0 var(--pc-space-4);border:1px solid var(--gold);border-radius:var(--pc-radius);background:var(--gold);color:var(--on-gold);cursor:pointer;font:700 var(--pc-type-1) var(--font-app);transition:transform .12s var(--pc-ease),background .2s var(--pc-ease)}button:hover{background:var(--gold2);transform:translateY(-2px)}button:active{transform:translateY(2px)}
-  .practice-community-public__notice{margin:calc(var(--pc-space-7) * -1 + var(--pc-space-2)) 0 0;padding:var(--pc-space-3) var(--pc-space-4);border-radius:var(--pc-radius);background:var(--gold-light);color:var(--brown);font-size:var(--pc-type-1)}
-  @media(max-width:760px){.practice-community-public{width:min(100% - 32px,1080px);padding-top:var(--pc-space-6)}.practice-community-public>header{grid-template-columns:1fr;gap:var(--pc-space-5)}h1{font-size:34px}}
-  @media(max-width:420px){.practice-community-public{width:min(100% - 24px,1080px);padding-top:var(--pc-space-5);gap:var(--pc-space-6)}h1{font-size:30px}}
-  @media(prefers-reduced-motion:reduce){.practice-community-public :is(a,button){transition:none}.practice-community-public :is(a,button):hover,.practice-community-public :is(a,button):active{transform:none}}
+  .practice-community-public{--pc-space-1:4px;--pc-space-2:8px;--pc-space-3:12px;--pc-space-4:16px;--pc-space-5:20px;--pc-space-6:28px;--pc-space-7:36px;--pc-space-8:48px;--pc-radius-xs:4px;--pc-radius:10px;--pc-radius-lg:16px;--pc-radius-pill:999px;--pc-type-0:var(--font-size-meta);--pc-type-1:var(--font-size-body);--pc-type-2:var(--font-size-body);--pc-type-3:var(--font-size-card-title);--pc-type-4:calc(20px * var(--ui-font-scale, 1));--pc-type-5:var(--font-size-section-title);--pc-ease:cubic-bezier(.25,1,.5,1);display:grid;width:min(1080px,calc(100% - 32px));margin:0 auto;padding:var(--pc-space-4) 0 var(--pc-space-5);gap:var(--pc-space-5);color:var(--text);font-family:var(--font-app)}
+  .practice-community-public>header{display:grid;align-items:center;padding-bottom:var(--pc-space-4);border-bottom:1px solid var(--border);grid-template-columns:1fr;gap:var(--pc-space-4);text-align:center}
+  header>div>span{display:block;color:var(--brown);font-size:var(--font-size-meta);font-weight:800;letter-spacing:.12em}h1{margin:var(--pc-space-1) 0 0;color:var(--brown-dark);font-size:var(--pc-type-5);font-weight:800;line-height:1.3;letter-spacing:-.01em;text-wrap:balance}:global([data-theme="dark"]) h1{color:var(--text)}header>div>p{max-width:60ch;overflow-wrap:anywhere;margin:var(--pc-space-2) auto 0;color:var(--text2);font-size:var(--pc-type-2);line-height:1.55;text-wrap:pretty}
+  aside{display:grid;padding:var(--pc-space-5);border:1px solid var(--border);border-radius:var(--radius-card);background:linear-gradient(155deg,var(--card),var(--bg2));box-shadow:inset 0 1.5px 0 color-mix(in srgb,var(--card) 88%,transparent),inset 0 -3px 0 rgba(60,40,10,.08),var(--shadow-sm);gap:var(--pc-space-3);text-align:left}aside>:global(svg){color:var(--gold)}aside>div{display:grid;gap:var(--pc-space-1)}aside strong{font-size:var(--font-size-label)}aside small{color:var(--text2);font-size:var(--font-size-meta);line-height:1.55}button{min-height:44px;padding:0 var(--pc-space-4);border:1px solid color-mix(in srgb,var(--card) 45%,var(--gold));border-radius:999px;background:linear-gradient(145deg,var(--gold2),var(--gold));color:var(--on-gold);cursor:pointer;font:800 var(--pc-type-1) var(--font-app);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.55),inset 0 -2.5px 0 rgba(90,56,8,.22),0 5px 12px -3px color-mix(in srgb,var(--gold) 40%,transparent);transition:transform .12s var(--pc-ease),filter .15s ease}button:hover{filter:brightness(1.04);transform:translateY(-1.5px)}button:active{transform:translateY(1.5px) scale(.98)}
+  .practice-community-public__notice{margin:calc(var(--pc-space-5) * -1 + var(--pc-space-2)) 0 0;padding:var(--pc-space-3) var(--pc-space-4);border-radius:var(--pc-radius);background:var(--gold-light);color:var(--brown);font-size:var(--pc-type-1)}
+  @media(max-width:760px){.practice-community-public{width:min(100% - 32px,1080px);padding-top:var(--pc-space-4)}}
+  @media(max-width:420px){.practice-community-public{width:min(100% - 24px,1080px);padding-top:var(--pc-space-3);gap:var(--pc-space-4)}}
+  @media(prefers-reduced-motion:reduce){.practice-community-public button{transition:none}.practice-community-public button:hover,.practice-community-public button:active{transform:none}}
 </style>

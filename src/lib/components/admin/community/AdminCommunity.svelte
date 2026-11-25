@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { afterNavigate } from '$app/navigation';
   import { page as routePage } from '$app/state';
   import { fetchWithSessionRefresh } from '$lib/browser/session-csrf';
   import { ADMIN_REFRESH_INTERVAL_MS, startVisibleInterval } from '$lib/browser/visible-interval';
@@ -25,6 +26,7 @@
   }: Props = $props();
 
   function sectionFromUrl(url: URL): 'moderation' | 'ranking' | 'practice' {
+    if (url.searchParams.has('moderation')) return 'moderation';
     const s = url.searchParams.get('section');
     if (s === 'ranking' || s === 'practice') return s;
     if (url.searchParams.has('period')) return 'ranking';
@@ -32,6 +34,11 @@
   }
 
   let activeSection = $state<'moderation' | 'ranking' | 'practice'>(sectionFromUrl(routePage.url));
+  afterNavigate(({ to }) => {
+    if (to?.url.pathname === '/admin/community' && to.url.searchParams.has('moderation')) {
+      activeSection = 'moderation';
+    }
+  });
   let community = $state(untrack(() => initialData));
   let thanhTinhParticipants = $state<ThanhTinhParticipantAdminRow[]>(untrack(() => initialThanhTinhParticipants));
   let fivePreceptsParticipants = $state<ParticipationRow[]>([]);
@@ -47,6 +54,7 @@
   let busy = $state(false);
   let refreshError = $state('');
   let moderationReady = $state(false);
+  let moderationQueue = $state<ReturnType<typeof AdminModerationQueue>>();
   let controller: AbortController | null = null;
   let disposed = false;
   const numberFormat = new Intl.NumberFormat('vi-VN');
@@ -147,7 +155,7 @@
         fetchWithSessionRefresh(`/api/admin/community?period=${community.period}`, { headers: { accept: 'application/json' }, signal: nextController.signal }),
         activeSection === 'practice'
           ? (practiceTab === 'thanh-tinh' ? refreshThanhTinh() : practiceTab === 'five-precepts' ? refreshFivePrecepts() : refreshEightPrecepts())
-          : Promise.resolve(),
+          : activeSection === 'moderation' ? moderationQueue?.refreshVisibleQueue() : undefined,
       ]);
       if (communityResponse.status === 401 || communityResponse.status === 403) {
         leaveAdmin();
@@ -262,7 +270,7 @@
 
   <!-- Khu vực 1: Kiểm duyệt nội dung -->
   {#if activeSection === 'moderation'}
-    {#if moderationReady}<AdminModerationQueue />{/if}
+    {#if moderationReady}<AdminModerationQueue bind:this={moderationQueue} />{/if}
 
   <!-- Khu vực 2: Bảng xếp hạng tu tập -->
   {:else if activeSection === 'ranking'}

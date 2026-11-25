@@ -17,7 +17,7 @@
     estimateOfflineQuota,
     readAlbumDownloadSize,
   } from '$lib/browser/audio-downloads';
-  import { deleteOfflineAlbum, readOfflineLibrarySnapshot } from '$lib/browser/offline-audio-database';
+  import { deleteOfflineAlbum, offlineCatalogProgress, readOfflineLibrarySnapshot, type OfflineLibrarySnapshot } from '$lib/browser/offline-audio-database';
   import { readStoredAlbumPosition } from '$lib/browser/audio-sync';
   import { getBrowserSession, hasUsableBrowserCsrf, requireBrowserCsrf } from '$lib/browser/session-csrf';
   import { resolvePublicUrl } from '$lib/browser/native-api';
@@ -103,7 +103,7 @@
     onCollectionToggle = () => {},
   }: Props = $props();
 
-  let selected = $state<TalkAlbum | null>(null);
+  let selected = $state.raw<TalkAlbum | null>(null);
   let offlineNoticeVisible = $state(false);
   const hasStoryNotice = $derived(!!selected && hasContentExperienceNotice(selected.id));
 
@@ -122,9 +122,9 @@
     ? selected.tracks[$audioPlayer.trackIndex] : null);
   const videoIsFull = $derived(Boolean(selectedVideoTrack && videoExpanded));
   let downloadStatus = $state<Record<string, string>>({});
-  let albumStatuses = $state<Record<string, 'none' | 'partial' | 'downloaded'>>({});
+  let offlineSnapshot = $state.raw<OfflineLibrarySnapshot | null>(null);
   let offlineStateReady = $state(false);
-  let offlineTrackCounts = $state<Record<string, number>>({});
+  const albumProgress = $derived(new Map(albums.map(album => [album.id, offlineCatalogProgress(offlineSnapshot, album)])));
   let busyModes = $state<Record<string, 'offline' | 'zip' | null>>({});
   let transferProgress = $state<Record<string, AlbumTransferProgress | null>>({});
   let storageStatus = $state('');
@@ -287,9 +287,10 @@
   }
 
   $effect(() => {
-    if (selectedAlbumId && selectedAlbumId !== selected?.id) {
+    if (selectedAlbumId) {
       const match = albums.find((a) => a.id === selectedAlbumId);
-      if (match) void openAlbum(match, null);
+      if (match && selectedAlbumId !== selected?.id) void openAlbum(match, null);
+      else if (match && selected !== match) selected = match;
     } else if (!selectedAlbumId && selected) {
       closeAlbum();
     }
@@ -451,34 +452,23 @@
     // Root đăng ký session sau lượt mount con; chờ để đọc đúng principal ngay lần đầu.
     await tick();
     if (disposed) return;
-    const generation = offlineStateGeneration;
+    const generation = ++offlineStateGeneration;
     const session = getBrowserSessionSnapshot();
     const principalId = session.authenticated ? session.user?.id ?? null : null;
-    const snapshot = await readOfflineLibrarySnapshot().catch(() => ({
-      albums: [],
-      bytes: 0,
-      trackCounts: {} as Record<string, number>,
-    }));
+    const snapshot = await readOfflineLibrarySnapshot().catch(() => null);
     const current = getBrowserSessionSnapshot();
     if (disposed || generation !== offlineStateGeneration) return;
     if (principalId !== (current.authenticated ? current.user?.id ?? null : null) || session.user?.role !== current.user?.role) {
       void syncOfflineState();
       return;
     }
-    const downloadedIds = new Set(snapshot.albums.map((album) => album.id));
-    const nextStatuses: Record<string, 'none' | 'partial' | 'downloaded'> = {};
-    const knownIds = new Set([...albums.map(album => album.id), ...downloadedIds, ...Object.keys(snapshot.trackCounts)]);
-    for (const albumId of knownIds) {
-      const count = snapshot.trackCounts[albumId] ?? 0;
-      if (downloadedIds.has(albumId)) nextStatuses[albumId] = 'downloaded';
-      else if (count > 0) nextStatuses[albumId] = 'partial';
-      else nextStatuses[albumId] = 'none';
-    }
-    albumStatuses = nextStatuses;
+    offlineSnapshot = snapshot;
     offlineStateReady = true;
-    offlineTrackCounts = snapshot.trackCounts;
-    storageStatus = snapshot.bytes > 0 ? `Đang lưu offline ${formatBytes(snapshot.bytes)}.` : '';
-    window.dispatchEvent(new CustomEvent('quangtu:offline-updated', { detail: nextStatuses }));
+    storageStatus = snapshot && snapshot.bytes > 0 ? `Đang lưu offline ${formatBytes(snapshot.bytes)}.` : '';
+    const statuses = Object.fromEntries(Object.keys(snapshot?.trackCounts ?? {}).map(id => [id, 'partial']));
+    for (const saved of snapshot?.albums ?? []) statuses[saved.id] = 'downloaded';
+    for (const [id, progress] of albumProgress) statuses[id] = progress.status;
+    window.dispatchEvent(new CustomEvent('quangtu:offline-updated', { detail: statuses }));
     onOfflineChanged();
   }
 
@@ -530,7 +520,7 @@
 
   async function toggleOffline(album: TalkAlbum, returnFocusTo: HTMLElement): Promise<void> {
     if (disposed) return;
-    if (albumStatuses[album.id] === 'downloaded') {
+    if (offlineCatalogProgress(offlineSnapshot, album).status === 'downloaded') {
       await removeOffline(album);
       return;
     }
@@ -590,7 +580,7 @@
     const controller = new AbortController();
     offlineControllers.set(album.id, controller);
     busyModes = { ...busyModes, [album.id]: 'offline' };
-    const initialCompleted = Math.min(offlineTrackCounts[album.id] ?? 0, album.tracks.length);
+    const initialCompleted = offlineCatalogProgress(offlineSnapshot, album).count;
     const initialPercent = Math.min(100, Math.round((initialCompleted / album.tracks.length) * 100));
 
     audioDownloadProgress = {
@@ -790,8 +780,15 @@
   onMount(() => {
     disposed = false;
     void syncOfflineState();
+    let offlinePrincipal = transferIdentity().key;
     const closeStaleTransfers = () => {
       const next = transferIdentity(), previous = transferSession;
+      if (offlinePrincipal !== next.key) {
+        offlinePrincipal = next.key;
+        offlineSnapshot = null;
+        offlineStateReady = false;
+        void syncOfflineState();
+      }
       if (!previous || previous.key === next.key) return;
       transferSession = next;
       cancelTrackDownload();
@@ -911,7 +908,7 @@
           <div class="pt-card-meta-row">
             <span class="pt-card-meta-item pt-card-meta-plays">▶ {album.playCount == null ? (localeStore.current === 'en' ? '0 plays' : '0 lượt phát') : `${new Intl.NumberFormat(localeStore.current === 'en' ? 'en-US' : 'vi-VN').format(album.playCount)} ${t.talks.playCountUnit}`}</span>
             {#if recentLookup.has(album.id)}<span class="pt-card-meta-sep">·</span><span class="pt-card-meta-item pt-card-meta-recent">🕘 {t.talks.recentlyPlayed}</span>{/if}
-            {#if albumStatuses[album.id] === 'downloaded' || offlineLookup.has(album.id)}<span class="pt-card-meta-sep">·</span><span class="pt-card-meta-item pt-card-meta-offline">⬇ Offline</span>{/if}
+            {#if albumProgress.get(album.id)?.status === 'downloaded' || (!offlineStateReady && offlineLookup.has(album.id))}<span class="pt-card-meta-sep">·</span><span class="pt-card-meta-item pt-card-meta-offline">⬇ Offline</span>{/if}
           </div>
         </div>
       </div>
@@ -939,9 +936,10 @@
 
 {#if selected}
   {@const selectedTransfer = transferProgress[selected.id]}
+  {@const saved = offlineCatalogProgress(offlineSnapshot, selected)}
   {@const offlineControl = offlineDownloadControl(
-    albumStatuses[selected.id] ?? 'none',
-    offlineTrackCounts[selected.id] ?? 0,
+    saved.status,
+    saved.count,
     selectedTransfer,
   )}
   <div class="album-overlay" class:video-full={videoIsFull} class:compact-video-active={selectedLandscapeVideo && Boolean(selectedVideoTrack)} role="presentation" inert={loginModalOpen} aria-hidden={loginModalOpen ? 'true' : undefined}>
@@ -1013,7 +1011,7 @@
       </header>
 
       <div class="album-body" class:album-body-scroll={hasStoryNotice && !videoIsFull}>
-      {#if offlineNoticeVisible && offlineStateReady && !isSelectedOnlineOnly && albumStatuses[selected.id] !== 'downloaded' && !offlineLookup.has(selected.id) && !busyModes[selected.id]}
+      {#if offlineNoticeVisible && offlineStateReady && !isSelectedOnlineOnly && saved.status !== 'downloaded' && !busyModes[selected.id]}
         <aside class="album-offline-notice" aria-label={t.talks.offlineRecommendationTitle}>
           <span class="album-offline-hand" aria-hidden="true">👆</span>
           <p>{t.talks.offlineRecommendation}</p>
@@ -1148,7 +1146,7 @@
 {/if}
 
 {#if audioDownloadModalOpen && audioDownloadProgress}
-  <div class="audio-offline-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="audio-dl-progress-title" tabindex="-1">
+  <dialog class="audio-offline-modal-backdrop" use:modalDialog aria-labelledby="audio-dl-progress-title" oncancel={(event) => { event.preventDefault(); cancelAudioOfflineDownload(); }}>
     <div class="audio-offline-modal-card" data-dialog-glass>
       <div class="audio-offline-modal-icon pulse">⏳</div>
       <h3 id="audio-dl-progress-title">Đang tải album Pháp thoại...</h3>
@@ -1183,12 +1181,12 @@
       {/if}
 
       <div class="audio-offline-modal-actions">
-        <button type="button" class="btn-cancel" onclick={cancelAudioOfflineDownload}>
+        <button type="button" class="btn-cancel" data-modal-focus onclick={cancelAudioOfflineDownload}>
           Hủy tải
         </button>
       </div>
     </div>
-  </div>
+  </dialog>
 {/if}
 
 <style>
@@ -1494,7 +1492,8 @@
   @media(prefers-reduced-motion:reduce){.album-dialog,.pt-card{animation:none}.pt-as-playing-bars i{animation:none;height:10px}}
 
   /* Audio offline modal */
-  .audio-offline-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:grid;place-items:center;z-index:9999;padding:16px}
+  .audio-offline-modal-backdrop{position:fixed;inset:0;box-sizing:border-box;width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0;background:transparent;display:grid;place-items:center;padding:var(--space-page)}
+  .audio-offline-modal-backdrop::backdrop{background:var(--practice-dialog-backdrop);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
   .audio-offline-modal-card{position:relative;width:min(380px,100%);background:var(--dialog-surface-background,var(--card));color:var(--text,#1c1a15);border:1.5px solid var(--dialog-surface-border,var(--border));border-radius:20px;padding:24px 20px 20px;box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));display:flex;flex-direction:column;align-items:center;text-align:center;box-sizing:border-box;animation:audioModalUp .24s cubic-bezier(.34,1.3,.64,1)}
   .audio-offline-modal-icon{font-size:38px;line-height:1;margin-bottom:12px}
   .audio-offline-modal-icon.pulse{animation:audioPulse 1.4s ease-in-out infinite}
@@ -1507,7 +1506,7 @@
   .audio-dl-bytes-info{display:flex;gap:6px;font-size:var(--font-size-meta);color:var(--muted);font-weight:600}
   .audio-dl-error-msg{margin:0 0 14px;color:#d93829;font-size:var(--font-size-body)}
   .audio-offline-modal-actions{display:flex;gap:10px;width:100%;justify-content:center}
-  .audio-offline-modal-actions button{flex:1;min-height:42px;border-radius:12px;font:700 var(--font-size-label) var(--font-app);cursor:pointer;transition:all .15s ease}
+  .audio-offline-modal-actions button{flex:1;min-height:var(--touch-target-size);border-radius:12px;font:700 var(--font-size-label) var(--font-app);cursor:pointer;transition:all .15s ease}
   .audio-offline-modal-actions .btn-cancel{border:1px solid var(--border);background:var(--bg2,#f5f5f5);color:var(--text2,#444)}
   .audio-offline-modal-actions .btn-cancel:hover{background:var(--bg3,#e5e5e5)}
   @keyframes audioModalUp{from{opacity:0;transform:scale(.92) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}

@@ -1,7 +1,7 @@
 export const personalEventsUi = {
   vi: {
-    lunarEquivalentYear: (year: number) => `Âm lịch tự quy đổi theo năm ${year}:`,
-    solarEquivalentYear: (year: number) => `Dương lịch tương ứng năm ${year}:`,
+    lunarEquivalentYear: (year: number) => `Âm lịch năm ${year}:`,
+    solarEquivalentYear: (year: number) => `Dương lịch năm ${year}:`,
     missingInformationTitle: 'Chưa đủ thông tin',
     invalidDateTitle: 'Ngày chưa hợp lệ',
     timingTitle: 'Thời điểm nhắc ngày lễ cá nhân',
@@ -41,8 +41,8 @@ export const personalEventsUi = {
     remindersDisabled: 'Nhắc nhở chung đang tắt. Bật nhắc nhở chung trong cài đặt để ứng dụng nhắc ngày lễ.',
   },
   en: {
-    lunarEquivalentYear: (year: number) => `Lunar equivalent for ${year}:`,
-    solarEquivalentYear: (year: number) => `Solar equivalent for ${year}:`,
+    lunarEquivalentYear: (year: number) => `Lunar date in ${year}:`,
+    solarEquivalentYear: (year: number) => `Solar date in ${year}:`,
     missingInformationTitle: 'Missing information',
     invalidDateTitle: 'Invalid date',
     timingTitle: 'Personal anniversary reminder times',

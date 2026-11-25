@@ -163,6 +163,7 @@ export class AudioPlayerController {
   private seekRequest?: AbortController;
   private seekMetadataReady?: () => void;
   private loadGeneration = 0;
+  private recoveringCatalog?: { album: AudioAlbum; result: Promise<AudioAlbum | undefined> };
   private playbackIntentGeneration = 0;
   private objectUrl?: string;
   private lastSavedAt = 0;
@@ -297,6 +298,12 @@ export class AudioPlayerController {
         });
         recoveredAlbum = { ...state.album, visibility: 'public', tracks };
       }
+      // Keep the native transport live while matching the queue against the local catalog.
+      const session = this.session;
+      const catalog = import('./content-catalogs')
+        .then(({ restoreLocalTalkAlbum }) => restoreLocalTalkAlbum(recoveredAlbum, session))
+        .catch(() => undefined);
+      this.recoveringCatalog = { album: recoveredAlbum, result: catalog };
       this.wantsPlayback = nativePlaybackRequested(state);
       this.snapshot = { ...this.snapshot, album: recoveredAlbum, trackIndex: state.trackIndex,
         currentTime: state.position, duration: state.duration, playing: this.wantsPlayback,
@@ -305,7 +312,14 @@ export class AudioPlayerController {
       audio.adopt(state);
       this.reportAlbumPlay.select(state.album.id, this.snapshot.album?.tracks[state.trackIndex]?.url ?? '');
       this.emit();
+      const catalogAlbum = await catalog;
+      if (!catalogAlbum || generation !== this.loadGeneration || this.snapshot.album !== recoveredAlbum) return;
+      const index = this.snapshot.trackIndex;
+      if (this.fallbackTrack === recoveredAlbum.tracks[index]) this.fallbackTrack = catalogAlbum.tracks[index];
+      this.reportAlbumPlay.select(catalogAlbum.id, catalogAlbum.tracks[index]?.url ?? '');
+      this.patch({ album: catalogAlbum });
     } catch { /* No active native session to restore. */ }
+    finally { this.recoveringCatalog = undefined; }
   }
 
   subscribe(listener: (snapshot: AudioPlayerSnapshot) => void): () => void {
@@ -375,12 +389,16 @@ export class AudioPlayerController {
   async load(album: AudioAlbum, trackIndex = 0, resumeSeconds = 0): Promise<boolean> {
     if (!isContentAvailable(album)) return false;
     if (album.visibility === 'private' && (!this.session.authenticated || this.session.user?.role !== 'admin')) return false;
-    const track = album.tracks[trackIndex];
-    if (!track) {
+    if (!album.tracks[trackIndex]) {
       this.patch({ error: 'Bài pháp thoại không tồn tại.' });
       return false;
     }
     const generation = ++this.loadGeneration;
+    if (this.recoveringCatalog?.album === album) {
+      album = await this.recoveringCatalog.result ?? album;
+      if (generation !== this.loadGeneration) return false;
+    }
+    const track = album.tracks[trackIndex];
     const access: OfflineAudioAccess = { session: this.session, album, isCurrent: () => generation === this.loadGeneration };
     if (this.audio instanceof NativeTalkAudio && !await canAccessAudioAlbum(album, access).catch(() => false)) return false;
     if (generation !== this.loadGeneration) return false;
@@ -906,6 +924,10 @@ export class AudioPlayerController {
 
   private bindAudioEvents(): void {
     if (this.audio instanceof NativeTalkAudio) {
+      this.audio.addEventListener('nativerepeat', event => {
+        const repeat = (event as CustomEvent<0 | 1 | 2>).detail;
+        if (!this.isPracticeAudio() && this.snapshot.repeat !== repeat) this.patch({ repeat });
+      });
       this.audio.addEventListener('trackchange', event => {
         if (this.isPracticeAudio()) return;
         const index = (event as CustomEvent<number>).detail;

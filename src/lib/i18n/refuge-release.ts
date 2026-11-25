@@ -82,7 +82,7 @@ export const refugeReleaseBlocks: readonly RitualBlock[] = [
   },
   {
     "kind": "paragraph",
-    "text": "- Nghi lễ phóng sanh này ưu tiên ngắn quá dài, quá rườm rà, bởi khi nghi thức kéo dài, sẽ có rất nhiều con vật chết trong thời gian đó, ta vốn muốn tạo thiện nghiệp mà vô tình lại gây ra ác nghiệp!"
+    "text": "- Nghi lễ phóng sanh này ưu tiên ngắn, tránh quá dài và rườm rà, bởi khi nghi thức kéo dài, sẽ có rất nhiều con vật chết trong thời gian đó, ta vốn muốn tạo thiện nghiệp mà vô tình lại gây ra ác nghiệp!"
   },
   {
     "kind": "paragraph",

@@ -19,22 +19,38 @@ import com.getcapacitor.BridgeWebViewClient;
 import com.codetrixstudio.capacitor.GoogleAuth.GoogleAuth;
 
 public class MainActivity extends BridgeActivity {
+    private static final long STARTUP_MIN_READING_MS = 3000;
+    private static final long STARTUP_FADE_MS = 280;
+    private static final long STARTUP_FAILSAFE_MS = 30000;
     private android.widget.FrameLayout startupScreen;
     private final android.os.Handler startupHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private boolean startupReady;
-    private boolean startupArtworkDrawn;
-    private final Runnable startupTimeout = () -> removeStartupScreen();
+    private long earliestStartupFadeAt = -1;
+    private boolean entranceFinished;
+    private boolean startupDrawn;
+    private boolean awaitingStartupFrame;
+    private boolean initialStartupHandled;
+    private final Runnable dismissStartup = this::removeStartupScreen;
+    private final Runnable startupFailsafe = this::finishStartupScreen;
 
     private void showStartupScreen() {
-        if (startupScreen != null) return;
+        if (startupScreen != null) {
+            // A second launcher can arrive after this cover painted but before it fades.
+            if (earliestStartupFadeAt >= 0) StartupActivity.finishBehindMain();
+            return;
+        }
         android.view.ViewGroup content = findViewById(android.R.id.content);
         if (content == null) return;
         Intent launch = getIntent();
-        int index = launch != null && launch.hasExtra(StartupArtworkView.EXTRA_INDEX)
+        boolean fromLauncher = launch != null && launch.hasExtra(StartupArtworkView.EXTRA_INDEX);
+        int index = fromLauncher
             ? launch.getIntExtra(StartupArtworkView.EXTRA_INDEX, 0) : StartupArtworkView.nextIndex(this);
         android.widget.FrameLayout artwork = StartupArtworkView.create(this, index);
         startupScreen = artwork;
-        startupArtworkDrawn = false;
+        earliestStartupFadeAt = -1;
+        entranceFinished = false;
+        startupDrawn = false;
+        awaitingStartupFrame = false;
         content.addView(artwork, new android.view.ViewGroup.LayoutParams(-1, -1));
         // Retire the launcher only after its replacement has actually painted.
         // Finishing a separate launcher task during the fade can reveal Home.
@@ -48,12 +64,54 @@ public class MainActivity extends BridgeActivity {
                     if (isDestroyed()) return;
                     StartupActivity.finishBehindMain();
                     if (startupScreen != artwork) return;
-                    startupArtworkDrawn = true;
-                    maybeDismissStartupScreen();
+                    startupDrawn = true;
+                    awaitReadableStartupFrame();
                 });
             }
         });
-        startupHandler.postDelayed(startupTimeout, 15000);
+        startupHandler.postDelayed(startupFailsafe, STARTUP_FAILSAFE_MS);
+    }
+
+    @Override public void onEnterAnimationComplete() {
+        super.onEnterAnimationComplete();
+        if (entranceFinished) return;
+        entranceFinished = true;
+        if (startupScreen != null) {
+            if (earliestStartupFadeAt >= 0) startupHandler.removeCallbacks(dismissStartup);
+            earliestStartupFadeAt = -1;
+            awaitReadableStartupFrame();
+        }
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) awaitReadableStartupFrame();
+        else if (startupScreen != null && earliestStartupFadeAt >= 0) {
+            startupHandler.removeCallbacks(dismissStartup);
+            earliestStartupFadeAt = -1;
+        }
+    }
+
+    private void awaitReadableStartupFrame() {
+        android.view.View screen = startupScreen;
+        if (!startupDrawn || screen == null || !screen.hasWindowFocus()
+            || earliestStartupFadeAt >= 0 || awaitingStartupFrame) return;
+        awaitingStartupFrame = true;
+        Runnable startReading = () -> {
+            if (screen != startupScreen) return;
+            awaitingStartupFrame = false;
+            if (!screen.hasWindowFocus()) return;
+            earliestStartupFadeAt = android.os.SystemClock.uptimeMillis() + STARTUP_MIN_READING_MS;
+            maybeDismissStartupScreen();
+        };
+        // OnDraw can precede the first foreground buffer by several frames during a cold launch.
+        // Let the compositor receive the artwork before starting the user's reading time.
+        if (android.os.Build.VERSION.SDK_INT >= 29 && screen.isHardwareAccelerated()) {
+            screen.getViewTreeObserver().registerFrameCommitCallback(() -> screen.postOnAnimation(startReading));
+            screen.invalidate();
+        } else {
+            screen.postOnAnimation(() -> screen.postOnAnimation(startReading));
+        }
     }
 
     public void finishStartupScreen() {
@@ -62,15 +120,22 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void maybeDismissStartupScreen() {
-        if (startupArtworkDrawn && startupReady) removeStartupScreen();
+        if (startupScreen == null || !startupReady || earliestStartupFadeAt < 0) return;
+        startupHandler.removeCallbacks(dismissStartup);
+        if (android.os.SystemClock.uptimeMillis() < earliestStartupFadeAt) {
+            startupHandler.postAtTime(dismissStartup, earliestStartupFadeAt);
+        } else {
+            removeStartupScreen();
+        }
     }
 
     private void removeStartupScreen() {
-        startupHandler.removeCallbacks(startupTimeout);
+        startupHandler.removeCallbacks(dismissStartup);
+        startupHandler.removeCallbacks(startupFailsafe);
         android.widget.FrameLayout screen = startupScreen;
         startupScreen = null;
         if (screen == null) return;
-        screen.animate().alpha(0).setDuration(180).withEndAction(() -> {
+        screen.animate().alpha(0).setDuration(STARTUP_FADE_MS).withEndAction(() -> {
             if (screen.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) screen.getParent()).removeView(screen);
             screen.removeAllViews();
         }).start();
@@ -87,7 +152,8 @@ public class MainActivity extends BridgeActivity {
     protected void onNewIntent(Intent intent) {
         if (intent != null) setIntent(intent);
         super.onNewIntent(intent);
-        if (intent != null && intent.hasExtra(StartupArtworkView.EXTRA_INDEX)) {
+        // Capacitor also dispatches the initial Intent here during super.onCreate().
+        if (initialStartupHandled && intent != null && intent.hasExtra(StartupArtworkView.EXTRA_INDEX)) {
             showStartupScreen();
         }
     }
@@ -109,6 +175,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(vn.quangtu.tutam.widgets.PracticeWidgetPlugin.class);
         super.onCreate(savedInstanceState);
         showStartupScreen();
+        initialStartupHandled = true;
         HomeScreenShortcuts.publish(this);
 
         try {

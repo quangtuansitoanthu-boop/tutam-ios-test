@@ -19,7 +19,6 @@
     getPersonalEventTypeIcon,
     getPersonalEventTypeName,
     isPersonalEventsNotificationEnabled,
-    setPersonalEventsNotificationEnabled,
     formatPersonalEventDateText,
   } from '$lib/browser/personal-lunar-events';
   import { triggerHaptic } from '$lib/utils/haptics';
@@ -38,7 +37,6 @@
   const isEn = $derived(localeStore.current === 'en');
 
   let events = $state<PersonalLunarEvent[]>(loadPersonalLunarEvents());
-  let notificationsEnabled = $state(isPersonalEventsNotificationEnabled());
 
   // Input Mode: 'lunar' | 'solar'
   let inputMode = $state<'lunar' | 'solar'>('lunar');
@@ -205,26 +203,13 @@
     formError = '';
     invalidField = '';
   }
-  function toggleNotifications(event: MouseEvent): void {
-    reminderGeneration += 1;
-    formError = '';
-    triggerHaptic('light');
-    const enabled = !notificationsEnabled;
-    if (!setPersonalEventsNotificationEnabled(enabled)) {
-      event.preventDefault();
-      formError = personalEventsUi[isEn ? 'en' : 'vi'].storageError;
-      return;
-    }
-    notificationsEnabled = enabled;
-    if (notificationsEnabled) void setupPersonalReminders(false);
-  }
 
   function reminderDraftSignature(): string {
     return JSON.stringify([inputMode, newTitle, newDay, newMonth, newSolarDay, newSolarMonth, newFrequency, newType, newNote]);
   }
 
   async function setupPersonalReminders(savedEvent: boolean): Promise<void> {
-    if (!isNativeApp() || !notificationsEnabled) return;
+    if (!isNativeApp() || !isPersonalEventsNotificationEnabled()) return;
     const generation = ++reminderGeneration;
     const draft = reminderDraftSignature();
     const copy = personalEventsUi[isEn ? 'en' : 'vi'];
@@ -348,276 +333,252 @@
         </button>
       </div>
 
-      <!-- Main Body -->
-      <div class="pem-body">
-        <!-- Công tắc bật thông báo (Mặc định BẬT) -->
-        <div class="pem-notify-toggle-card">
-          <div class="notify-card-info">
-            <span class="notify-icon" aria-hidden="true">🔔</span>
-            <div class="notify-text-box">
-              <strong class="notify-title">
-                {isEn ? 'Personal Anniversary Reminders' : 'Thông Báo Ngày Lễ Cá Nhân'}
-              </strong>
-              <p class="notify-desc">
-                {isEn ? 'Remind you on morning of personal anniversaries' : 'Nhắc nhở chu đáo vào buổi sáng của ngày lễ cá nhân'}
-              </p>
+      <!-- Main Form + Scrollable Body + Pinned Footer -->
+      <form class="pem-form" onsubmit={handleAddEvent} oninput={clearFieldError} onchange={clearFieldError}>
+        <div class="pem-body">
+          <div class="pem-form-fields">
+            <div class="pem-form-title">
+              <span>+</span>
+              <strong>{isEn ? 'Add Personal Anniversary' : 'Thêm Ngày Lễ Cá Nhân Mới'}</strong>
+            </div>
+
+            {#if savedMessage}<p class="pem-saved-message" role="status">{savedMessage}</p>{/if}
+            {#if formError}
+              <div id="pem-validation-error" class="pem-error" role="alert">{formError}</div>
+            {/if}
+
+            <!-- Tên Sự Kiện -->
+            <div class="pem-field">
+              <label for="pem-input-title" class="pem-label">
+                {isEn ? 'Event Name / Title *' : 'Tên ngày lễ / Sự kiện *'}
+              </label>
+              <input
+                id="pem-input-title"
+                aria-invalid={invalidField === 'pem-input-title' || undefined}
+                aria-describedby={invalidField === 'pem-input-title' ? 'pem-validation-error' : undefined}
+                type="text"
+                class="pem-input"
+                bind:value={newTitle}
+                placeholder={isEn ? 'e.g. Grandfather Memorial, Refuge Anniversary...' : 'Ví dụ: Giỗ ông nội, Kỷ niệm ngày Quy y...'}
+                maxlength={80}
+              />
+            </div>
+
+            <!-- Phân loại & Ghi chú -->
+            <div class="pem-field">
+              <label for="pem-select-type" class="pem-label">
+                {isEn ? 'Event Type' : 'Phân loại sự kiện'}
+              </label>
+              <select id="pem-select-type" aria-invalid={invalidField === 'pem-select-type' || undefined} aria-describedby={invalidField === 'pem-select-type' ? 'pem-validation-error' : undefined} class="pem-select" bind:value={newType}>
+                {#each PERSONAL_EVENT_TYPES as t}
+                  <option value={t.type}>
+                    {t.icon} {isEn ? t.nameEn : t.nameVi}
+                  </option>
+                {/each}
+              </select>
+            </div>
+
+            <!-- Bộ Chuyển Đổi Tab: Âm Lịch ⇄ Dương Lịch -->
+            <div class="pem-mode-switch-wrap">
+              <div class="pem-mode-tabs" role="group" aria-label={isEn ? 'Calendar' : 'Lịch'}>
+                <button
+                  type="button"
+                  class="mode-tab-btn"
+                  class:mode-tab-btn--active={inputMode === 'lunar'}
+                  aria-pressed={inputMode === 'lunar'}
+                  onclick={() => setMode('lunar')}
+                >
+                  {isEn ? 'Lunar' : 'Âm lịch'}
+                </button>
+                <button
+                  type="button"
+                  class="mode-tab-btn"
+                  class:mode-tab-btn--active={inputMode === 'solar'}
+                  aria-pressed={inputMode === 'solar'}
+                  onclick={() => setMode('solar')}
+                >
+                  {isEn ? 'Solar' : 'Dương lịch'}
+                </button>
+              </div>
+            </div>
+
+            <!-- Nhập theo Âm lịch -->
+            {#if inputMode === 'lunar'}
+              <div class="pem-row-3">
+                <div class="pem-field">
+                  <label for="pem-select-day" class="pem-label">
+                    {isEn ? 'Lunar Day' : 'Ngày Âm'}
+                  </label>
+                  <select id="pem-select-day" aria-invalid={invalidField === 'pem-select-day' || undefined} aria-describedby={invalidField === 'pem-select-day' ? 'pem-validation-error' : undefined} class="pem-select" bind:value={newDay}>
+                    {#each Array.from({ length: 30 }, (_, i) => i + 1) as day}
+                      <option value={day}>
+                        {formatLunarDayLabel(day, isEn)}
+                      </option>
+                    {/each}
+                  </select>
+                </div>
+
+                <div class="pem-field">
+                  <label for="pem-select-month" class="pem-label">
+                    {isEn ? 'Lunar Month' : 'Tháng Âm'}
+                  </label>
+                  <select id="pem-select-month" aria-invalid={invalidField === 'pem-select-month' || undefined} aria-describedby={invalidField === 'pem-select-month' ? 'pem-validation-error' : undefined} class="pem-select" value={newFrequency === 'monthly' ? 0 : newMonth} disabled={newFrequency === 'monthly'} onchange={(event) => { newMonth = Number(event.currentTarget.value);  }}>
+                    {#if newFrequency === 'monthly'}<option value={0}>{isEn ? 'Every month' : 'Mỗi tháng'}</option>{:else}
+                      {#each Array.from({ length: 12 }, (_, i) => i + 1) as month (month)}<option value={month}>{isEn ? `Month ${month}` : `Tháng ${month}`}</option>{/each}
+                    {/if}
+                  </select>
+                </div>
+              </div>
+
+              <div class="pem-field">
+                <span class="pem-label" id="pem-frequency-label">{isEn ? 'Recurrence' : 'Lặp lại'}</span>
+                <div id="pem-select-freq" class="pem-frequency" role="group" aria-labelledby="pem-frequency-label" tabindex="-1" data-invalid={invalidField === 'pem-select-freq' || invalidField === 'pem-solar-freq' || undefined}>
+                  {#each ['yearly', 'monthly'] as frequency (frequency)}
+                    <button type="button" aria-pressed={newFrequency === frequency} onclick={() => { clearSavedMessage(); newFrequency = frequency as PersonalEventFrequency; formTouched = true; invalidField = ''; formError = ''; }}>{frequency === 'yearly' ? (isEn ? 'Yearly' : 'Hàng năm') : (isEn ? 'Monthly' : 'Hàng tháng')}</button>
+                  {/each}
+                </div>
+              </div>
+
+              <!-- Quy đổi Dương lịch -->
+              <div class="conversion-pill">
+                <span class="conv-icon" aria-hidden="true">☀️</span>
+                <span class="conv-text">
+                  <span>{personalEventsUi[isEn ? 'en' : 'vi'].solarEquivalentYear(currentYear)}</span>
+                  <strong>{convertedSolarDate}</strong>
+                </span>
+              </div>
+            {:else}
+              <!-- Nhập theo Dương lịch (Tự động đổi sang Âm lịch) -->
+              <div class="pem-row-3">
+                <div class="pem-field">
+                  <label for="pem-solar-day" class="pem-label">
+                    {isEn ? 'Solar Day' : 'Ngày Dương'}
+                  </label>
+                  <select id="pem-solar-day" aria-invalid={invalidField === 'pem-solar-day' || undefined} aria-describedby={invalidField === 'pem-solar-day' ? 'pem-validation-error' : undefined} class="pem-select" bind:value={newSolarDay} onchange={handleSolarChange}>
+                    {#each Array.from({ length: 31 }, (_, i) => i + 1) as day}
+                      <option value={day}>{isEn ? `Day ${pad(day)}` : `Ngày ${pad(day)}`}</option>
+                    {/each}
+                  </select>
+                </div>
+
+                <div class="pem-field">
+                  <label for="pem-solar-month" class="pem-label">
+                    {isEn ? 'Solar Month' : 'Tháng Dương'}
+                  </label>
+                  <select id="pem-solar-month" aria-invalid={invalidField === 'pem-solar-month' || undefined} aria-describedby={invalidField === 'pem-solar-month' ? 'pem-validation-error' : undefined} class="pem-select" value={newFrequency === 'monthly' ? 0 : newSolarMonth} disabled={newFrequency === 'monthly'} onchange={(event) => { newSolarMonth = Number(event.currentTarget.value); handleSolarChange(); }}>
+                    {#if newFrequency === 'monthly'}<option value={0}>{isEn ? 'Every month' : 'Mỗi tháng'}</option>{:else}
+                      {#each Array.from({ length: 12 }, (_, i) => i + 1) as month (month)}<option value={month}>{isEn ? `Month ${month}` : `Tháng ${month}`}</option>{/each}
+                    {/if}
+                  </select>
+                </div>
+              </div>
+
+              <div class="pem-field">
+                <span class="pem-label" id="pem-frequency-label">{isEn ? 'Recurrence' : 'Lặp lại'}</span>
+                <div id="pem-solar-freq" class="pem-frequency" role="group" aria-labelledby="pem-frequency-label" tabindex="-1" data-invalid={invalidField === 'pem-select-freq' || invalidField === 'pem-solar-freq' || undefined}>
+                  {#each ['yearly', 'monthly'] as frequency (frequency)}
+                    <button type="button" aria-pressed={newFrequency === frequency} onclick={() => { clearSavedMessage(); newFrequency = frequency as PersonalEventFrequency; formTouched = true; invalidField = ''; formError = ''; }}>{frequency === 'yearly' ? (isEn ? 'Yearly' : 'Hàng năm') : (isEn ? 'Monthly' : 'Hàng tháng')}</button>
+                  {/each}
+                </div>
+              </div>
+
+              <!-- Quy đổi Âm lịch -->
+              <div class="conversion-pill">
+                <span class="conv-icon" aria-hidden="true">🌙</span>
+                <span class="conv-text">
+                  {#if convertedLunar}
+                    <span>{personalEventsUi[isEn ? 'en' : 'vi'].lunarEquivalentYear(currentYear)}</span>
+                    <strong>{formatLunarDayLabel(convertedLunar.day, isEn)} {isEn ? 'Month' : 'Tháng'} {pad(convertedLunar.month)}</strong>
+                  {:else}
+                    {isEn ? 'Invalid date' : 'Ngày không hợp lệ'}
+                  {/if}
+                </span>
+              </div>
+            {/if}
+
+            <div class="pem-field">
+              <label for="pem-input-note" class="pem-label">
+                {isEn ? 'Notes (Optional)' : 'Ghi chú (Tùy chọn)'}
+              </label>
+              <input
+                id="pem-input-note"
+                type="text"
+                class="pem-input"
+                bind:value={newNote}
+                placeholder={isEn ? 'e.g. Vegetarian feast & recite Ksitigarbha Sutra' : 'Ví dụ: Làm mâm cơm chay & tụng kinh Địa Tạng'}
+                maxlength={120}
+              />
             </div>
           </div>
 
-          <label class="pem-switch" aria-label={isEn ? 'Toggle anniversary reminder' : 'Bật tắt nhắc nhở ngày lễ cá nhân'}>
-            <input
-              type="checkbox"
-              checked={notificationsEnabled}
-              onclick={toggleNotifications}
-            />
-            <span class="pem-slider"></span>
-          </label>
+          <!-- Danh sách hiện có -->
+          <div class="pem-list-section">
+            <PersonalEventsSyncStatus {isEn} />
+            <h3 class="pem-list-heading">
+              {isEn ? 'Saved Anniversaries' : 'Danh Sách Ngày Lễ Đã Lưu'} ({events.length})
+            </h3>
+
+            {#if events.length === 0}
+              <div class="pem-empty">
+                <span class="pem-empty-icon" aria-hidden="true">📿</span>
+                <p>{isEn ? 'No personal anniversaries saved yet.' : 'Chưa có ngày lễ cá nhân nào được lưu.'}</p>
+                <span>{isEn ? 'Add an anniversary above to receive lunar reminders!' : 'Hãy thêm ngày giỗ chạp hoặc ngày quy y ở trên để app nhắc nhở bạn!'}</span>
+              </div>
+            {:else}
+              <ul class="pem-list" role="list">
+                {#each events as item (item.id)}
+                  <li class="pem-item">
+                    <div class="pem-item-left">
+                      <span class="pem-item-badge-icon" aria-hidden="true">
+                        {getPersonalEventTypeIcon(item.type)}
+                      </span>
+                      <div class="pem-item-info">
+                        <div class="pem-item-title-row">
+                          <strong class="pem-item-title">{item.title}</strong>
+                          <span class="pem-item-type-tag">
+                            {getPersonalEventTypeName(item.type, isEn)}
+                          </span>
+                          {#if item.frequency === 'monthly' || (item.calendarMode !== 'solar' && Number(item.lunarMonth) === 0)}
+                            <span class="pem-freq-tag">
+                              {isEn ? 'Monthly' : 'Hàng tháng'}
+                            </span>
+                          {/if}
+                        </div>
+                        <div class="pem-item-date">
+                          {formatPersonalEventDateText(item, isEn).replace(/^🗓️\s*/u, '')}
+                        </div>
+                        {#if item.note}
+                          <p class="pem-item-note">"{item.note}"</p>
+                        {/if}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      class="pem-delete-btn"
+                      onclick={() => handleDelete(item.id)}
+                      title={isEn ? 'Delete anniversary' : 'Xóa ngày lễ này'}
+                      aria-label={isEn ? `Delete ${item.title}` : `Xóa ${item.title}`}
+                    >
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
         </div>
 
-        <!-- Form Thêm Mới -->
-        <form class="pem-form" onsubmit={handleAddEvent} oninput={clearFieldError} onchange={clearFieldError}>
-          <div class="pem-form-title">
-            <span>+</span>
-            <strong>{isEn ? 'Add Personal Anniversary' : 'Thêm Ngày Lễ Cá Nhân Mới'}</strong>
-          </div>
-
-          {#if savedMessage}<p class="pem-saved-message" role="status">{savedMessage}</p>{/if}
-          {#if formError}
-            <div id="pem-validation-error" class="pem-error" role="alert">{formError}</div>
-          {/if}
-
-          <!-- Tên Sự Kiện -->
-          <div class="pem-field">
-            <label for="pem-input-title" class="pem-label">
-              {isEn ? 'Event Name / Title *' : 'Tên ngày lễ / Sự kiện *'}
-            </label>
-            <input
-              id="pem-input-title"
-              aria-invalid={invalidField === 'pem-input-title' || undefined}
-              aria-describedby={invalidField === 'pem-input-title' ? 'pem-validation-error' : undefined}
-              type="text"
-              class="pem-input"
-              bind:value={newTitle}
-              placeholder={isEn ? 'e.g. Grandfather Memorial, Refuge Anniversary...' : 'Ví dụ: Giỗ ông nội, Kỷ niệm ngày Quy y...'}
-              maxlength={80}
-            />
-          </div>
-
-          <!-- Phân loại & Ghi chú -->
-          <div class="pem-field">
-            <label for="pem-select-type" class="pem-label">
-              {isEn ? 'Event Type' : 'Phân loại sự kiện'}
-            </label>
-            <select id="pem-select-type" aria-invalid={invalidField === 'pem-select-type' || undefined} aria-describedby={invalidField === 'pem-select-type' ? 'pem-validation-error' : undefined} class="pem-select" bind:value={newType}>
-              {#each PERSONAL_EVENT_TYPES as t}
-                <option value={t.type}>
-                  {t.icon} {isEn ? t.nameEn : t.nameVi}
-                </option>
-              {/each}
-            </select>
-          </div>
-
-          <!-- Bộ Chuyển Đổi Tab: Âm Lịch ⇄ Dương Lịch -->
-          <div class="pem-mode-switch-wrap">
-            <div class="pem-mode-tabs" role="group" aria-label={isEn ? 'Calendar' : 'Lịch'}>
-              <button
-                type="button"
-                class="mode-tab-btn"
-                class:mode-tab-btn--active={inputMode === 'lunar'}
-                aria-pressed={inputMode === 'lunar'}
-                onclick={() => setMode('lunar')}
-              >
-                {isEn ? 'Lunar' : 'Âm lịch'}
-              </button>
-              <button
-                type="button"
-                class="mode-tab-btn"
-                class:mode-tab-btn--active={inputMode === 'solar'}
-                aria-pressed={inputMode === 'solar'}
-                onclick={() => setMode('solar')}
-              >
-                {isEn ? 'Solar' : 'Dương lịch'}
-              </button>
-            </div>
-          </div>
-
-          <!-- Nhập theo Âm lịch -->
-          {#if inputMode === 'lunar'}
-            <div class="pem-row-3">
-              <div class="pem-field">
-                <label for="pem-select-day" class="pem-label">
-                  {isEn ? 'Lunar Day' : 'Ngày Âm'}
-                </label>
-                <select id="pem-select-day" aria-invalid={invalidField === 'pem-select-day' || undefined} aria-describedby={invalidField === 'pem-select-day' ? 'pem-validation-error' : undefined} class="pem-select" bind:value={newDay}>
-                  {#each Array.from({ length: 30 }, (_, i) => i + 1) as day}
-                    <option value={day}>
-                      {formatLunarDayLabel(day, isEn)}
-                    </option>
-                  {/each}
-                </select>
-              </div>
-
-              <div class="pem-field">
-                <label for="pem-select-month" class="pem-label">
-                  {isEn ? 'Lunar Month' : 'Tháng Âm'}
-                </label>
-                <select id="pem-select-month" aria-invalid={invalidField === 'pem-select-month' || undefined} aria-describedby={invalidField === 'pem-select-month' ? 'pem-validation-error' : undefined} class="pem-select" value={newFrequency === 'monthly' ? 0 : newMonth} disabled={newFrequency === 'monthly'} onchange={(event) => { newMonth = Number(event.currentTarget.value);  }}>
-                  {#if newFrequency === 'monthly'}<option value={0}>{isEn ? 'Every month' : 'Mỗi tháng'}</option>{:else}
-                    {#each Array.from({ length: 12 }, (_, i) => i + 1) as month (month)}<option value={month}>{isEn ? `Month ${month}` : `Tháng ${month}`}</option>{/each}
-                  {/if}
-                </select>
-              </div>
-
-
-            </div>
-
-          <div class="pem-field">
-            <span class="pem-label" id="pem-frequency-label">{isEn ? 'Recurrence' : 'Lặp lại'}</span>
-            <div id="pem-select-freq" class="pem-frequency" role="group" aria-labelledby="pem-frequency-label" tabindex="-1" data-invalid={invalidField === 'pem-select-freq' || invalidField === 'pem-solar-freq' || undefined}>
-              {#each ['yearly', 'monthly'] as frequency (frequency)}
-                <button type="button" aria-pressed={newFrequency === frequency} onclick={() => { clearSavedMessage(); newFrequency = frequency as PersonalEventFrequency; formTouched = true; invalidField = ''; formError = ''; }}>{frequency === 'yearly' ? (isEn ? 'Yearly' : 'Hàng năm') : (isEn ? 'Monthly' : 'Hàng tháng')}</button>
-              {/each}
-            </div>
-          </div>
-            <!-- Quy đổi Dương lịch tương ứng -->
-            <div class="conversion-pill">
-              <span class="conv-icon" aria-hidden="true">☀️</span>
-              <span class="conv-text">
-                {isEn ? 'Equivalent Solar Date in' : 'Dương lịch tương ứng năm'} {currentYear}: <strong>{convertedSolarDate}</strong>
-              </span>
-            </div>
-          {:else}
-            <!-- Nhập theo Dương lịch (Tự động đổi sang Âm lịch) -->
-            <div class="pem-row-3">
-              <div class="pem-field">
-                <label for="pem-solar-day" class="pem-label">
-                  {isEn ? 'Solar Day' : 'Ngày Dương'}
-                </label>
-                <select id="pem-solar-day" aria-invalid={invalidField === 'pem-solar-day' || undefined} aria-describedby={invalidField === 'pem-solar-day' ? 'pem-validation-error' : undefined} class="pem-select" bind:value={newSolarDay} onchange={handleSolarChange}>
-                  {#each Array.from({ length: 31 }, (_, i) => i + 1) as day}
-                    <option value={day}>{isEn ? `Day ${pad(day)}` : `Ngày ${pad(day)}`}</option>
-                  {/each}
-                </select>
-              </div>
-
-              <div class="pem-field">
-                <label for="pem-solar-month" class="pem-label">
-                  {isEn ? 'Solar Month' : 'Tháng Dương'}
-                </label>
-                <select id="pem-solar-month" aria-invalid={invalidField === 'pem-solar-month' || undefined} aria-describedby={invalidField === 'pem-solar-month' ? 'pem-validation-error' : undefined} class="pem-select" value={newFrequency === 'monthly' ? 0 : newSolarMonth} disabled={newFrequency === 'monthly'} onchange={(event) => { newSolarMonth = Number(event.currentTarget.value); handleSolarChange(); }}>
-                  {#if newFrequency === 'monthly'}<option value={0}>{isEn ? 'Every month' : 'Mỗi tháng'}</option>{:else}
-                    {#each Array.from({ length: 12 }, (_, i) => i + 1) as month (month)}<option value={month}>{isEn ? `Month ${month}` : `Tháng ${month}`}</option>{/each}
-                  {/if}
-                </select>
-              </div>
-
-
-            </div>
-
-          <div class="pem-field">
-            <span class="pem-label" id="pem-frequency-label">{isEn ? 'Recurrence' : 'Lặp lại'}</span>
-            <div id="pem-solar-freq" class="pem-frequency" role="group" aria-labelledby="pem-frequency-label" tabindex="-1" data-invalid={invalidField === 'pem-select-freq' || invalidField === 'pem-solar-freq' || undefined}>
-              {#each ['yearly', 'monthly'] as frequency (frequency)}
-                <button type="button" aria-pressed={newFrequency === frequency} onclick={() => { clearSavedMessage(); newFrequency = frequency as PersonalEventFrequency; formTouched = true; invalidField = ''; formError = ''; }}>{frequency === 'yearly' ? (isEn ? 'Yearly' : 'Hàng năm') : (isEn ? 'Monthly' : 'Hàng tháng')}</button>
-              {/each}
-            </div>
-          </div>
-            <!-- Quy đổi Âm lịch tương ứng -->
-            <div class="conversion-pill">
-              <span class="conv-icon" aria-hidden="true">🌙</span>
-              <span class="conv-text">
-                {#if convertedLunar}
-                  {personalEventsUi[isEn ? 'en' : 'vi'].lunarEquivalentYear(currentYear)} <strong>{formatLunarDayLabel(convertedLunar.day, isEn)} {isEn ? 'Month' : 'Tháng'} {pad(convertedLunar.month)}</strong>
-                {:else}
-                  {isEn ? 'Invalid date' : 'Ngày không hợp lệ'}
-                {/if}
-              </span>
-            </div>
-          {/if}
-
-          <div class="pem-field">
-            <label for="pem-input-note" class="pem-label">
-              {isEn ? 'Notes (Optional)' : 'Ghi chú (Tùy chọn)'}
-            </label>
-            <input
-              id="pem-input-note"
-              type="text"
-              class="pem-input"
-              bind:value={newNote}
-              placeholder={isEn ? 'e.g. Vegetarian feast & recite Ksitigarbha Sutra' : 'Ví dụ: Làm mâm cơm chay & tụng kinh Địa Tạng'}
-              maxlength={120}
-            />
-          </div>
-
+        <!-- Footer -->
+        <div class="pem-footer">
+          <button type="button" class="pem-done-btn" onclick={closeDialog}>
+            {isEn ? 'Close' : 'Đóng'}
+          </button>
           <button type="submit" class="pem-submit-btn">
             {personalEventsUi[isEn ? 'en' : 'vi'].saveEvent}
           </button>
-        </form>
-
-        <!-- Danh sách hiện có -->
-        <div class="pem-list-section">
-          <PersonalEventsSyncStatus {isEn} />
-          <h3 class="pem-list-heading">
-            {isEn ? 'Saved Anniversaries' : 'Danh Sách Ngày Lễ Đã Lưu'} ({events.length})
-          </h3>
-
-          {#if events.length === 0}
-            <div class="pem-empty">
-              <span class="pem-empty-icon" aria-hidden="true">📿</span>
-              <p>{isEn ? 'No personal anniversaries saved yet.' : 'Chưa có ngày lễ cá nhân nào được lưu.'}</p>
-              <span>{isEn ? 'Add an anniversary above to receive lunar reminders!' : 'Hãy thêm ngày giỗ chạp hoặc ngày quy y ở trên để app nhắc nhở bạn!'}</span>
-            </div>
-          {:else}
-            <ul class="pem-list" role="list">
-              {#each events as item (item.id)}
-                <li class="pem-item">
-                  <div class="pem-item-left">
-                    <span class="pem-item-badge-icon" aria-hidden="true">
-                      {getPersonalEventTypeIcon(item.type)}
-                    </span>
-                    <div class="pem-item-info">
-                      <div class="pem-item-title-row">
-                        <strong class="pem-item-title">{item.title}</strong>
-                        <span class="pem-item-type-tag">
-                          {getPersonalEventTypeName(item.type, isEn)}
-                        </span>
-                        {#if item.frequency === 'monthly' || (item.calendarMode !== 'solar' && Number(item.lunarMonth) === 0)}
-                          <span class="pem-freq-tag">
-                            {isEn ? 'Monthly' : 'Hàng tháng'}
-                          </span>
-                        {/if}
-                      </div>
-                      <div class="pem-item-date">
-                        {formatPersonalEventDateText(item, isEn)}
-                      </div>
-                      {#if item.note}
-                        <p class="pem-item-note">"{item.note}"</p>
-                      {/if}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    class="pem-delete-btn"
-                    onclick={() => handleDelete(item.id)}
-                    title={isEn ? 'Delete anniversary' : 'Xóa ngày lễ này'}
-                    aria-label={isEn ? `Delete ${item.title}` : `Xóa ${item.title}`}
-                  >
-                    🗑️
-                  </button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
         </div>
-      </div>
-
-      <!-- Footer -->
-      <div class="pem-footer">
-        <button type="button" class="pem-done-btn" onclick={closeDialog}>
-          {isEn ? 'Done' : 'Hoàn tất'}
-        </button>
-      </div>
+      </form>
     </dialog>
 {/if}
 
@@ -625,60 +586,60 @@
 
 <style>
   .pem-dialog::backdrop { background: var(--practice-dialog-backdrop); }
-  .pem-dialog[open] { position: fixed; inset: 0; box-sizing: border-box; width: min(var(--practice-dialog-width), calc(100% - 2 * var(--space-page))); max-width: none; max-height: var(--practice-dialog-height); max-height: min(var(--practice-dialog-height), calc(100dvh - 2 * var(--space-page) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))); margin: auto; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--bg); color: var(--text); display: flex; flex-direction: column; overflow: hidden; font: inherit; font-size: var(--font-size-body); }
-  .pem-header, .pem-footer { display: flex; justify-content: space-between; gap: var(--dialog-action-gap); padding: var(--space-page); border-bottom: 1px solid var(--border); }
-  .pem-header { align-items: flex-start; }
-  .pem-header, .pem-footer { flex: none; }
+  .pem-dialog[open] { position: fixed; inset: 0; box-sizing: border-box; width: min(var(--practice-dialog-width), calc(100% - 2 * var(--space-page))); max-width: none; max-height: var(--practice-dialog-height); max-height: min(var(--practice-dialog-height), calc(100dvh - 2 * var(--space-page) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))); margin: auto; padding: 0; border: 1px solid var(--border); border-radius: 20px; background: var(--bg); color: var(--text); display: flex; flex-direction: column; overflow: hidden; font: inherit; font-size: var(--font-size-body); box-shadow: var(--shadow-xl); }
+  .pem-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 14px 12px 16px; border-bottom: 1px solid var(--border2); background: var(--card); flex: none; }
+  .pem-title-box { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .pem-title-box > div { min-width: 0; overflow-wrap: anywhere; }
-  .pem-title-box, .notify-card-info, .pem-item-left { display: flex; align-items: flex-start; gap: var(--dialog-action-gap); min-width: 0; }
-  .pem-title { margin: 0; font-size: var(--font-size-section-title); line-height: 1.5; }
-  .pem-subtitle, .notify-desc { margin: var(--dialog-action-gap) 0 0; color: var(--text2); font-size: var(--font-size-label); line-height: 1.6; }
-  .pem-icon, .notify-icon, .pem-empty-icon, .pem-item-badge-icon { font-size: var(--font-size-section-title); }
-  button { box-sizing: border-box; min-width: var(--touch-target-size); min-height: var(--touch-target-size); padding: var(--dialog-action-gap) var(--dialog-action-space); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
-  .pem-close-btn, .pem-delete-btn { flex-shrink: 0; padding: var(--dialog-action-gap); }
-  .pem-body { padding: var(--space-page); min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-page); }
-  .pem-notify-toggle-card { display: flex; justify-content: space-between; align-items: center; gap: var(--dialog-action-gap); padding-bottom: var(--dialog-action-space); border-bottom: 1px solid var(--border); }
-  .notify-title { font-size: var(--font-size-card-title); }
-  .pem-switch { position: relative; width: calc(var(--touch-target-size) + var(--dialog-action-gap)); height: var(--touch-target-size); flex-shrink: 0; }
-  .pem-switch input { position: absolute; margin: 0; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-  .pem-slider { pointer-events: none; position: absolute; inset: var(--dialog-action-gap) 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--bg3); }
-  .pem-slider::before { content: ''; position: absolute; width: var(--space-page); height: var(--space-page); top: 50%; left: calc(var(--dialog-action-gap) / 2); transform: translateY(-50%); border-radius: 50%; background: var(--card); }
-  .pem-switch input:checked + .pem-slider { background: var(--gold); border-color: var(--gold); }
-  .pem-switch input:checked + .pem-slider::before { left: auto; right: calc(var(--dialog-action-gap) / 2); background: var(--white); }
-  .pem-switch input:focus-visible + .pem-slider { outline: 2px solid var(--gold); outline-offset: 2px; }
-  .pem-form { display: flex; flex-direction: column; gap: var(--dialog-action-space); min-width: 0; }
-  .pem-form-title { display: flex; gap: var(--dialog-action-gap); font-size: var(--font-size-section-title); }
-  .pem-field { display: flex; flex-direction: column; gap: var(--dialog-action-gap); min-width: 0; }
-  .pem-label { color: var(--text2); line-height: 1.6; }
-  .pem-input, .pem-select { box-sizing: border-box; width: 100%; min-width: 0; min-height: calc(var(--touch-target-size) + var(--dialog-action-gap) / 2); padding: var(--dialog-action-gap); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--card); color: var(--text); font: inherit; font-size: var(--font-size-input); }
-  .pem-select:disabled { background: var(--bg3); color: var(--text2); cursor: not-allowed; }
-  .pem-mode-tabs, .pem-frequency { display: flex; padding: calc(var(--dialog-action-gap) / 2); gap: calc(var(--dialog-action-gap) / 2); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--card); }
+  .pem-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--gold-light); border: 1px solid var(--gold-muted); font-size: 19px; flex-shrink: 0; }
+  .pem-title { margin: 0; font-size: var(--font-size-section-title); font-weight: 800; line-height: 1.3; }
+  .pem-subtitle { margin: 2px 0 0; color: var(--muted); font-size: var(--font-size-meta); line-height: 1.4; }
+  button { box-sizing: border-box; min-width: var(--touch-target-size); min-height: var(--touch-target-size); padding: var(--dialog-action-gap) var(--dialog-action-space); border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
+  .pem-close-btn { flex-shrink: 0; width: 44px; height: 44px; padding: 0; border-radius: 12px; border: 1px solid var(--border2); background: var(--bg2); color: var(--text2); display: grid; place-items: center; }
+  .pem-delete-btn { flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 1px solid transparent; border-radius: var(--radius); background: transparent; color: var(--danger-text); display: grid; place-items: center; }
+  .pem-form { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+  .pem-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  .pem-body::-webkit-scrollbar { width: 4px; }
+  .pem-body::-webkit-scrollbar-track { background: transparent; }
+  .pem-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  .pem-form-fields { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .pem-form-title { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-card-title); font-weight: 800; color: var(--brown); }
+  .pem-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .pem-label { font-size: var(--font-size-label); font-weight: 600; color: var(--text2); line-height: 1.4; }
+  .pem-input, .pem-select { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--touch-target-size); padding: 9px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text); font: inherit; font-size: var(--font-size-input); }
+  .pem-select:disabled { background: var(--bg2); color: var(--muted); cursor: not-allowed; }
+  .pem-mode-tabs, .pem-frequency { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; gap: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg2); }
   .pem-mode-switch-wrap { min-width: 0; }
-  .pem-mode-tabs button, .pem-frequency button { flex: 1; min-width: 0; padding: var(--dialog-action-gap); border: 0; border-radius: var(--radius); background: transparent; font-weight: 600; }
-  .pem-mode-tabs button[aria-pressed='true'] { background: var(--gold); background: color-mix(in srgb, var(--gold) 88%, var(--on-gold)); color: var(--on-gold); box-shadow: inset 0 0 0 1px var(--on-gold); font-weight: 700; }
-  .pem-frequency button[aria-pressed='true'] { background: var(--gold-light); }
-  .pem-row-3 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--dialog-action-space); }
-  .conversion-pill { color: var(--text2); line-height: 1.6; overflow-wrap: anywhere; }
-  .conv-icon { display: none; }
-  .conversion-pill strong { color: var(--brown); font-weight: 600; }
+  .pem-mode-tabs button, .pem-frequency button { min-width: 0; min-height: var(--touch-target-size); padding: 8px; border: 1.5px solid transparent; border-radius: 9px; background: transparent; color: var(--text2); font-weight: 600; transition: background var(--motion-press) var(--ease-standard), border-color var(--motion-press) var(--ease-standard), color var(--motion-press) var(--ease-standard); }
+  .pem-mode-tabs button[aria-pressed='true'] { background: var(--gold); border-color: var(--gold); color: var(--on-gold); font-weight: 700; box-shadow: 0 2px 8px color-mix(in srgb, var(--gold) 28%, transparent); }
+  .pem-frequency button[aria-pressed='true'] { background: var(--card); border-color: var(--gold); color: var(--brown); font-weight: 700; box-shadow: var(--shadow-sm); }
+  .pem-row-3 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+  .conversion-pill { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 11px; background: var(--gold-light); border: 1px solid var(--gold-muted); color: var(--text2); font-size: var(--font-size-body); line-height: 1.4; overflow-wrap: anywhere; }
+  .conv-icon { font-size: 16px; flex-shrink: 0; line-height: 1; }
+  .conv-text { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; min-width: 0; }
+  .conversion-pill strong { color: var(--brown); font-weight: 800; white-space: nowrap; }
   :global([data-theme='dark']) .conversion-pill strong { color: var(--gold2); }
-  .pem-saved-message { margin: 0; padding: var(--dialog-action-space); border: 1px solid var(--gold); border-radius: var(--radius-card); background: var(--gold-light); color: var(--text); font-weight: 600; line-height: 1.6; }
-  .pem-error { color: var(--danger-text); line-height: 1.6; }
+  .pem-saved-message { margin: 0; padding: 10px 12px; border: 1px solid var(--gold); border-radius: 12px; background: var(--gold-light); color: var(--text); font-weight: 600; line-height: 1.5; }
+  .pem-error { color: var(--danger-text); line-height: 1.5; }
   [aria-invalid='true'], [data-invalid='true'] { border-color: var(--danger-text); }
-  .pem-submit-btn { min-height: calc(var(--touch-target-size) + var(--dialog-action-gap) / 2); background: var(--gold); color: var(--on-gold); font-weight: 600; }
   :is(button, input, select, [tabindex]):focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
-  .pem-list-section { display: flex; flex-direction: column; gap: var(--dialog-action-space); padding-top: var(--dialog-action-space); border-top: 1px solid var(--border); }
-  .pem-list-heading { margin: 0; font-size: var(--font-size-section-title); }
+  .pem-list-section { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border2); }
+  .pem-list-heading { margin: 0; font-size: var(--font-size-card-title); font-weight: 700; }
   .pem-empty { color: var(--text2); line-height: 1.6; }
   .pem-empty p { margin: var(--dialog-action-gap) 0; }
-  .pem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--dialog-action-space); }
-  .pem-item { display: flex; align-items: center; justify-content: space-between; gap: var(--dialog-action-gap); padding-bottom: var(--dialog-action-space); border-bottom: 1px solid var(--border); }
-  .pem-item-left, .pem-item-info { flex: 1; min-width: 0; }
-  .pem-item-info { overflow-wrap: anywhere; }
-  .pem-item-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--dialog-action-gap); }
+  .pem-empty-icon { font-size: var(--font-size-section-title); }
+  .pem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .pem-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 8px 10px 10px; border-radius: 12px; background: var(--card); border: 1px solid var(--border2); }
+  .pem-item-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+  .pem-item-badge-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: var(--gold-light); border: 1px solid var(--gold-muted); font-size: 17px; flex-shrink: 0; }
+  .pem-item-info { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .pem-item-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .pem-item-title { font-size: var(--font-size-card-title); }
-  .pem-item-type-tag, .pem-freq-tag, .pem-item-date, .pem-item-note { color: var(--text2); font-size: var(--font-size-label); line-height: 1.6; }
-  .pem-item-note { margin: var(--dialog-action-gap) 0 0; font-style: italic; }
-  .pem-delete-btn { color: var(--danger-text); background: transparent; }
-  .pem-footer { justify-content: flex-end; border-top: 1px solid var(--border); border-bottom: 0; padding-bottom: max(var(--space-page), env(safe-area-inset-bottom, 0px)); }
+  .pem-item-type-tag, .pem-freq-tag, .pem-item-date, .pem-item-note { color: var(--text2); font-size: var(--font-size-label); line-height: 1.5; }
+  .pem-item-note { margin: 4px 0 0; font-style: italic; }
+  .pem-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 12px 14px max(12px, env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border2); background: var(--card); flex: none; }
+  .pem-done-btn { min-height: var(--touch-target-size); padding: 0 18px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg2); color: var(--text2); font-weight: 700; }
+  .pem-submit-btn { min-height: var(--touch-target-size); padding: 0 18px; border-radius: 12px; border: 0; background: var(--gold); color: var(--on-gold); font-weight: 800; box-shadow: 0 3px 12px color-mix(in srgb, var(--gold) 28%, transparent); }
+  @media (prefers-reduced-motion: reduce) {
+    .pem-mode-tabs button, .pem-frequency button { transition: none; }
+  }
 </style>

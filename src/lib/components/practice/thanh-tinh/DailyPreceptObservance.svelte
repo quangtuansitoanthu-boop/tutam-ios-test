@@ -6,15 +6,15 @@
   import { getPreceptPracticeCopy, getDailyPreceptPracticeCopy, getPreceptCompletionCopy } from '$lib/i18n/precept-practice-ui';
   import { FIVE_PRECEPTS, TEN_PRECEPTS } from '$lib/content/precept-practice-content';
   import type { DailySession, DayAnswers } from '$lib/domain/practice/precept-companion';
-  import { saveDailySession, getDailySessionConduct, getDailySessionTestingConduct } from '$lib/browser/precept-companion-storage';
+  import { saveDailySession } from '$lib/browser/precept-companion-storage';
   import { createBrowserId } from '$lib/browser/random-id';
   import PracticeConfirmDialog from '../dialog/PracticeConfirmDialog.svelte';
   import PreceptCompletion from './PreceptCompletion.svelte';
 
-  let { group, session, ready, loadError, now, onReload, onContinue, onOpenAbstinence, resumeReflection = false, resumeTestingPrincipal = null, testingConductConfirmed = false }: {
+  let { group, session, ready, loadError, now, onReload, onContinue, onOpenAbstinence: _onOpenAbstinence, resumeReflection = false, resumeTestingPrincipal = null }: {
     group: 'combined'; session: DailySession | null;
     ready: boolean; loadError: boolean; now: number; resumeReflection?: boolean; resumeTestingPrincipal?: string | null; testingConductConfirmed?: boolean; testingConductAnswer?: 'kept' | 'review';
-    onReload: () => void; onContinue: () => void; onOpenAbstinence: (options: { sessionId: string; principal: string | null }) => void;
+    onReload: () => void; onContinue: () => void; onOpenAbstinence?: (options: { sessionId: string; principal: string | null }) => void;
   } = $props();
   const groups = [{ id: 'five', items: FIVE_PRECEPTS }, { id: 'ten', items: TEN_PRECEPTS }] as const;
   const locale = getLocaleContext();
@@ -25,29 +25,23 @@
   const text = $derived(getDailyPreceptPracticeCopy(ix === 1, name));
   const completion = $derived(getPreceptCompletionCopy(ix === 1));
   const uniqueItems = [...new Map([...FIVE_PRECEPTS, ...TEN_PRECEPTS].map(item => [item.id, item])).values()];
-  const requiredItems = uniqueItems.filter(item => item.id !== 'conduct');
+  const requiredItems = uniqueItems;
   let showMissing = $state(false);
-  let completedResult = $state<{ id: string; conduct: 'kept' | 'review' } | null>(null);
   let draft = $state<DayAnswers>({});
   let reflecting = $state(false);
   let preparingNext = $state(false);
   let pledged = $state(false);
   let confirming = $state<'start' | 'finish' | 'test' | null>(null);
-  let conductPromptOpen = $state(false);
-  let conductSourceError = $state(false);
   let adminReleasePrincipal = $state<string | null>(null);
   let saveError = $state(false);
   let loadedId = $state('');
   const answers = $derived({ ...session?.answers, ...draft });
-  const conduct = $derived(readConduct(now));
   const active = $derived(session?.status === 'active');
   const elapsed = $derived(!!session && now >= Date.parse(session.endsAt));
   const adminPrincipal = $derived(getAdminPrincipal(now));
   const adminTesting = $derived(adminReleasePrincipal !== null && adminReleasePrincipal === adminPrincipal);
   const missing = $derived(requiredItems.filter(item => !answers[item.id]));
-  const effectiveConduct = $derived(conduct.answer);
-  const resultConduct = $derived(completedResult?.id === session?.id ? completedResult?.conduct : conduct.answer);
-  const unmet = $derived(uniqueItems.filter(item => (item.id === 'conduct' ? resultConduct : answers[item.id]) !== 'kept'));
+  const unmet = $derived(uniqueItems.filter(item => answers[item.id] !== 'kept'));
   const resultComplete = $derived(unmet.length === 0);
   const canReflect = $derived(elapsed || adminTesting);
   const remaining = $derived(session ? Math.max(0, Math.ceil((Date.parse(session.endsAt) - now) / 1000)) : 0);
@@ -57,7 +51,7 @@
   $effect(() => {
     if ((session?.id ?? '') !== loadedId) {
       const initialSession = loadedId === '';
-      loadedId = session?.id ?? ''; draft = {}; showMissing = false; preparingNext = false; pledged = false; confirming = null; conductPromptOpen = false; conductSourceError = false;
+      loadedId = session?.id ?? ''; draft = {}; showMissing = false; preparingNext = false; pledged = false; confirming = null;
       const validResume = initialSession && resumeTestingPrincipal !== null && resumeTestingPrincipal === getAdminPrincipal(Date.now()) && !!session && session.status === 'active' && Date.now() < Date.parse(session.endsAt);
       adminReleasePrincipal = validResume ? resumeTestingPrincipal : null;
       reflecting = initialSession && resumeReflection && !!session && (now >= Date.parse(session.endsAt) || validResume);
@@ -66,11 +60,7 @@
   $effect(() => {
     if (adminReleasePrincipal !== null && (adminReleasePrincipal !== adminPrincipal || elapsed)) revokeTesting();
   });
-  $effect(() => {
-    if (conductPromptOpen && (!ready || loadError || !active || !reflecting || !canReflect)) conductPromptOpen = false;
-  });
   export function handleBack(): boolean {
-    if (conductPromptOpen) { conductPromptOpen = false; return true; }
     if (confirming !== null) { confirming = null; return true; }
     return false;
   }
@@ -79,7 +69,7 @@
     const expiry = Date.parse(current.expiresAt ?? '');
     return current.authenticated && current.user?.role === 'admin' && current.user.id && Number.isFinite(expiry) && expiry > at ? current.user.id : null;
   }
-  function revokeTesting() { adminReleasePrincipal = null; reflecting = false; confirming = null; conductPromptOpen = false; }
+  function revokeTesting() { adminReleasePrincipal = null; reflecting = false; confirming = null; }
   function releaseForTesting() {
     const principal = getAdminPrincipal(Date.now());
     if (!principal || !ready || loadError || !session || !active || Date.now() >= Date.parse(session.endsAt)) return;
@@ -113,41 +103,18 @@
     if (!testing && Date.now() < Date.parse(session.endsAt)) { confirming = null; return; }
     confirming = null;
     if (!validateReflection()) return;
-    const completedConduct = readConduct(Date.now()).answer;
     if (!saveDailySession({ ...session, status: testing ? 'cancelled' : 'ended', answers: { ...answers } })) { saveError = true; return; }
     if (!testing) {
       if (group === 'combined') { recordPracticeParticipation('five','completed'); recordPracticeParticipation('ten','completed'); }
       else recordPracticeParticipation(group,'completed');
     }
-    completedResult = completedConduct ? { id: session.id, conduct: completedConduct } : null;
     saveError = false; draft = {}; reflecting = false; adminReleasePrincipal = null; onReload();
   }
   function release() { if (session && active && Date.now() >= Date.parse(session.endsAt)) { adminReleasePrincipal = null; reflecting = true; } }
-  function readConduct(at: number) {
-    if (!session) return { answer: undefined, confirmed: false, error: false };
-    const earlyTesting = at < Date.parse(session.endsAt) && adminReleasePrincipal !== null && adminReleasePrincipal === getAdminPrincipal(at);
-    return earlyTesting && testingConductConfirmed ? getDailySessionTestingConduct(session) : getDailySessionConduct(session);
-  }
   function validateReflection() {
     showMissing = missing.length > 0;
-    conductSourceError = false;
     if (showMissing) { confirming = null; return false; }
-    const currentConduct = readConduct(Date.now());
-    if (currentConduct.error) { confirming = null; conductPromptOpen = false; conductSourceError = true; return false; }
-    if (!currentConduct.confirmed || !currentConduct.answer) { confirming = null; conductPromptOpen = true; return false; }
     return true;
-  }
-  function confirmConductNavigation() {
-    if (!conductPromptOpen) return;
-    conductPromptOpen = false;
-    openConduct();
-  }
-  function openConduct() {
-    if (!ready || loadError || !session || !active) return;
-    const testing = Date.now() < Date.parse(session.endsAt);
-    if (testing && (!adminReleasePrincipal || adminReleasePrincipal !== getAdminPrincipal(Date.now()))) { revokeTesting(); return; }
-    if (!saveDailySession({ ...session, answers: { ...answers } })) { saveError = true; return; }
-    saveError = false; onOpenAbstinence({ sessionId: session.id, principal: testing ? adminReleasePrincipal : null });
   }
   function formatDate(value: string) { return new Intl.DateTimeFormat(ix === 1 ? 'en-GB' : 'vi-VN', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(value)); }
   function focusStage(node: HTMLDivElement, initial: string) {
@@ -172,7 +139,7 @@
     {#if !reflecting || !canReflect}
       <section class="tracking" data-testid={`daily-${group}-tracking`}>
         <h3 tabindex="-1">{elapsed ? text.elapsed : text.tracking}</h3>
-        <div class="countdown" style:--daily-progress={`${progress}%`}><strong role="timer" aria-live="off">{countdown}</strong></div>
+        <div class="countdown" style:--daily-progress={`${progress}%`}><div class="countdown-face"><strong role="timer" aria-live="off">{countdown}</strong><span>{elapsed ? text.elapsed : c.eightCountdownActive}</span></div></div>
         <dl><div><dt>{c.startedAt}</dt><dd>{formatDate(session.startsAt)}</dd></div><div><dt>{c.endsAt}</dt><dd>{formatDate(session.endsAt)}</dd></div></dl>
         <p>{text.wait}</p>{#if elapsed}<button class="primary" type="button" disabled={!ready || loadError} onclick={release}>{text.conclude}</button>{/if}
         {#if adminPrincipal && !elapsed}<button class="admin-testing" type="button" disabled={!ready || loadError} onclick={releaseForTesting}>{text.adminRelease}</button>{/if}
@@ -187,24 +154,17 @@
             <summary>{reflectionGroup.id === 'five' ? c.fiveSectionTitle : c.tenSectionTitle}</summary>
             {#each reflectionGroup.items as item (item.id)}
               <article class="precept-item"><h4 id={`daily-${reflectionGroup.id}-${item.id}`}>{item.title[ix]}</h4>
-                {#if item.id === 'conduct'}
-                  <p>{c.conductSourceNote}</p>
-                  <p class="conduct-status" role="status">{conduct.error ? c.conductSourceError : effectiveConduct === 'kept' ? c.kept : effectiveConduct === 'review' ? c.review : c.conductPending}</p>
-                  {#if elapsed || adminTesting}<button type="button" disabled={!ready || loadError} onclick={openConduct}>{c.openAbstinence}</button>{/if}
-                {:else}
-                  <fieldset aria-labelledby={`daily-${reflectionGroup.id}-${item.id}`} disabled={!ready || loadError}>
-                    <legend>{c.recordHonestly}</legend>
-                    {#each ['kept', 'review'] as answer (answer)}
-                      <label class:selected={answers[item.id] === answer}><input type="radio" name={`${reflectionGroup.id}-${item.id}`} checked={answers[item.id] === answer} onchange={() => { draft = { ...draft, [item.id]: answer === 'kept' ? 'kept' : 'review' }; saveError = false; }} /><span>{answer === 'kept' ? c.kept : c.review}</span></label>
-                    {/each}
-                  </fieldset>{#if !answers[item.id]}<small>{c.unanswered}</small>{/if}
-                {/if}
+                <fieldset aria-labelledby={`daily-${reflectionGroup.id}-${item.id}`} disabled={!ready || loadError}>
+                  <legend>{c.recordHonestly}</legend>
+                  {#each ['kept', 'review'] as answer (answer)}
+                    <label class:selected={answers[item.id] === answer}><input type="radio" name={`${reflectionGroup.id}-${item.id}`} checked={answers[item.id] === answer} onchange={() => { draft = { ...draft, [item.id]: answer === 'kept' ? 'kept' : 'review' }; saveError = false; }} /><span>{answer === 'kept' ? c.kept : c.review}</span></label>
+                  {/each}
+                </fieldset>{#if !answers[item.id]}<small>{c.unanswered}</small>{/if}
               </article>
             {/each}
           </details>
         {/each}
         {#if showMissing && missing.length}<div class="error" role="alert" data-testid="daily-missing-answers"><p>{completion.missingPrefix}</p><ul>{#each missing as item (item.id)}<li>{item.title[ix]}</li>{/each}</ul></div>{/if}
-        {#if conductSourceError}<div class="error" role="alert"><p>{c.conductSourceError}</p><button type="button" onclick={() => { conductSourceError = false; onReload(); }}>{c.tryAgain}</button></div>{/if}
         <button class="primary" type="button" disabled={!ready || loadError || !canReflect} onclick={requestFinish}>{adminTesting ? text.testConfirm : text.confirm}</button>
       </section>
     {/if}
@@ -221,11 +181,6 @@
   {/if}
 
 </div>
-{#if conductPromptOpen}
-  <div class="daily-confirmation daily-conduct-confirmation">
-    <PracticeConfirmDialog open title={c.conductMissingTitle} description={`${c.conductMissingBody}\n\n${c.conductAnswersPreserved}`} cancelLabel={c.back} confirmLabel={c.conductMissingAction} onCancel={() => conductPromptOpen = false} onConfirm={confirmConductNavigation} />
-  </div>
-{/if}
 {#if confirming}
   <div class="daily-confirmation">
   <PracticeConfirmDialog open title={confirming === 'start' ? text.vow : confirming === 'test' ? text.testConfirm : text.confirmTitle} description={confirming === 'start' ? text.startQuestion : confirming === 'test' ? text.testQuestion : text.finishQuestion} cancelLabel={c.back} confirmLabel={confirming === 'start' ? text.startConfirm : confirming === 'test' ? text.testAction : text.finishConfirm} onCancel={() => confirming = null} onConfirm={confirming === 'start' ? start : finish} />
@@ -234,40 +189,45 @@
 
 <style>
   .daily-confirmation :global(.practice-confirm__dialog p) { color: var(--text2); font-size: 1em; text-align: justify; }
-  .daily-conduct-confirmation :global(.practice-confirm__dialog h2) { white-space: pre-line; text-align: center; font-weight: 700; }
   .daily-observance, .tracking { display: grid; gap: var(--space-page); min-width: 0; padding-top: var(--space-page); color: var(--text); font-family: var(--font-app); }
   h2, h3, h4 { margin: 0; text-align: center; font-weight: 700; line-height: 1.5; color: var(--brown-dark); }
   h2 { font-size: 1.35em; letter-spacing: -0.01em; }
   h3 { font-size: 1.15em; }
   h4 { font-size: 1.05em; text-align: start; }
   p { margin: 0; text-align: justify; line-height: 1.75; }
-  .duration { text-align: center; color: var(--brown); font-weight: 600; font-size: 0.9em; letter-spacing: 0.03em; }
-  .countdown { position: relative; display: grid; place-items: center; width: min(100%, calc(var(--space-page) * 13)); aspect-ratio: 1; margin-inline: auto; border-radius: 50%; background: radial-gradient(circle, var(--gold-light), transparent 70%); box-shadow: 0 4px 20px rgba(200, 150, 62, 0.08); }
-  .countdown::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from -90deg, var(--gold) var(--daily-progress), var(--border2) 0); mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px)); }
-  .countdown strong { font-size: clamp(2.2rem, 10vw, 3rem); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--brown-dark); }
-  dl { display: grid; gap: var(--radius-sm); margin: 0; min-width: 0; background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--radius-card); padding: calc(var(--space-page) * 0.75) var(--space-page); }
+  .duration { text-align: center; justify-self: center; padding: 4px 12px; border-radius: 999px; background: linear-gradient(145deg, var(--gold-light), var(--gold-muted)); border: 1px solid color-mix(in srgb, var(--gold) 30%, var(--border)); color: var(--brown); font-weight: 700; font-size: 0.88em; letter-spacing: 0.03em; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--card) 88%, transparent), var(--shadow-sm); }
+  .countdown { position: relative; display: grid; place-items: center; width: min(100%, calc(var(--space-page) * 13)); aspect-ratio: 1; margin-inline: auto; border-radius: 50%; background: radial-gradient(circle at 32% 24%, var(--card) 0%, var(--gold-light) 55%, var(--gold-muted) 100%); border: 1.5px solid color-mix(in srgb, var(--card) 85%, var(--border)); box-shadow: inset 0 4px 10px color-mix(in srgb, var(--card) 88%, transparent), inset 0 -8px 16px color-mix(in srgb, var(--gold) 18%, transparent), 0 18px 36px -10px color-mix(in srgb, var(--gold) 30%, transparent), var(--shadow); }
+  .countdown::before { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: conic-gradient(from -90deg, var(--gold2), var(--gold) var(--daily-progress), var(--border2) 0); mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); }
+  .countdown::after { content: ''; position: absolute; top: 10px; left: 26px; right: 26px; height: 40%; border-radius: 50% 50% 45% 45% / 62% 62% 28% 28%; background: linear-gradient(180deg, color-mix(in srgb, var(--card) 62%, transparent), transparent); pointer-events: none; }
+  :global([data-theme='dark']) .countdown { background: radial-gradient(circle at 32% 24%, var(--bg3) 0%, var(--bg2) 58%, var(--bg) 100%); border-color: rgba(255, 255, 255, 0.16); box-shadow: inset 0 3px 8px rgba(255, 235, 195, 0.14), inset 0 -10px 18px rgba(0, 0, 0, 0.6), 0 18px 36px -8px rgba(0, 0, 0, 0.65); }
+  .countdown-face { position: relative; z-index: 2; display: grid; justify-items: center; gap: 4px; text-align: center; padding: 0 12px; }
+  .countdown strong { font-size: clamp(2.1rem, 10vw, 2.85rem); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--brown-dark); line-height: 1.15; }
+  .countdown-face span { font-size: var(--font-size-meta); font-weight: 600; color: var(--text2); }
+  dl { display: grid; gap: var(--radius-sm); margin: 0; min-width: 0; background: linear-gradient(155deg, var(--card), var(--bg2)); border: 1px solid var(--border); border-radius: var(--radius-card); padding: calc(var(--space-page) * 0.75) var(--space-page); box-shadow: inset 0 1.5px 0 color-mix(in srgb, var(--card) 90%, transparent), inset 0 -3px 0 rgba(60, 40, 10, 0.1), var(--shadow); }
   dl > div { display: flex; justify-content: space-between; gap: var(--radius-sm); line-height: 1.7; }
-  dt { color: var(--text2); font-weight: 500; font-size: 0.9em; }
-  dd { margin: 0; text-align: end; overflow-wrap: anywhere; font-weight: 600; color: var(--brown-dark); }
+  dl > div + div { border-top: 1px solid var(--border2); padding-top: var(--radius-xs); }
+  dt { color: var(--text2); font-weight: 600; font-size: 0.9em; }
+  dd { margin: 0; text-align: end; overflow-wrap: anywhere; font-weight: 700; color: var(--brown-dark); }
   fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   legend, small { color: var(--text2); font-size: .85em; }
   legend { margin-bottom: calc(var(--space-page) / 4); font-weight: 500; }
   .precept-item { padding-block: calc(var(--space-page) * 0.75); border-top: 1px solid var(--border2); }
   .precept-item h4 { margin-bottom: calc(var(--space-page) / 4); }
-  label { display: flex; align-items: center; gap: calc(var(--space-page) / 2); min-height: 44px; padding: calc(var(--space-page) * 0.4) var(--space-page); margin-top: calc(var(--space-page) / 4); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--bg2); color: var(--text2); font-weight: 500; line-height: 1.6; cursor: pointer; transition: all 0.15s ease; }
-  label.selected { background: var(--gold-light); border-color: var(--gold); color: var(--brown-dark); font-weight: 700; box-shadow: 0 1px 4px color-mix(in srgb, var(--gold) 20%, transparent); }
+  label { display: flex; align-items: center; gap: calc(var(--space-page) / 2); min-height: 44px; padding: calc(var(--space-page) * 0.4) var(--space-page); margin-top: calc(var(--space-page) / 4); border: 1px solid var(--border); border-radius: var(--radius-control); background: linear-gradient(155deg, var(--card), var(--bg2)); color: var(--text2); font-weight: 500; line-height: 1.6; cursor: pointer; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--card) 85%, transparent), var(--shadow-sm); transition: all 0.15s ease; }
+  label.selected { background: linear-gradient(145deg, var(--gold-light), var(--gold-muted)); border-color: var(--gold); color: var(--brown-dark); font-weight: 700; box-shadow: inset 0 1.5px 0 color-mix(in srgb, var(--card) 85%, transparent), 0 3px 10px color-mix(in srgb, var(--gold) 24%, transparent); }
   input { accent-color: var(--gold); flex-shrink: 0; }
-  .pledge { align-items: flex-start; padding: var(--space-page); border: 1px solid var(--gold-muted); border-radius: var(--radius-card); background: var(--gold-light); color: var(--brown-dark); font-weight: 500; line-height: 1.7; }
+  .pledge { align-items: flex-start; padding: var(--space-page); border: 1px solid var(--gold-muted); border-radius: var(--radius-card); background: linear-gradient(145deg, var(--gold-light), var(--gold-muted)); color: var(--brown-dark); font-weight: 500; line-height: 1.7; }
   .pledge input { margin-top: 3px; width: 22px; height: 22px; }
   fieldset:disabled label { opacity: .6; cursor: default; }
-  button { font: inherit; min-height: 44px; min-width: 0; border: 1px solid var(--border2); border-radius: var(--radius-control); background: var(--card); color: var(--text); padding: calc(var(--space-page) / 2) var(--space-page); line-height: 1.6; cursor: pointer; }
-  .primary { width: 100%; height: 48px; background: var(--gold); border-color: var(--gold); color: var(--on-gold); font-weight: 700; box-shadow: 0 2px 6px color-mix(in srgb, var(--gold) 30%, transparent); }
+  button { font: inherit; min-height: 44px; min-width: 0; border: 1px solid var(--border); border-radius: 999px; background: linear-gradient(155deg, var(--card), var(--bg2)); color: var(--text2); font-weight: 700; padding: calc(var(--space-page) / 2) var(--space-page); line-height: 1.5; cursor: pointer; box-shadow: inset 0 1.5px 0 color-mix(in srgb, var(--card) 88%, transparent), inset 0 -2.5px 0 rgba(60, 40, 10, 0.1), var(--shadow-sm); transition: transform 0.12s ease; }
+  button:active:not(:disabled) { transform: translateY(1.5px) scale(0.98); }
+  .primary { width: 100%; height: 48px; background: linear-gradient(145deg, var(--gold2), var(--gold)); border-color: color-mix(in srgb, var(--card) 45%, var(--gold)); color: var(--on-gold); font-weight: 800; box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.55), inset 0 -3px 0 rgba(90, 56, 8, 0.24), 0 6px 14px -3px color-mix(in srgb, var(--gold) 45%, transparent); }
   button:disabled { opacity: .5; cursor: default; }
   .error { color: var(--danger-text); font-weight: 500; }
   button:focus-visible, summary:focus-visible, label:has(input:focus-visible) { outline: 2px solid var(--gold); outline-offset: 2px; }
   .reflection-group { border: 1px solid var(--border2); border-radius: var(--radius-card); padding: calc(var(--space-page) * 0.75); margin-block: var(--space-page); background: var(--card); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02); }
   .reflection-group summary { text-align: center; font-weight: 700; font-size: 1.05em; color: var(--brown-dark); background: var(--gold-light); border-radius: var(--radius-control); padding: calc(var(--space-page) * 0.5); }
-  .shared-note, .conduct-status { color: var(--text2); font-size: 0.9em; }
+  .shared-note { color: var(--text2); font-size: 0.9em; }
   summary { min-height: 44px; align-content: center; cursor: pointer; }
   .testing-notice { color: var(--brown); background: var(--gold-light); border: 1px solid var(--border); border-radius: var(--radius-control); padding: calc(var(--space-page) / 2); text-align: start; }
   .admin-testing { justify-self: start; }

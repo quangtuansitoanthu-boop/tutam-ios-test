@@ -3,6 +3,12 @@ package vn.quangtu.tutam;
 /** Paint the selected photo before the WebView and login SDKs start initializing. */
 public class StartupActivity extends androidx.appcompat.app.AppCompatActivity {
     private static java.lang.ref.WeakReference<StartupActivity> current = new java.lang.ref.WeakReference<>(null);
+    static long getReadableSince(int index) {
+        StartupActivity activity = current.get();
+        if (activity == null || activity.artworkIndex != index
+            || activity.firstDrawUptime < 0 || activity.entranceFinishedAt < 0) return -1;
+        return Math.max(activity.firstDrawUptime, activity.entranceFinishedAt);
+    }
     public static void finishBehindMain() {
         StartupActivity activity = current.get();
         if (activity != null && !activity.isFinishing()) {
@@ -12,6 +18,13 @@ public class StartupActivity extends androidx.appcompat.app.AppCompatActivity {
     }
     private boolean started;
     private int artworkIndex;
+    private long firstDrawUptime = -1;
+    private long entranceFinishedAt = -1;
+
+    @Override public void onEnterAnimationComplete() {
+        super.onEnterAnimationComplete();
+        if (entranceFinishedAt < 0) entranceFinishedAt = android.os.SystemClock.uptimeMillis();
+    }
 
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
@@ -29,6 +42,7 @@ public class StartupActivity extends androidx.appcompat.app.AppCompatActivity {
             @Override public void onDraw() {
                 if (posted) return;
                 posted = true;
+                firstDrawUptime = android.os.SystemClock.uptimeMillis();
                 artwork.post(() -> {
                     artwork.getViewTreeObserver().removeOnDrawListener(this);
                     if (started || isFinishing() || isDestroyed()) return;

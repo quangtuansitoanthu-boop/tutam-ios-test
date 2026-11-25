@@ -316,6 +316,7 @@
     }, 1500);
   }
   function toggleGhostMode() {
+    const wasAtEnd = caretPosition === null || caretPosition >= text.length;
     ghostEnabled = !ghostEnabled;
     clearGhostMismatch();
     if (ghostEnabled && text) {
@@ -328,6 +329,9 @@
         syncView();
       }
     }
+    if (wasAtEnd) caretPosition = text.length;
+    lastFollowTop = -1;
+    sourceLayoutVersion++;
     try {
       localStorage.setItem('tt_copy_ghost_v1', ghostEnabled ? '1' : '0');
     } catch { /* Device preference only. */ }
@@ -385,7 +389,9 @@
     }
   }
   function followEditorCaret() {
-    if (composing || !editor || !editor.hasFocus()) return;
+    if (!editor || !editor.hasFocus()) return;
+    caretPosition = Math.min(text.length, editorPages[editorPage] + editor.getSelectionEnd());
+    if (composing) return;
     if (caretFollowFrame !== undefined) cancelAnimationFrame(caretFollowFrame);
     const target = editor, current = ticket, currentBlock = block, currentPage = editorPage, pageStart = editorPages[editorPage];
     caretFollowFrame = requestAnimationFrame(async () => {
@@ -393,8 +399,9 @@
       // Intercepted ghost input restores its selection during the Svelte render.
       await tick();
       if (current !== ticket || block !== currentBlock || editorPage !== currentPage || editorPages[editorPage] !== pageStart
-        || composing || editor !== target || step !== 'write' || !target.hasFocus()) return;
+        || editor !== target || step !== 'write' || !target.hasFocus()) return;
       caretPosition = Math.min(text.length, pageStart + target.getSelectionEnd());
+      if (composing) return;
       const turn = pageTurnPending; pageTurnPending = false;
       const carry = !continuousScroll && turn && target.needsPage() ? copyingCarryStart(target.getValue()) : 0;
       if (carry > 0) {
@@ -921,12 +928,12 @@
     void sourceLayoutVersion;
     const word = currentWord;
     const index = currentSentence, panel = sourceElement, fontSize = sourceFontSize, sentences = sourceSentences;
-    if (step !== 'write' || !sourceVisible || composing || !panel || !sentences.length) return;
+    if (step !== 'write' || !sourceVisible || !panel || !sentences.length) return;
     let cancelled = false, frame: number | undefined;
     void tick().then(() => {
       if (cancelled) return;
       frame = requestAnimationFrame(() => {
-      if (sourceElement !== panel || sourceSentences !== sentences || currentSentence !== index || currentWord !== word || composing || step !== 'write') return;
+      if (sourceElement !== panel || sourceSentences !== sentences || currentSentence !== index || currentWord !== word || step !== 'write') return;
       const sentence = panel.querySelector<HTMLElement>('[data-copy-sentence="' + index + '"]');
       if (!sentence) return;
       const anchor = sentence.querySelector<HTMLElement>('[data-copy-word="' + word + '"]') ?? sentence;

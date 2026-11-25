@@ -438,25 +438,28 @@
 
   /* Action Buttons */
   .quote-card-actions {
-    display: flex;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .quote-btn {
-    flex: 1;
+    min-width: 0;
     min-height: var(--touch-target-size);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 10px 12px;
-    border-radius: 12px;
+    gap: 4px;
+    padding: 8px 6px;
+    border-radius: var(--radius);
     font-family: inherit;
-    font-size:var(--font-size-label);
+    font-size: var(--font-size-meta);
     font-weight: 700;
+    line-height: 1.25;
+    text-align: center;
     cursor: pointer;
     transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
-    white-space: nowrap;
+    overflow-wrap: break-word;
     -webkit-tap-highlight-color: transparent;
   }
 
@@ -532,13 +535,6 @@
     .quote-card-dialog {
       padding: 16px;
     }
-    .quote-card-actions {
-      flex-direction: column;
-    }
-    .quote-btn {
-      width: 100%;
-      padding: 11px;
-    }
   }
   @media (min-width: 900px) {
     .quote-card-modal { width:min(860px,calc(100% - var(--space-page)*2)); }
@@ -546,6 +542,5 @@
     .quote-card-header { grid-column:1/-1; margin-bottom:0; }
     .quote-canvas-preview-wrap { grid-column:1; grid-row:2/4; margin-bottom:0; }
     .quote-card-themes { margin-bottom:0; }
-    .quote-card-actions { flex-wrap:wrap; }
   }
 </style>

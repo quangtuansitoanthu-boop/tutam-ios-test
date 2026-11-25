@@ -326,7 +326,7 @@
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" /></svg>
       </button>
       <div class="login-brand">
-        <img src="/assets/branding/tu-tap-logo.png" alt="Tu Tập Phật Pháp" width="56" height="56" />
+        <img src="/assets/branding/temple-icon-192.png" alt="Tu Tập Phật Pháp" width="56" height="56" />
         <h2 id="shared-login-title">{t.session.loginTitle}</h2>
         <p>{t.session.loginDesc}</p>
       </div>

@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { createInterfaceTranslator } from '$lib/i18n/interface';
-  const localizeUi = createInterfaceTranslator();
   import { confirmInApp } from '$lib/browser/app-dialog';
   import { onMount, untrack } from 'svelte';
   import { modalDialog } from '$lib/browser/modal-dialog';
@@ -218,19 +216,6 @@
 
 <main class="quotes-page" aria-labelledby="quotes-title">
   <header class="quotes-hero">
-    <a
-      class="quotes-back-btn tt-back-btn"
-      href="/kinh-sach#reading-library"
-      onclick={(event) => {
-        if (typeof window !== 'undefined' && window.history.length > 1) {
-          event.preventDefault();
-          window.history.back();
-        }
-      }}
-    >
-      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-      <span>{localizeUi('Quay lại')}</span>
-    </a>
     <span>KHÔNG GIAN RIÊNG TƯ</span>
     <h1 id="quotes-title">Trích dẫn của tôi</h1>
     <p>Các đoạn bạn tô sáng và suy ngẫm cá nhân chỉ hiển thị cho tài khoản của bạn.</p>
@@ -320,13 +305,10 @@
 <style>
   .quotes-page{box-sizing:border-box;min-height:70vh;max-width:1000px;margin:0 auto;padding:34px 24px var(--space-page);color:var(--text);font-family:var(--font-app)}
   .quote-card-btn{color:var(--brown) !important;font-weight:700 !important}
-  .quotes-hero{margin-bottom:24px}
-  .quotes-hero>a{display:inline-flex;min-height:44px;align-items:center;gap:6px;padding:0 14px;border:1px solid var(--border);border-radius:999px;background:var(--card);color:var(--text2);font-size:var(--font-size-label);font-weight:700;text-decoration:none;box-shadow:var(--shadow-sm);transition:background .15s,border-color .15s,color .15s}
-  .quotes-hero>a:hover{background:var(--gold-light);border-color:var(--gold);color:var(--brown)}
-  :global([data-theme='dark']) .quotes-hero>a{background:rgba(200,150,62,.12);border-color:rgba(200,150,62,.28);color:var(--gold2)}
-  .quotes-hero>span{display:block;margin-top:15px;color:var(--brown);font-size:var(--font-size-meta);font-weight:700;letter-spacing:2px}
-  .quotes-hero h1{margin:5px 0 6px;font-size:clamp(1.35rem,3vw,1.85rem);line-height:1.25}
-  .quotes-hero p{max-width:620px;margin:0;color:var(--muted);line-height:1.6}
+  .quotes-hero{margin-bottom:24px;text-align:center}
+  .quotes-hero>span{display:block;color:var(--brown);font-size:var(--font-size-meta);font-weight:700;letter-spacing:2px}
+  .quotes-hero h1{margin:5px 0 6px;font-size:var(--font-size-section-title);line-height:1.25}
+  .quotes-hero p{max-width:620px;margin:0 auto;color:var(--text2);line-height:1.6}
   .quotes-login,.quotes-empty{padding:46px 24px;border:1px dashed var(--border);border-radius:16px;background:var(--bg2);text-align:center}
   .quotes-login>span,.quotes-empty>span{font-size:38px}
   .quotes-login h2,.quotes-empty h2{margin:10px 0 5px}
