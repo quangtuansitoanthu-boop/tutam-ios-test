@@ -53,6 +53,11 @@ export async function useNativeApiWithLocalBackend(page: Page, locale: 'vi' | 'e
   return fetchLocal;
 }
 
+export async function deferStartupNotification(page: Page): Promise<void> {
+  const prompt = page.getByRole('dialog', { name: /^(Thông báo tu tập|Practice notifications)$/ });
+  await page.addLocatorHandler(prompt, () => prompt.getByRole('button', { name: /^(Để sau|Maybe later)$/ }).click());
+}
+
 export async function beginScriptureCopying(page: Page): Promise<void> {
   await page.getByTestId('start-copying').click();
   await expect(page.getByTestId('copying-preparation')).toBeVisible();

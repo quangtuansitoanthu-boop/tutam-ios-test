@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { loginAsAdmin, loginAsMember, settleClient, logoutThroughAccount } from './runtime-helpers';
 
 test('guest notice banner displays for unauthenticated visitors and re-appears on every visit', async ({ page }) => {
+  await page.context().grantPermissions(['notifications']);
   await page.goto('/');
   await settleClient(page);
 

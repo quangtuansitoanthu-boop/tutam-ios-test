@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 import { translations } from '../../src/lib/i18n/translations';
 
 const tools = [
@@ -21,6 +21,7 @@ async function expectAction(page: Page, action: string | null) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
   await page.addInitScript(({ key, value }) => {
     localStorage.setItem('tutam_locale', 'vi');
     if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
@@ -144,7 +145,7 @@ test('category and article links preserve their existing parameters through Back
   await page.goForward();
   await expect.poll(() => new URL(page.url()).searchParams.get('muc')).toBe('kinh');
   await expect(page.locator('.tt-section-view[data-practice-route-back]')).toBeVisible();
-  await expect(page.getByRole('banner').getByRole('button', { name: 'Quay lại', exact: true })).toBeVisible();
+  await expect(page.locator('.qts-nav').getByRole('button', { name: 'Quay lại', exact: true })).toBeVisible();
   await page.locator('.tt-card-title').first().click();
   await expect(page.locator('.tt-preview')).toBeVisible();
   const articleId = new URL(page.url()).searchParams.get('article');
@@ -152,7 +153,7 @@ test('category and article links preserve their existing parameters through Back
   expect(new URL(page.url()).searchParams.get('muc')).toBe('kinh');
   await page.goBack();
   await expect(page.locator('.tt-section-view[data-practice-route-back]')).toBeVisible();
-  await expect(page.getByRole('banner').getByRole('button', { name: 'Quay lại', exact: true })).toBeVisible();
+  await expect(page.locator('.qts-nav').getByRole('button', { name: 'Quay lại', exact: true })).toBeVisible();
   await expect(page.locator('.tt-preview')).toHaveCount(0);
   await page.goForward();
   await expect(page.locator('.tt-preview')).toBeVisible();

@@ -188,6 +188,7 @@
   .admin-overview-header { align-items: stretch; flex-direction: column; gap: 12px; }
   .admin-overview-header > div:last-child { align-items: flex-start; }
   .admin-overview-header .admin-overview-actions { display: flex; width: auto; }
+  .admin-analytics .admin-overview-actions { flex-wrap: wrap; justify-content: flex-start; }
   .admin-overview-header .admin-refresh-button { width: auto; min-width: 120px; align-self: flex-start; }
   .admin-analytics__grid,
   .admin-analytics__grid--content,

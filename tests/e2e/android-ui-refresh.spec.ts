@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { deferStartupNotification } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 test('greeting, calendar, and a single quote follow the requested order', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -10,7 +13,8 @@ test('greeting, calendar, and a single quote follow the requested order', async 
   const veganBanner = page.getByRole('link', { name: 'Lịch ăn chay đủ dinh dưỡng', exact: true });
   await expect(giftBanner).toHaveClass(/\bpbb-compact\b/);
   await expect(page.locator('.home-container > :nth-child(3)')).toHaveClass(/\bpbb-compact--vegan\b/);
-  await expect(page.locator('.home-container > :nth-child(4)')).toHaveClass(/\bhome-calendar\b/);
+  await expect(page.locator('.home-container > :nth-child(4)')).toHaveClass(/\brefuge-release-banner\b/);
+  await expect(page.locator('.home-container > :nth-child(5)')).toHaveClass(/\bhome-calendar\b/);
   for (const width of [320, 375, 1440]) for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width, height: 844 });
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
@@ -32,7 +36,7 @@ test('greeting, calendar, and a single quote follow the requested order', async 
   await expect(page).toHaveURL(/\/tu-tap\/an-chay$/u);
   await expect(page.getByRole('heading', { name: 'Lịch ăn chay đủ dinh dưỡng', exact: true })).toBeVisible();
   await expect(page.locator('.vegan .heading a')).toHaveCount(0);
-  await page.locator('.qts-route-topbar').getByRole('button', { name: 'Quay lại', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true }).getByRole('button', { name: 'Quay lại', exact: true }).click();
   await expect(page).toHaveURL('/');
   await expect(veganBanner).toBeVisible();
 });
@@ -49,7 +53,16 @@ test('feast portraits are date-specific while ordinary days use scenery and just
   await page.goto('/?calendarDate=2026-02-18');
   await expect(calendar.locator('img')).toHaveAttribute('src',/^\/images\/calendar\/[^/]+\.webp$/);
   await expect(calendar.locator('.art-shuffle-btn')).toBeVisible();
-  expect(await page.locator('.global-presence-pill').evaluate(el=>parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(13);
+  const presence = page.locator('.global-presence-pill');
+  const labelSize = await presence.evaluate(element => {
+    const label = document.createElement('span');
+    label.style.fontSize = 'var(--font-size-label)';
+    element.append(label);
+    const size = getComputedStyle(label).fontSize;
+    label.remove();
+    return size;
+  });
+  await expect(presence).toHaveCSS('font-size', labelSize);
 });
 
 test('Thập Trai calendar artwork rotates within the lay practitioner collection', async ({ page }) => {

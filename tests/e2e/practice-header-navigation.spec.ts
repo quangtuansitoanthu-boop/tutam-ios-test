@@ -1,16 +1,18 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 
-test('cold practice header Back returns home without reloading the document', async ({ page }) => {
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
+
+test('cold practice subpage Back returns to the hub without reloading the document', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 844 });
-  await page.goto('/tu-tap');
+  await page.goto('/tu-tap/an-chay');
   await settleClient(page);
   await page.evaluate(() => {
     Object.defineProperty(window.history, 'length', { configurable: true, get: () => 1 });
     (window as Window & { practiceBackDocumentMarker?: boolean }).practiceBackDocumentMarker = true;
   });
-  await page.locator('.tt-topbar .tt-back-btn').click();
-  await expect(page).toHaveURL(/\/$/u);
+  await page.locator('.qts-nav').getByRole('button', { name: 'Quay lại', exact: true }).click();
+  await expect(page).toHaveURL(/\/tu-tap$/u);
   await settleClient(page);
   expect(await page.evaluate(() =>
     (window as Window & { practiceBackDocumentMarker?: boolean }).practiceBackDocumentMarker,
@@ -29,7 +31,7 @@ test('practice header Back keeps an active tool callback ahead of route fallback
       onBack: () => { state.practiceBackCallbackCount = (state.practiceBackCallbackCount ?? 0) + 1; },
     } }));
   });
-  await page.locator('.tt-topbar .tt-back-btn').click();
+  await page.locator('.qts-nav').getByRole('button', { name: 'Quay lại', exact: true }).click();
   await expect(page).toHaveURL(/\/tu-tap$/u);
   expect(await page.evaluate(() =>
     (window as Window & { practiceBackCallbackCount?: number }).practiceBackCallbackCount,
@@ -37,14 +39,14 @@ test('practice header Back keeps an active tool callback ahead of route fallback
 });
 
 test('practice header Back preserves existing browser history navigation', async ({ page }) => {
-  await page.goto('/tu-tap');
+  await page.goto('/tu-tap/an-chay');
   await settleClient(page);
   await page.evaluate(() => {
     (window as Window & { practiceBackDocumentMarker?: boolean }).practiceBackDocumentMarker = true;
-    window.history.pushState(window.history.state, '', '/tu-tap?headerHistory=1');
+    window.history.pushState(window.history.state, '', '/tu-tap/an-chay?headerHistory=1');
   });
-  await page.locator('.tt-topbar .tt-back-btn').click();
-  await expect(page).toHaveURL(/\/tu-tap$/u);
+  await page.locator('.qts-nav').getByRole('button', { name: 'Quay lại', exact: true }).click();
+  await expect(page).toHaveURL(/\/tu-tap\/an-chay$/u);
   expect(await page.evaluate(() =>
     (window as Window & { practiceBackDocumentMarker?: boolean }).practiceBackDocumentMarker,
   )).toBe(true);

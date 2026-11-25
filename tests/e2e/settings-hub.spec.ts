@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 test('legacy practice slots with duplicate IDs remain editable without rewriting stored data', async ({ page }) => {
   await page.addInitScript(() => {

@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { userTestimonials } from '../../src/lib/i18n/user-testimonials';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 
 for (const theme of ['light', 'dark'] as const) {
   test(`full user stories preserve separate authors and personal navigation (${theme})`, async ({ page }, testInfo) => {
+    await deferStartupNotification(page);
     await page.setViewportSize({ width: 375, height: 900 });
     await page.addInitScript(({ theme }) => {
       localStorage.setItem('tutam_locale', 'vi');
@@ -22,7 +23,7 @@ for (const theme of ['light', 'dark'] as const) {
     const initial = [...requests];
     await page.getByRole('button', { name: /Chia sẻ từ người dùng/ }).click();
     await expect(page).toHaveURL(/tab=testimonials/);
-    await expect(page).toHaveTitle('Chia sẻ từ người dùng — Quang Từ');
+    await expect(page).toHaveTitle('Chia sẻ từ người dùng — Tu Tập Phật Pháp');
     const stories = page.locator('.cn-testimonials article');
     await expect(stories).toHaveCount(8);
     expect(await stories.first().evaluate(element => getComputedStyle(element).backdropFilter)).not.toBe('none');
@@ -46,7 +47,8 @@ for (const theme of ['light', 'dark'] as const) {
     }
     expect(requests).toEqual(initial);
     await page.context().setOffline(false);
-    await page.locator('.cn-subpage-back-btn').click();
+    await page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true })
+      .getByRole('button', { name: 'Quay lại', exact: true }).click();
     await expect(page.getByRole('button', { name: /Liên hệ & Góp ý/ })).toBeVisible();
     await page.getByRole('button', { name: /Liên hệ & Góp ý/ }).click();
     await expect(page.getByRole('heading', { name: 'Liên hệ & Góp ý', exact: true })).toBeVisible();

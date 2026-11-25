@@ -1,7 +1,8 @@
-import { beginScriptureCopying } from './runtime-helpers';
+import { beginScriptureCopying, deferStartupNotification } from './runtime-helpers';
 import { test, expect, type Page } from '@playwright/test';
 import book from '../../src/lib/data/scripture-copying/dia-tang.json' with { type: 'json' };
 import { normalizeCopyText } from '../../src/lib/domain/practice/scripture-copying';
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 async function acceptAppConfirm(page: Page, message: string) {
   const dialog = page.locator('dialog[data-app-message]');
@@ -322,7 +323,7 @@ for (const width of [375, 1440]) test(`idle completion respects composition and 
 test('finishing a passage with Enter advances once and preserves the completed draft', async ({ page }) => {
   const requests: string[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname === '/api/practice/copying') requests.push(request.method()); });
-  await page.goto('/tu-tap/chep-kinh');
+  await page.goto('/tu-tap/chep-kinh', { waitUntil: 'domcontentloaded' });
   await beginScriptureCopying(page);
   const input = page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true });
   const completed = normalizeCopyText(book.chapters[0].blocks[0]);
@@ -339,7 +340,7 @@ test('finishing a passage with Enter advances once and preserves the completed d
   await input.pressSequentially('Bản chép đoạn tiếp theo');
   await expect(page.getByText('Đã lưu trên máy', { exact: true })).toBeVisible();
   page.on('dialog', dialog => dialog.accept());
-  await page.reload();
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await beginScriptureCopying(page);
   await expect(page.locator('#copy-block')).toHaveValue('1');
   await expect(input).toHaveText('Bản chép đoạn tiếp theo');
@@ -379,7 +380,8 @@ test('three-step copying expands the editor and preserves local text when choosi
   await expect(input).toHaveCount(0);
   await beginScriptureCopying(page);
   await expect(input).toBeVisible();
-  await expect(page.locator('.tt-topbar')).toBeHidden();
+  const navigation = page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true });
+  await expect(navigation).toBeHidden();
   await expect(page.getByRole('navigation', { name: 'Điều hướng nhanh' })).toBeHidden();
   const before = (await input.boundingBox())!;
   await page.getByRole('button', { name: 'Thu gọn', exact: true }).click();
@@ -390,7 +392,7 @@ test('three-step copying expands the editor and preserves local text when choosi
   await expect(page.getByText('Đã lưu trên máy', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Đổi kinh hoặc phẩm', exact: true }).click();
   await expect(input).toHaveCount(0);
-  await expect(page.locator('.tt-topbar')).toBeVisible();
+  await expect(navigation).toBeVisible();
   await beginScriptureCopying(page);
   await expect(input).toHaveText('Nam mô Phật');
   await page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true }).click();

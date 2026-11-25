@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs';
 import { copySourceText } from '../../src/lib/domain/practice/copying-formatting';
 import { normalizeCopyText } from '../../src/lib/domain/practice/scripture-copying';
 import { copyingBlockCompleted, copyingTextCompletion } from '../../src/lib/domain/practice/copying-completion-progress';
-import { beginScriptureCopying, loginAsAdmin } from './runtime-helpers';
+import { beginScriptureCopying, deferStartupNotification, loginAsAdmin } from './runtime-helpers';
 const book = JSON.parse(readFileSync(new URL('../../src/lib/data/scripture-copying/dia-tang.json', import.meta.url), 'utf8'));
 
 const editorFor = (page: Page) => page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true });
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 function longImperfectDraft(): string {
   const source = normalizeCopyText(book.chapters[0].blocks[0]);
@@ -295,7 +296,7 @@ test('administrator can copy and paste the entire reference into its matching pa
   await page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true }).click();
   await page.getByRole('button', { name: 'Sao chép toàn bộ kinh mẫu', exact: true }).click();
   const copyStatus = page.getByRole('dialog', { name: 'Cài đặt chép kinh', exact: true })
-    .locator('.mobile-save-feedback[role="status"]');
+    .getByRole('status').filter({ hasText: 'Đã sao chép toàn bộ kinh mẫu của phẩm/quyển.' });
   await expect(copyStatus).toHaveText('Đã sao chép toàn bộ kinh mẫu của phẩm/quyển.');
   await expect(copyStatus).toBeVisible();
   const closeOptions = page.getByRole('button', { name: 'Đóng tùy chọn', exact: true });

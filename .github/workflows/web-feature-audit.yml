@@ -55,7 +55,7 @@ jobs:
           const report = JSON.parse(fs.readFileSync(reportPath,'utf8'));
           const rows=[];
           const visit=s=>{
-            for(const t of s.specs ?? []) for(const r of t.tests) rows.push({ file:t.file, line:t.line, title:t.title, project:r.projectName, status:r.status, outcome:r.results.map(x=>x.status) });
+            for(const t of s.specs ?? []) for(const r of t.tests) rows.push({ file:t.file, line:t.line, title:t.title, project:r.projectName, status:r.status, outcome:r.results.map(x=>x.status),error:r.results.find(x=>x.error)?.error?.message?.slice(0,1600) });
             for(const child of s.suites ?? []) visit(child);
           };
           for(const suite of report.suites ?? []) visit(suite);

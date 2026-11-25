@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import { loginAsMember, settleClient, TEST_MEMBER_ID } from './runtime-helpers';
+import { deferStartupNotification, loginAsMember, settleClient, TEST_MEMBER_ID } from './runtime-helpers';
 import { MINDFUL_REACTION_TEMPLATES } from '../../src/lib/contracts/mindful-community';
 
 const inboxPath = '/api/practice/mindful-notifications';
 const errors = new WeakMap<Page, string[]>();
-test.beforeEach(({ page }) => {
+test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
   const messages: string[] = []; errors.set(page, messages);
   page.on('pageerror', error => messages.push(error.message));
 });
@@ -63,8 +64,9 @@ for (const width of [375, 1440]) {
     expect(reads).toBe(1);
     expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? '[]'), `quangtu_notifications_read_${TEST_MEMBER_ID}`)).toEqual(expect.arrayContaining([`mindful-reaction:${prayer.id}`, `mindful-reaction:${rejoice.id}`]));
     await page.locator('.notification-popover .close-popover-btn').click();
-    await page.getByRole('button', { name: 'Giao diện Sáng/Tối', exact: true }).click();
+    await page.getByRole('button', { name: 'Chuyển sang chế độ tối', exact: true }).click();
     await page.locator('.notification-bell-btn').click();
+    await page.getByRole('tab', { name: 'Tất cả', exact: true }).click();
     await expect(rows).toHaveCount(2);
     await page.screenshot({ path: info.outputPath('account-notifications-dark.png'), animations: 'disabled' });
     expect(reads).toBe(1);

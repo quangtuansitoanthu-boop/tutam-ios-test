@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import manifest from '../../src/lib/data/mission-book-images.json' with { type: 'json' };
 import videoManifest from '../../src/lib/data/quang-tu-facebook-videos.json' with { type: 'json' };
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 import mobileImages from '../../assets/book-content/mobile-image-variants.json' with { type: 'json' };
 
 test('old book HTML still opens illustrations after mobile asset compression', async ({ page }) => {
@@ -57,6 +57,7 @@ for (const id of ['tt_1781528855960', 'tt_1783429280091_jcrra', 'tt_178152836516
 }
 
 async function openNativeBook(page: Page, loaded = false): Promise<void> {
+  await deferStartupNotification(page);
   await page.route('**/api/**', route => route.abort('failed'));
   if (!loaded) await page.goto('/');
   await expect(page.locator('.daily-dhammapada-card')).toBeVisible();

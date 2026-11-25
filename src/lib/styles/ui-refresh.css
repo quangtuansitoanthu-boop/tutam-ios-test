@@ -442,7 +442,8 @@ html:root body .pt-tab.active:not(.pt-tab-offline) small {
   background: rgba(36, 24, 12, 0.14);
   color: var(--on-gold);
 }
-html:root body :is(.day-col.is-selected, .month-day-cell.is-selected) :is(.day-weekday, .day-solar-num, .day-lunar-num) {
+html:root body .day-col.is-selected :is(.day-weekday, .day-solar-num, .day-lunar-num),
+html:root body .month-day-cell.is-selected :is(.month-cell-solar, .month-cell-lunar) {
   color: var(--on-gold);
 }
 

@@ -1,9 +1,14 @@
 import { expect, test } from '@playwright/test';
+import { settleClient } from './runtime-helpers';
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.route('**/api/**', (route) => route.abort('failed'));
-  await page.goto('/huong-dan#cong-cu-tu-tap', { waitUntil: 'networkidle' });
+  await page.goto('/huong-dan#cong-cu-tu-tap', { waitUntil: 'domcontentloaded' });
+  await settleClient(page);
+  const prompt = page.getByRole('dialog', { name: 'Thông báo tu tập', exact: true });
+  await prompt.getByRole('button', { name: 'Để sau', exact: true }).click();
+  await expect(prompt).toHaveCount(0);
 });
 
 test('guide confirmation traps focus and Escape returns to its link without navigation', async ({ page }) => {
@@ -48,6 +53,7 @@ test('guide confirmation still follows the selected destination only after confi
   const trigger = page.locator('#cong-cu-tu-tap .guide-link-card a[href="/tu-tap?mode=le-phat"]');
   await trigger.click();
   await page.locator('.guide-confirm-dialog .guide-btn-confirm').click();
-  await expect(page).toHaveURL(/\/tu-tap\?mode=le-phat$/);
+  await expect(page).toHaveURL(/\/tu-tap\?action=le-phat$/);
+  await expect(page.getByRole('button', { name: 'Vị Phật trước', exact: true })).toBeVisible();
   await expect(page.locator('.guide-confirm-scrim')).toHaveCount(0);
 });

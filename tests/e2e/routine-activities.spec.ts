@@ -3,8 +3,8 @@ import { loginAsMember, TEST_MEMBER_ID } from './runtime-helpers';
 
 const settingsKey = 'quangtu_principal_v1:anonymous:tt_personal_settings_v1';
 const modes = [
-  'Thiền định', 'Lần tràng hạt', 'Lễ Phật & Sám Hối', 'Chép kinh', 'Chép danh hiệu Phật, Bồ Tát',
-  'Giữ giới thanh tịnh', 'Thọ Bát quan trai giới', 'Tiết dục bảo thân', 'Tụng, đọc kinh', 'Trì chú', 'Nghi thức khác',
+  'Thiền định', 'Lần tràng hạt', 'Lễ Phật & Sám Hối', 'Tụng, đọc kinh', 'Trì chú', 'Nghi thức khác',
+  'Chép kinh', 'Chép danh hiệu Phật, Bồ Tát', 'Giữ giới thanh tịnh', 'Thọ Bát quan trai giới', 'Tiết dục bảo thân',
 ];
 
 async function openEditor(page: Page) {
@@ -27,6 +27,8 @@ test('routine copy selections open the chosen tools and keep the legacy step for
   const editor = await openEditor(page);
   await editor.getByRole('button', { name: 'Tạo thời khóa mới', exact: true }).click();
   const draft = page.getByRole('dialog', { name: 'Tạo thời khóa mới', exact: true });
+  const routineName = 'Hai bước biên chép';
+  await draft.getByRole('textbox', { name: 'Tên thời khóa' }).fill(routineName);
   const add = async (name: string) => {
     await draft.getByRole('combobox', { name: 'Thêm bước' }).click();
     await page.getByRole('dialog', { name: 'Thêm bước' }).getByRole('button', { name, exact: true }).click();
@@ -38,9 +40,9 @@ test('routine copy selections open the chosen tools and keep the legacy step for
   await draft.getByRole('combobox', { name: 'Chọn danh hiệu' }).click();
   await page.getByRole('dialog', { name: 'Chọn danh hiệu' }).getByRole('button', { name: /Quán Thế Âm/i }).click();
   await draft.getByRole('button', { name: 'Lưu thời khóa', exact: true }).click();
-  const steps = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).routines[0].steps, settingsKey);
+  const steps = await page.evaluate(({ key, name }) => JSON.parse(localStorage.getItem(key)!).routines.find((r: { name: string }) => r.name === name).steps, { key: settingsKey, name: routineName });
   expect(steps.map((step: { sourceId: string }) => step.sourceId)).toEqual(['routine-v1:scripture-copying', 'routine-v1:name-copying']);
-  await startSavedRoutine(page, 'Thời khoá sáng');
+  await startSavedRoutine(page, routineName);
   await expect(page).toHaveURL(/chep-kinh/);
   await expect(page.getByRole('button', { name: /KINH DIỆU PHÁP LIÊN HOA/i }).first()).toHaveAttribute('aria-pressed', 'true');
   await page.goBack();
@@ -60,6 +62,8 @@ for (const width of [375, 1100]) {
     const editor = await openEditor(page);
     await editor.getByRole('button', { name: 'Tạo thời khóa mới', exact: true }).click();
     const draft = page.getByRole('dialog', { name: 'Tạo thời khóa mới', exact: true });
+    const routineName = 'Phát nguyện và trì chú';
+    await draft.getByRole('textbox', { name: 'Tên thời khóa' }).fill(routineName);
     const picker = page.getByRole('dialog', { name: 'Thêm bước', exact: true });
     const openPicker = () => draft.getByRole('combobox', { name: 'Thêm bước', exact: true }).click();
     await openPicker();
@@ -77,10 +81,10 @@ for (const width of [375, 1100]) {
     await page.getByRole('dialog', { name: 'Chọn bài chú' }).getByRole('button', { name: 'NGHI THỨC TRÌ TỤNG CHÚ ĐẠI BI', exact: true }).click();
     await draft.getByRole('button', { name: 'Lưu thời khóa', exact: true }).click();
     await expect(editor.getByRole('status')).toHaveText('Đã lưu thời khóa trên thiết bị.');
-    const steps = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).routines[0].steps, settingsKey);
+    const steps = await page.evaluate(({ key, name }) => JSON.parse(localStorage.getItem(key)!).routines.find((r: { name: string }) => r.name === name).steps, { key: settingsKey, name: routineName });
     expect(steps.map((step: { kind: string }) => step.kind)).toEqual(['dedication', 'dedication']);
     expect(steps[1].sourceId).toBe('routine-v1:mantra:tt_1781274943336');
-    await startSavedRoutine(page, 'Thời khoá sáng');
+    await startSavedRoutine(page, routineName);
     const transition = page.getByRole('dialog', { name: 'Hành trì thời khóa' });
     await expect(transition.locator('.routine-reading__verse .heading')).toHaveText([
       'LỜI NGUYỆN TRƯỚC KHI TỤNG KINH', 'SÁM OAN GIA TRÁI CHỦ',
@@ -261,7 +265,7 @@ for (const step of otherSteps) {
     if (step.mode === 'name-copying') {
       await transition.getByRole('button', { name: 'Mở lại bước' }).click();
       await expect(page.locator('#name-line-0')).toHaveValue('NAM MÔ A');
-      await page.locator('.tt-topbar .tt-back-btn').click();
+      await page.locator('nav.qts-nav').getByRole('button', { name: 'Quay lại', exact: true }).click();
     }
     await transition.getByRole('button', { name: 'Hoàn tất bước', exact: true }).click();
     await expect(transition).toHaveCount(0);

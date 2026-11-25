@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+import { fixtureEnglishPack } from './helpers/personal-journal-zen';
 
 for (const [name, width, height, dark, english] of [
   ['phone light', 375, 812, false, false],
@@ -20,7 +21,9 @@ for (const [name, width, height, dark, english] of [
     page.on('pageerror', error => errors.push(error.message));
     // Nội dung phải đọc được khi backend không truy cập được.
     await page.route(url => url.pathname.startsWith('/api/'), route => route.abort());
-    await page.goto('/');
+    if (english) await fixtureEnglishPack(page);
+    await deferStartupNotification(page);
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await settleClient(page);
     const title = english ? 'Short refuge & life release ritual' : 'Bài quy y & phóng sinh ngắn';
     const trigger = page.getByRole('button', { name: title, exact: true });
@@ -49,7 +52,7 @@ for (const [name, width, height, dark, english] of [
     await expect(content).toHaveAttribute('lang', 'vi');
     await expect(content.locator('h2')).toHaveCount(2);
     const text = (await content.innerText()).normalize('NFC').replace(/\s+/gu, ' ').trim();
-    expect(createHash('sha256').update(text).digest('hex')).toBe('7467ca96c332d27079075d802947633fa4f6df98d78fe48ccf1f94d32207edc5');
+    expect(createHash('sha256').update(text).digest('hex')).toBe('5b5fb2578d4ce93736e69d74ec578cdd50fab941eebd08117fef27167303de85');
     await expect(content).toContainText('NGHI THỨC PHÓNG SINH NGẮN GỌN');
     expect(await content.locator('.ritual-verse').first().evaluate(e => getComputedStyle(e).textAlign)).toBe('center');
     expect(await content.locator('p:not(.ritual-verse)').first().evaluate(e => getComputedStyle(e).textAlign)).toBe('justify');
@@ -59,10 +62,20 @@ for (const [name, width, height, dark, english] of [
     }
     expect(await content.evaluate(e => e.scrollWidth > e.clientWidth)).toBe(false);
     const close = dialog.getByRole('button', { name: english ? 'Close reading' : 'Đóng bài đọc' });
+    const decrease = dialog.getByRole('button', { name: english ? 'Decrease font size' : 'Giảm cỡ chữ' });
+    const increase = dialog.getByRole('button', { name: english ? 'Increase font size' : 'Tăng cỡ chữ' });
+    await page.keyboard.press('Tab');
+    await expect(decrease).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(dialog.locator('.ritual-font-val')).toHaveText('16px');
+    await page.keyboard.press('Tab');
+    await expect(increase).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(dialog.locator('.ritual-font-val')).toHaveText('18px');
     await page.keyboard.press('Tab');
     await expect(close).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(close).toBeFocused();
+    await expect(decrease).toBeFocused();
     await page.screenshot({ path: info.outputPath('reading.png') });
     await content.evaluate(e => e.scrollTop = e.scrollHeight);
     await expect(content.locator('p').last()).toContainText('rốt cuộc đều chứng đắc Phật đạo.');

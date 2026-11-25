@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { UI_MOTION_STORAGE_KEY } from '../../src/lib/browser/ui-motion';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 
 for (const width of [375, 1440]) {
   for (const dark of [false, true]) {
@@ -105,6 +105,7 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 667, height: 375 }
 
 for (const platform of ['ios', 'android'] as const) {
   test(`${platform} lifts the picker from the bottom in landscape and respects reduced motion`, async ({ page }) => {
+    await deferStartupNotification(page);
     await page.setViewportSize({ width: 844, height: 390 });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.addInitScript(platform => {

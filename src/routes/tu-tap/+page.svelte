@@ -2278,7 +2278,7 @@
     const tool = toolFromUrl(initialUrl);
     const params = initialUrl.searchParams;
     const targetId = params.get('article') || params.get('book') || params.get('id') || params.get('sach');
-    if (!tool && targetId && catalogLoading && !articles.length) return;
+    if (targetId && catalogLoading && !articles.length) return;
     checkedInitialUrl = true;
     if (tool) {
       initialToolRestoring = true;

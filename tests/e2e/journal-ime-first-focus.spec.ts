@@ -1,20 +1,23 @@
 import {expect,test} from '@playwright/test';
-import {settleClient} from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+import { openJournalSection } from './helpers/journal-controls';
 for(const width of [411,900])for(const dark of [false,true]){
   test(`journal caret follows first IME resize without manual scroll-to-end ${width} ${dark}`,async({page})=>{
     await page.setViewportSize({width,height:814});
+    await deferStartupNotification(page);
     await page.addInitScript(dark=>{localStorage.setItem('tt_reflection_guide_seen_v1','1');localStorage.setItem('tutam_dark_mode',dark?'1':'0');},dark);
     await page.route('**/api/**',route=>route.fulfill({json:new URL(route.request().url()).pathname==='/api/session'?{authenticated:false,user:null,csrfToken:null,expiresAt:null}:new URL(route.request().url()).pathname==='/api/presence'?{enabled:false,activeCount:0}:[]}));
-    await page.goto('/tu-tap');await settleClient(page);
+    await page.goto('/tu-tap', {waitUntil:'domcontentloaded'});await settleClient(page);
     await page.evaluate(()=>{document.documentElement.dataset.nativeApp='true';});
     await page.locator('.tt-mode-card--reflection').click();
     const guideToggle = page.locator('.guide-toggle-button');
     await expect(guideToggle).toHaveAttribute('aria-expanded', 'true');
     await guideToggle.click();
-    const fields=page.locator('.personal-journal .journal-columns textarea');
-    for(const index of [0,1]){
+    const journal=page.locator('.personal-journal');
+    for(const id of ['repentance','good-deed'] as const){
       await page.setViewportSize({width,height:814});
-      const field=fields.nth(index),value='Con nhìn lại lời nói và việc làm trong ngày. '.repeat(40)+'Dòng đang gõ cuối cùng.';
+      const section=await openJournalSection(journal,id,width===411);
+      const field=section.locator('textarea'),value='Con nhìn lại lời nói và việc làm trong ngày. '.repeat(40)+'Dòng đang gõ cuối cùng.';
       await field.fill(value);
       await field.press('Control+End');
       await page.setViewportSize({width,height:526});

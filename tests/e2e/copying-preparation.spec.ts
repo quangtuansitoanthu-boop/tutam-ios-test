@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { deferStartupNotification } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 for (const locale of ['vi', 'en'] as const) {
   test(`copying preparation ${locale} keeps drafts and adds no cloud requests`, async ({ page }, testInfo) => {
@@ -49,7 +52,9 @@ for (const locale of ['vi', 'en'] as const) {
     await expect(guide).toBeVisible();
     await expect(expand()).toHaveAttribute('aria-expanded', 'false');
     await expect(editor).toHaveCount(0);
-    await page.locator('.tt-topbar .tt-back-btn').click();
+    const back = page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true })
+      .getByRole('button', { name: locale === 'vi' ? 'Quay lại' : 'Back', exact: true });
+    await back.click();
     await page.locator('.books button').first().click();
     await expect(guide).toBeVisible();
     await page.getByTestId('confirm-copying-guide').click();
@@ -60,9 +65,13 @@ for (const locale of ['vi', 'en'] as const) {
       const title = await book.locator('strong').innerText();
       await book.click();
       await expect(guide).toBeVisible();
-      await expect(page.locator('.choose-header > p')).toHaveText(title);
+      for (const heading of [page.locator('.choose-header > p'), page.locator('#copy-preparation-book')]) {
+        await expect(heading).toHaveText(title, { useInnerText: true });
+        await expect(heading).toHaveCSS('text-align', 'center');
+        await expect(heading).toHaveCSS('font-weight', '700');
+      }
       await expect(guide.locator('section')).toHaveCount(6);
-      await page.locator('.tt-topbar .tt-back-btn').click();
+      await back.click();
     }
     expect(cloudRequests).toEqual([]);
   });

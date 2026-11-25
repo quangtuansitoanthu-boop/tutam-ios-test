@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
+import { deferStartupNotification, settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
 
 for (const width of [375, 1440]) {
   for (const dark of [false, true]) {
@@ -21,12 +21,13 @@ for (const width of [375, 1440]) {
       await expect(page.locator('#library-category')).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await quotes.click();
-      await page.getByRole('link', { name: /Quay lại/ }).click();
+      await page.getByRole('navigation', { name: 'Tu Tập Phật Pháp' }).getByRole('button', { name: 'Quay lại', exact: true }).click();
       await expect(page).toHaveURL(/\/kinh-sach/);
     });
     test(`native ambient has no download or delete controls ${width} ${dark}`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 900 });
       await useNativeApiWithLocalBackend(page);
+      await deferStartupNotification(page);
       await page.addInitScript(value => {
         localStorage.setItem('tutam_dark_mode', value ? '1' : '0');
         Object.assign(globalThis, { Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android' } });

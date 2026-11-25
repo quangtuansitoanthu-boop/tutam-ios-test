@@ -30,7 +30,10 @@ test('two independent devices share read status and keep the approved bubble lay
     expect((await fetched).ok()).toBe(true);
     await expect(b.locator('.notification-popover .notification-item.unread')).toHaveCount(0);
     await expect(b.locator('.notification-badge')).toHaveCount(0);
-    await expect(b.locator('.notification-popover .notification-item')).not.toHaveCount(0);
+    await b.getByRole('tab', { name: 'Tất cả', exact: true }).click();
+    const synced = b.locator('.notification-popover .mindful-item').filter({ hasText: 'Đồng tu kiểm thử' });
+    await expect(synced).toBeVisible();
+    await expect(synced).not.toHaveClass(/unread/);
     await aPanel.screenshot({ path: '.cache/notification-approved-mobile.png' });
     await b.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await b.locator('.notification-popover').screenshot({ path: '.cache/notification-approved-desktop-dark.png' });

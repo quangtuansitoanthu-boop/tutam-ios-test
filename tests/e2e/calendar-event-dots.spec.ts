@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 // 17/02/2026 là Mùng 1 Tết: Thập trai, vía Di Lặc, Thọ Khang và lễ cá nhân minh họa cùng ngày.
 const personal = { id: 'calendar-dot-personal', title: 'Kỷ niệm kiểm thử', type: 'gia-dinh', calendarMode: 'solar', solarDay: 17, solarMonth: 2, lunarDay: 1, lunarMonth: 1, frequency: 'yearly', createdAt: '2026-01-01T00:00:00Z' };

@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 const modes = [
   { kind:'thien', screen:'.meditation-chooser', controls:'.meditation-chooser__actions button,.meditation-chooser__tabs button,.meditation-sound-picker__tile,.meditation-chooser__check', back:'.meditation-chooser__actions button:first-child' },
@@ -19,7 +21,7 @@ for (const section of ['kinh', 'tri-chu', 'nghi-thuc']) {
     await page.goto(`/tu-tap?muc=${section}`);
     await expect(page.locator('.tt-section-view')).toBeVisible();
     await expect(page.locator('.tt-section-view .tt-back-btn')).toHaveCount(0);
-    await page.locator('.tt-topbar .tt-back-btn').click();
+    await page.locator('.qts-nav .nav-back-circle-btn').click();
     await expect(page.locator('.tt-mode-card--thien')).toBeVisible();
     await expect(page.locator('.tt-section-view')).toHaveCount(0);
     await expect(page).toHaveURL(/\/tu-tap$/);
@@ -35,7 +37,7 @@ for (const hash of ['#tri-chu', '#notes']) {
       history.pushState({}, '', `/tu-tap?category=tri-chu&keep=1${fragment}`);
       window.dispatchEvent(new PopStateEvent('popstate'));
     }, hash);
-    await page.locator('.tt-topbar .tt-back-btn').click();
+    await page.locator('.qts-nav .nav-back-circle-btn').click();
     await expect(page.locator('.tt-mode-card--thien')).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/tu-tap\\?keep=1${hash === '#notes' ? '#notes' : ''}$`));
   });
@@ -109,7 +111,7 @@ for (const width of [360, 390]) for (const mode of modes) {
     }
     if (mode.back || ['kinh','tri-chu','nghi-thuc','rec'].includes(mode.kind)) {
       if (mode.back) await screen.locator(mode.back).click();
-      else await page.locator('.tt-topbar .tt-back-btn').click();
+      else await page.locator('.qts-nav .nav-back-circle-btn').click();
       await expect(page.locator('.tt-mode-card--thien')).toBeVisible();
       await expect(screen).toHaveCount(0);
     }
@@ -139,12 +141,12 @@ for (const width of [360,390]) for (const safeTop of [0,44]) {
     const actions = page.locator('.tt-section-topbar .tt-create-btn');
     await expect(actions).toHaveCount(0);
     await expect(page.locator('.tt-section-topbar .tt-back-btn')).toHaveCount(0);
-    await expect(page.locator('.tt-topbar .tt-back-btn')).toBeVisible();
+    await expect(page.locator('.qts-nav .nav-back-circle-btn')).toBeVisible();
     await expect(page.locator('.tt-card-edit,.tt-card-delete')).toHaveCount(0);
     const firstArticle = page.locator('.tt-section-view .tt-card').first();
     await expect(firstArticle).toBeVisible();
     await expect.poll(() => page.evaluate(() => {
-      const header = document.querySelector('.tt-topbar')!.getBoundingClientRect();
+      const header = document.querySelector('.qts-nav')!.getBoundingClientRect();
       return [...document.querySelectorAll('.tt-section-view .tt-card')].slice(0, 1).every((button) => {
         const r = button.getBoundingClientRect();
         return r.top >= header.bottom && r.x >= 0 && r.right <= innerWidth

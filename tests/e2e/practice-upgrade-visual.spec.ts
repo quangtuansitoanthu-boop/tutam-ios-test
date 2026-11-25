@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 for (const dark of [false, true]) {
   test(`new practice panels and existing picker remain consistent at 375px, dark=${dark}`, async ({ page }, info) => {
@@ -35,7 +37,7 @@ for (const dark of [false, true]) {
     await mkdir('.artifacts', { recursive: true });
     await page.evaluate(() => scrollTo(0, 0));
     await page.screenshot({ path: `.artifacts/practice-upgrade-journal-${dark ? 'dark' : 'light'}.png`, fullPage: true });
-    await page.locator('.tt-topbar .tt-back-btn').click();
+    await page.locator('.qts-nav .nav-back-circle-btn').click();
     await page.getByRole('button', { name: /^Thời khóa tu tập/u }).click();
     await page.getByRole('button', { name: 'Tạo thời khóa mới', exact: true }).click();
     const pickerRequests: string[] = [];

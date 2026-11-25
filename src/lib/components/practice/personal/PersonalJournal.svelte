@@ -948,7 +948,8 @@
   }
   .snippet-pill {
     flex-shrink: 0;
-    min-height: 38px;
+    min-width: var(--touch-target-size);
+    min-height: var(--touch-target-size);
     padding: 4px 12px;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -979,7 +980,7 @@
   .journal-textarea {
     --journal-nav-clearance: 0px;
     width: 100%;
-    min-height: calc(var(--space-page) * 13 + var(--journal-nav-clearance));
+    min-height: calc(var(--space-page) * 14 + var(--journal-nav-clearance));
     padding: calc(var(--space-page) * 0.75);
     padding-block-end: calc(var(--space-page) * 0.75 + var(--journal-nav-clearance));
     scroll-margin-block-end: calc(var(--journal-nav-clearance) + var(--space-page));
