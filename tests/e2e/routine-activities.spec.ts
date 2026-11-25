@@ -7,9 +7,16 @@ const modes = [
   'Chép kinh', 'Chép danh hiệu Phật, Bồ Tát', 'Giữ giới thanh tịnh', 'Thọ Bát quan trai giới', 'Tiết dục bảo thân',
 ];
 
+async function visitPractice(page: Page) {
+  await page.goto('/tu-tap', { waitUntil: 'domcontentloaded' });
+  await settleClient(page);
+}
+
 async function openEditor(page: Page) {
   await page.getByRole('button', { name: 'Thời khóa tu tập', exact: true }).click();
-  return page.getByRole('region', { name: 'Thời khóa tu tập', exact: true });
+  const editor = page.getByRole('region', { name: 'Thời khóa tu tập', exact: true });
+  await expect(editor).toBeVisible();
+  return editor;
 }
 
 async function startSavedRoutine(page: Page, name: string) {
@@ -24,7 +31,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('routine copy selections open the chosen tools and keep the legacy step format', async ({ page }) => {
-  await page.goto('/tu-tap');
+  await visitPractice(page);
   const editor = await openEditor(page);
   await editor.getByRole('button', { name: 'Tạo thời khóa mới', exact: true }).click();
   const draft = page.getByRole('dialog', { name: 'Tạo thời khóa mới', exact: true });
@@ -57,8 +64,7 @@ for (const width of [375, 1100]) {
   test(`routine uses the catalog order and reads the complete repentance vow offline at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.addInitScript(dark => localStorage.setItem('tutam_dark_mode', dark ? '1' : '0'), width === 375);
-    await page.goto('/tu-tap');
-    await settleClient(page);
+    await visitPractice(page);
     const catalogNames = page.locator('.tt-practice-groups .tt-mode-title');
     await expect(catalogNames).toHaveText(modes);
     const editor = await openEditor(page);
@@ -121,7 +127,7 @@ test('routine opens the next practice after prostrations and both completion con
       { id: 'chant', kind: 'dedication', sourceId: 'routine-v1:ritual:tt_1781615695204', text: 'Nghi thức' },
     ] }],
   })), settingsKey);
-  await page.goto('/tu-tap');
+  await visitPractice(page);
   const editor = await openEditor(page);
   const play = editor.getByRole('button', { name: 'Bắt đầu Thời khoá sáng', exact: true });
   await expect(play).toHaveCSS('width', '52px');
@@ -174,7 +180,7 @@ test('confirming the end of a rosary session opens the next reading step', async
       { id: 'read', kind: 'dedication', sourceId: 'routine-v1:sutra:tt_1780910773084', text: 'Tụng kinh' },
     ] }],
   })), settingsKey);
-  await page.goto('/tu-tap');
+  await visitPractice(page);
   await openEditor(page);
   await startSavedRoutine(page, 'Thời khoá sáng');
 
@@ -204,7 +210,7 @@ for (const kind of ['meditation', 'prostration'] as const) {
         { id: 'next', kind: 'dedication', text: 'BƯỚC TIẾP THEO' },
       ] }],
     })), { key: settingsKey, kind });
-    await page.goto('/tu-tap');
+    await visitPractice(page);
     await openEditor(page);
     await startSavedRoutine(page, 'Kết thúc từng bước');
     if (kind === 'meditation' && progressed) await page.clock.fastForward(61_000);
@@ -248,7 +254,7 @@ for (const step of otherSteps) {
         { id: 'step-1', kind: 'dedication', sourceId: 'routine-v1:' + step.mode, text: step.label },
       ] }], nickname: '',
     })), { key, step });
-    await page.goto('/tu-tap');
+    await visitPractice(page);
     await openEditor(page);
     await startSavedRoutine(page, 'Kiểm tra hành trì');
     await expect(page.locator(step.screen).first()).toBeVisible();
