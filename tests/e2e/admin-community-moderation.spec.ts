@@ -59,7 +59,7 @@ test('admin community shows two main queues and keeps reflection filters inside 
   await expect(mindful.getByText('Không còn bài chờ duyệt')).toBeVisible();
   await expect(mindful.getByRole('group', { name: 'Trạng thái', exact: true }).getByRole('button')).toHaveCount(2);
   await expect(mindful.getByRole('group', { name: 'Loại bài', exact: true }).getByRole('button')).toHaveCount(3);
-  await expect(mindful.getByRole('button', { name: 'Trang sau', exact: true })).toBeDisabled();
+  await expect(mindful.getByRole('button', { name: 'Trang sau', exact: true })).toHaveCount(0);
   await expectNoHorizontalOverflow(page, mindful);
   await touchModeration(tabs.getByRole('button', { name: 'Bình luận', exact: true }));
   await expect(page.getByRole('group', { name: 'Loại bài', exact: true })).toHaveCount(0);
@@ -80,7 +80,7 @@ test('reloading the selected comment queue preserves its URL and filters', async
   await page.route('**/api/admin/community/moderation?*', route => route.fulfill({
     json: { items: [], nextCursor: null },
   }));
-  await page.goto('/admin/community?period=today#review');
+  await page.goto('/admin/community?moderation=mindful&period=today#review');
   const queues = page.getByRole('navigation', { name: 'Hàng chờ kiểm duyệt', exact: true });
   const comments = queues.getByRole('button', { name: 'Bình luận', exact: true });
   await comments.click();

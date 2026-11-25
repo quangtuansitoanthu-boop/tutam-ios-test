@@ -1,5 +1,7 @@
 import {expect,test} from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 for (const [width, dark] of [[375, false], [375, true], [1440, false], [1440, true]] as const) test(`bowing keeps counts through setup, editing and browser back (${width}, ${dark ? 'dark' : 'light'})`, async ({ page }) => {
  await page.addInitScript(value => localStorage.setItem('tutam_dark_mode', value ? '1' : '0'), dark);

@@ -44,7 +44,7 @@ jobs:
           JS
           npm run build
       - name: Run the shard against fresh loopback D1 and R2
-        run: npx --no-install playwright test admin-community-moderation.spec.ts bowing-counter.spec.ts copying-layout.spec.ts --config tests/e2e/playwright.config.ts --project=desktop-1440-light --reporter=dot,json --workers=1 -g 'reloading the selected|rejection reason on failure|counter records actual taps|ghost input without keyup'
+        run: npx --no-install playwright test admin-community-moderation.spec.ts bowing-counter.spec.ts copying-layout.spec.ts --config tests/e2e/playwright.config.ts --project=desktop-1440-light --reporter=dot,json --workers=1 -g 'admin community shows two|reloading the selected|rejection reason on failure|bowing keeps counts|counter records actual taps|ghost input without keyup'
       - name: Save a compact per-test result
         if: always()
         run: |
