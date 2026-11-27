@@ -404,11 +404,18 @@ class NativeGuestUITestCase: XCTestCase {
             guard frame.width.isFinite && frame.height.isFinite && frame.minX.isFinite && frame.minY.isFinite,
                   frame.width > 0 && frame.height > 0 else { return nil }
             let headers = app.otherElements.matching(NSPredicate(format: "label == %@ OR label == %@ OR label == %@ OR label == %@ OR label == %@ OR label == %@", "biểu ngữ", "banner", "Tu tập Phật pháp, điều hướng", "Tu Tập Phật Pháp, điều hướng", "Tu tập Phật pháp, navigation", "Tu Tập Phật Pháp, navigation")).allElementsBoundByIndex
-            guard let headerFrame = headers.lazy.map({ $0.frame }).first(where: { bounds in
-                return bounds.width > 0 && bounds.height > 0 && bounds.intersects(frame)
-                    && bounds.minX >= frame.minX - chromeTolerance && bounds.maxX <= frame.maxX + chromeTolerance
-                    && bounds.minY <= frame.minY + chromeTolerance && bounds.maxY > frame.minY && bounds.maxY < frame.midY
-            }) else { return nil }
+            var headerFrame: CGRect?
+            for header in headers {
+                let bounds: CGRect = header.frame
+                let visible = bounds.width > 0 && bounds.height > 0 && bounds.intersects(frame)
+                let aligned = bounds.minX >= frame.minX - chromeTolerance && bounds.maxX <= frame.maxX + chromeTolerance
+                let atTop = bounds.minY <= frame.minY + chromeTolerance && bounds.maxY > frame.minY && bounds.maxY < frame.midY
+                if visible && aligned && atTop {
+                    headerFrame = bounds
+                    break
+                }
+            }
+            guard let headerFrame = headerFrame else { return nil }
             let navigation = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Điều hướng nhanh", "Quick navigation")).firstMatch
             guard navigation.exists else { return nil }
             let footer = navigation.frame

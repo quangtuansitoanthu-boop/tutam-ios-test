@@ -135,22 +135,29 @@ private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
         }
     }
 
-    private func queueNativeDiagnostic<Event: Encodable & Sendable>(_ event: Event, logToConsole: Bool = false) {
+    private func queueNativeDiagnostic<Event: Encodable & Sendable>(_ event: Event) {
         eventsQueue.async {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             guard let data = try? encoder.encode(event),
                   let serialized = String(data: data, encoding: .utf8) else { return }
-            if logToConsole { NSLog("[TutamQA] %@", serialized) }
+            self.appendEvent(serialized)
+        }
+    }
+
+    func recordNativeStartup(_ event: TuTapQANativeStartupEvent) {
+        eventsQueue.async {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            guard let data = try? encoder.encode(event),
+                  let serialized = String(data: data, encoding: .utf8) else { return }
+            NSLog("[TutamQA] %@", serialized)
             self.appendEvent(serialized)
         }
     }
 
     func recordImageExport(_ event: TuTapQAImageExportEvent) {
-        queueNativeDiagnostic(event, logToConsole: true)
-    }
-
-    func recordNativeStartup(_ event: TuTapQANativeStartupEvent) {
+        guard ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") else { return }
         eventsQueue.async {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]

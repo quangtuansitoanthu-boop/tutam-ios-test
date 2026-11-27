@@ -91,6 +91,10 @@
   outline: none;
 }
 
+.dream-page .dream-search-wrap input::-webkit-search-cancel-button {
+  display: none;
+}
+
 .dream-page .dream-search-wrap input::placeholder {
   color: var(--muted);
   opacity: 1;
