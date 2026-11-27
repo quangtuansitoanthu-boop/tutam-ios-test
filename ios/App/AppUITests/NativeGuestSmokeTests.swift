@@ -1681,6 +1681,33 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     }
 
     @MainActor
+    private func revealReopenedHomeSavedEvent(_ title: String, app: XCUIApplication) {
+        let dialog = homePersonalDialog(app)
+        let saved = dialog.staticTexts[title].firstMatch
+        let screen = app.frame
+        let viewport = screen.intersection(dialog.frame)
+        let top = max(viewport.minY, dialog.buttons["Đóng cửa sổ"].firstMatch.frame.maxY)
+        let bottom = min(viewport.maxY, dialog.buttons["Lưu ngày lễ"].firstMatch.frame.minY)
+        guard bottom > top else {
+            evidence("home-reopened-saved-list-no-scroll-area", app: app)
+            XCTFail("Home's reopened manager must expose a body between its header and save footer")
+            return
+        }
+        let x = (viewport.midX - screen.minX) / screen.width
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: (top + (bottom - top) * 0.8 - screen.minY) / screen.height))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: (top + (bottom - top) * 0.2 - screen.minY) / screen.height))
+        // Reopening starts above the saved list. Run 56 placed persisted rows below
+        // the form in its AX tree while the generic frame-based reveal swiped toward the form.
+        for _ in 0..<14 {
+            if insideViewport(saved, viewport: viewport) { return }
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        evidence("home-reopened-saved-list-unreachable", app: app)
+        XCTAssertTrue(saved.exists, "The exact saved Home anniversary must survive reopening")
+        XCTAssertTrue(insideViewport(saved, viewport: viewport), "The persisted Home anniversary must be visible and reachable inside the native viewport")
+    }
+
+    @MainActor
     private func saveHomePersonal(_ title: String, app: XCUIApplication) {
         dismissPersonalKeyboard(app)
         let save = homePersonalDialog(app).buttons["Lưu ngày lễ"].firstMatch
@@ -1767,9 +1794,9 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         deferStartupNotificationPrompt(app, timeout: 7)
         navigate("Trang chủ", app: app, captureNavigationEvidence: false)
         openHomePersonal(app)
-        reveal(homePersonalDialog(app).staticTexts[lunar].firstMatch, app: app)
+        revealReopenedHomeSavedEvent(lunar, app: app)
         XCTAssertTrue(homePersonalDialog(app).staticTexts[lunar].firstMatch.exists, "Home lunar anniversary must survive a relaunch")
-        reveal(homePersonalDialog(app).staticTexts[solar].firstMatch, app: app)
+        revealReopenedHomeSavedEvent(solar, app: app)
         XCTAssertTrue(homePersonalDialog(app).staticTexts[solar].firstMatch.exists, "Home solar anniversary must survive a relaunch")
         deleteHomePersonal(solar, cancelFirst: true, app: app)
         deleteHomePersonal(lunar, cancelFirst: false, app: app)

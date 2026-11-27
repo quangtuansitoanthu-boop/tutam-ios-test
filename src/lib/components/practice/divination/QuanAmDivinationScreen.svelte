@@ -891,6 +891,10 @@
     text-wrap: balance;
     line-height: 1.3;
   }
+  .qa-res-title,
+  .qa-aspect-val {
+    font-family: var(--font-reader);
+  }
   .qa-res-topic-meta {
     margin: 0;
     font-size: 12.5px;

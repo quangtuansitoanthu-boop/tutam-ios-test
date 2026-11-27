@@ -1528,7 +1528,8 @@ export async function handleAppStatsRequest(env: CloudflareEnvLike, requestId: s
   const cached = appStatsMemoryCache.get(env.DB);
   if (cached && now < cached.expiresAt) {
     return json(cached.data, 200, {
-      'Cache-Control': 'public, max-age=1800, s-maxage=3600, stale-while-revalidate=86400',
+      'Cache-Control': 'private, max-age=1800',
+      Vary: 'Origin',
     });
   }
 
@@ -1551,7 +1552,8 @@ export async function handleAppStatsRequest(env: CloudflareEnvLike, requestId: s
 
   try {
     return json(await pending, 200, {
-      'Cache-Control': 'public, max-age=1800, s-maxage=3600, stale-while-revalidate=86400',
+      'Cache-Control': 'private, max-age=1800',
+      Vary: 'Origin',
     });
   } catch {
     // Thiếu migration không được kéo COUNT/full scan trở lại luồng đọc công khai.

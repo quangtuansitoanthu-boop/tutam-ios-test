@@ -7,6 +7,7 @@ import memberSchema from '../../migrations/0026-member-status.sql?raw';
 import counterSchema from '../../migrations/0049-app-public-stats-counter.sql?raw';
 import { handleAppStatsRequest } from '../../src/lib/server/http/api-handler.ts';
 import { createPresenceRepository } from '../../src/lib/server/repositories/presence-repository.ts';
+import { withCors } from '../../src/lib/server/http/cors.ts';
 
 const counterQueries = counterSchema.trim().split(/;\s*\n\s*\n/gu)
   .map(sql => sql.trim().endsWith(';') ? sql.trim() : `${sql.trim()};`);
@@ -83,6 +84,20 @@ beforeEach(async () => {
   ]);
   await seedFixture();
   await assertCounts(2, 3);
+});
+
+it('does not store the public aggregate in the real URL-keyed Cache API across web and native origins', async () => {
+  const cache = await caches.open(`stats-cors-${crypto.randomUUID()}`);
+  const DB = { prepare: sql => env.DB.prepare(sql) };
+  const key = new Request('https://quangtu.vn/api/app/stats');
+  for (const origin of ['', 'capacitor://localhost', 'https://localhost', '']) {
+    const request = new Request(key, { headers: origin ? { origin } : {} });
+    const response = await cache.match(request) ?? withCors(await handleAppStatsRequest({ DB }), request);
+    await cache.put(request, response.clone());
+    expect(response.headers.get('access-control-allow-origin')).toBe(origin || null);
+    await expect(response.json()).resolves.toEqual({ total: 1233, base: 1230, real: 3 });
+    expect(await cache.match(key)).toBeUndefined();
+  }
 });
 
 it('bootstraps existing users including suspended administrators and cross-day distinct visitors with exactly five triggers', async () => {

@@ -3,6 +3,7 @@ import {
   createReadingActivityClient,
   createThrottledReadingProgressWriter,
   isReadingActivityCapacityError,
+  READING_ACTIVITY_OUTBOX_KEY,
   READING_PROGRESS_CACHE_KEY,
 } from '../../../src/lib/browser/reading-activity-client';
 import { createPrincipalStorage } from '../../../src/lib/browser/principal-storage';
@@ -44,6 +45,63 @@ const progress = (percent = 20) => ({
 });
 
 describe('reading activity client', () => {
+  it.each(['', '{broken', '{}', 'mixed'])('preserves unreadable outbox bytes %j instead of replacing them during a new edit or flush', async raw => {
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn(async (_path: RequestInfo | URL, _init?: RequestInit) => Response.json({}));
+    const client = createReadingActivityClient(fetcher, storage);
+    client.setSession(session('a'));
+    client.enqueueProgress(progress());
+    const scoped = createPrincipalStorage(storage, 'a');
+    const cached = scoped.getItem(READING_PROGRESS_CACHE_KEY);
+    const bytes = raw === 'mixed' ? JSON.stringify([...client.pending(), null]) : raw;
+    scoped.setItem(READING_ACTIVITY_OUTBOX_KEY, bytes);
+
+    expect(() => client.enqueueProgress({ ...progress(), contentId: 'new-book' })).toThrow();
+    expect(scoped.getItem(READING_ACTIVITY_OUTBOX_KEY)).toBe(bytes);
+    expect(scoped.getItem(READING_PROGRESS_CACHE_KEY)).toBe(cached);
+    await expect(client.flush()).rejects.toThrow();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(scoped.getItem(READING_ACTIVITY_OUTBOX_KEY)).toBe(bytes);
+    expect(() => client.pending()).not.toThrow();
+  });
+
+  it('preserves the prior reading operation when one storage read fails during a new edit and retries after recovery', async () => {
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn(async (_path: RequestInfo | URL, _init?: RequestInit) => Response.json({}));
+    const client = createReadingActivityClient(fetcher, storage);
+    client.setSession(session('a'));
+    client.enqueueProgress(progress());
+    const scoped = createPrincipalStorage(storage, 'a');
+    const saved = scoped.getItem(READING_ACTIVITY_OUTBOX_KEY);
+    const originalRead = storage.getItem.bind(storage);
+    let failed = false;
+    const read = vi.spyOn(storage, 'getItem').mockImplementation(key => {
+      if (key.endsWith(READING_ACTIVITY_OUTBOX_KEY) && !failed) { failed = true; throw new Error('storage_unavailable'); }
+      return originalRead(key);
+    });
+    try {
+      expect(() => client.enqueueProgress({ ...progress(), contentId: 'new-book' })).toThrow('storage_unavailable');
+      expect(scoped.getItem(READING_ACTIVITY_OUTBOX_KEY)).toBe(saved);
+      await expect(client.flush()).resolves.toBe(1);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).contentId).toBe('book-a');
+    } finally { read.mockRestore(); }
+  });
+
+  it.each(['anonymous', 'a'])('retains both queue sources when explicit adoption cannot read the %s outbox', brokenOwner => {
+    const storage = new MemoryStorage();
+    const client = createReadingActivityClient(vi.fn(), storage);
+    client.enqueueProgress({ ...progress(), contentId: 'guest-book' });
+    client.setSession(session('a'));
+    client.enqueueProgress(progress());
+    const guest = createPrincipalStorage(storage, 'anonymous');
+    const account = createPrincipalStorage(storage, 'a');
+    createPrincipalStorage(storage, brokenOwner).setItem(READING_ACTIVITY_OUTBOX_KEY, '{broken');
+    const guestBytes = guest.getItem(READING_ACTIVITY_OUTBOX_KEY), accountBytes = account.getItem(READING_ACTIVITY_OUTBOX_KEY);
+    expect(() => client.adoptAnonymousQueue('a')).toThrow();
+    expect(guest.getItem(READING_ACTIVITY_OUTBOX_KEY)).toBe(guestBytes);
+    expect(account.getItem(READING_ACTIVITY_OUTBOX_KEY)).toBe(accountBytes);
+  });
   it.each([400, 404, 422])('quarantines HTTP %s without blocking later progress or deleting cached intent', async status => {
     const storage = new MemoryStorage();
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status })).mockResolvedValue(Response.json({}));

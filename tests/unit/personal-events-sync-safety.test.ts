@@ -22,6 +22,85 @@ beforeEach(() => {
 });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 describe('personal event principal and outbox protection', () => {
+  it.each([{ id: 'broken' }, { id: 'broken', title: 42 }])('retains the last good calendar and recovery data when a pull returns a malformed event: %j', async malformed => {
+    const key = 'tutam_personal_lunar_events:v2:user:A';
+    const saved = { version: 2, events: [event('saved')], base: [event('saved')], revision: 3,
+      pending: false, status: 'synced', recovery: [event('recovered')], guestTransferReceipts: ['imported'] };
+    storage.set(key, JSON.stringify(saved));
+    mocks.fetch.mockResolvedValueOnce(Response.json({ events: [malformed], revision: 4 }));
+
+    await expect(pullPersonalLunarEventsFromServer()).resolves.toBeNull();
+    expect(loadPersonalLunarEvents()).toEqual(saved.events);
+    expect(JSON.parse(storage.get(key)!)).toEqual({ ...saved, status: 'error' });
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a legacy event response with an empty title and absent optional date fields', async () => {
+    const legacyEvent = { id: 'legacy-event', title: '' };
+    mocks.fetch.mockResolvedValueOnce(Response.json({ events: [legacyEvent], revision: 1 }));
+    await expect(pullPersonalLunarEventsFromServer()).resolves.toEqual([legacyEvent]);
+    expect(loadPersonalLunarEvents()).toEqual([legacyEvent]);
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a failed pull with one explicit retry GET while automatic sync adds no duplicate read or write', async () => {
+    const key = 'tutam_personal_lunar_events:v2:user:A';
+    const saved = { version: 2, events: [event('saved')], base: [event('saved')], revision: 1,
+      pending: false, status: 'synced', recovery: [event('recovery')], guestTransferReceipts: ['imported'] };
+    storage.set(key, JSON.stringify(saved));
+    mocks.fetch.mockResolvedValueOnce(new Response(null, { status: 503 }));
+    await pullPersonalLunarEventsFromServer();
+    const afterFailure = storage.get(key);
+    expect(getPersonalEventsSyncStatus()).toBe('error');
+    await syncPersonalLunarEventsWithServer();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(storage.get(key)).toBe(afterFailure);
+    mocks.fetch.mockResolvedValueOnce(Response.json({ events: [event('server')], revision: 2 }));
+    await syncPersonalLunarEventsWithServer(undefined, { retryPull: true });
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.fetch.mock.calls.every(call => call[1]?.method !== 'POST')).toBe(true);
+    expect(loadPersonalLunarEvents()).toEqual([event('server')]);
+    expect(JSON.parse(storage.get(key)!)).toMatchObject({ status: 'synced', recovery: saved.recovery,
+      guestTransferReceipts: saved.guestTransferReceipts });
+  });
+
+  it('preserves failed retry bytes and ignores a late retry result after the principal changes', async () => {
+    const key = 'tutam_personal_lunar_events:v2:user:A';
+    storage.set(key, JSON.stringify({ version: 2, events: [event('saved')], base: [event('saved')], revision: 1,
+      pending: false, status: 'error', recovery: [event('recovery')], guestTransferReceipts: ['imported'] }));
+    const saved = storage.get(key);
+    mocks.fetch.mockResolvedValueOnce(Response.json({ events: [{ id: 'broken' }], revision: 2 }));
+    await syncPersonalLunarEventsWithServer(undefined, { retryPull: true });
+    expect(storage.get(key)).toBe(saved);
+    let release!: (response: Response) => void;
+    mocks.fetch.mockImplementationOnce(() => new Promise<Response>(resolve => { release = resolve; }));
+    const retry = syncPersonalLunarEventsWithServer(undefined, { retryPull: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    session = { authenticated: true, user: { id: 'B' } };
+    savePersonalLunarEvents([event('B')], false);
+    release(Response.json({ events: [event('late-A')], revision: 2 }));
+    await retry;
+    expect(loadPersonalLunarEvents()).toEqual([event('B')]);
+    expect(storage.get(key)).toBe(saved);
+  });
+
+  it('recovers a malformed conflict with one explicit read while preserving local changes and existing recovery receipts', async () => {
+    const key = 'tutam_personal_lunar_events:v2:user:A';
+    const local = { ...event('same'), title: 'Local edit' };
+    const remote = { ...event('same'), title: 'Remote edit' };
+    storage.set(key, JSON.stringify({ version: 2, events: [local], base: [event('same')], revision: 1,
+      pending: true, status: 'conflict', remote: { revision: 2 },
+      recovery: [event('recovery')], guestTransferReceipts: ['imported'] }));
+    mocks.fetch.mockResolvedValueOnce(Response.json({ events: [remote], revision: 2 }));
+    await syncPersonalLunarEventsWithServer(undefined, { retryPull: true });
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.csrf).not.toHaveBeenCalled();
+    expect(getPersonalEventsSyncStatus()).toBe('conflict');
+    expect(getPersonalEventsConflict()).toEqual({ local: [local], remote: [remote] });
+    expect(JSON.parse(storage.get(key)!)).toMatchObject({ recovery: [event('recovery')], guestTransferReceipts: ['imported'] });
+  });
+
   it.each([{ revision: 2 }, { events: [null], revision: 2 }])('keeps invalid conflict bytes intact and blocks either resolution without requests: %j', async remote => {
     const key = 'tutam_personal_lunar_events:v2:user:A';
     const raw = JSON.stringify({ version: 2, events: [event('local')], base: [event('base')], revision: 1, pending: true,
@@ -235,15 +314,19 @@ describe('personal event principal and outbox protection', () => {
     const post = mocks.fetch.mock.calls.find((call) => call[1]?.method === 'POST');
     expect(JSON.parse(post?.[1]?.body).events).toEqual([event('first'), event('added-during-refresh')]);
   });
-  it('does not interpret damaged storage as an empty reminder calendar', () => {
+  it.each(['{interrupted', ''])('does not interpret damaged storage %j as an empty reminder calendar', raw => {
     const key = 'tutam_personal_lunar_events:v2:user:A';
-    storage.set(key, '{interrupted');
+    storage.set(key, raw);
     expect(() => loadPersonalLunarEvents(true)).toThrow();
-    expect(storage.get(key)).toBe('{interrupted');
+    expect(storage.get(key)).toBe(raw);
+    expect(() => savePersonalLunarEvents([event('new')])).toThrow();
+    expect(storage.get(key)).toBe(raw);
     session = { authenticated: false, user: null };
-    storage.set('tutam_personal_lunar_events', '{damaged legacy');
+    storage.set('tutam_personal_lunar_events', raw);
     expect(() => loadPersonalLunarEvents(true)).toThrow();
-    expect(storage.get('tutam_personal_lunar_events')).toBe('{damaged legacy');
+    expect(storage.get('tutam_personal_lunar_events')).toBe(raw);
+    expect(() => savePersonalLunarEvents([event('guest-new')])).toThrow();
+    expect(storage.has('tutam_personal_lunar_events:v2:guest')).toBe(false);
   });
   it('isolates account data and retains unknown legacy data without assigning it to the next account', () => {
     storage.set('tutam_personal_lunar_events', JSON.stringify([event('legacy-A')]));

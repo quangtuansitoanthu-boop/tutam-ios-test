@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { chromium, webkit } from '@playwright/test';
 import { flushSync, mount, unmount } from 'svelte';
 import type { BiorhythmProfile } from '$lib/browser/spiritual-tools-storage';
 import Harness from './biorhythm-screen-harness.svelte';
@@ -34,6 +36,32 @@ afterEach(async () => {
   document.body.replaceChildren();
   vi.unstubAllGlobals();
 });
+
+it('keeps the opened biorhythm guide below the native safe top in both CSS engines', async () => {
+  mocks.read.mockResolvedValue(null);
+  component = mount(Harness, { target: document.body }); await settle(); await settle();
+  document.querySelector<HTMLButtonElement>('.div-guide-btn')!.click(); await settle();
+  const html = document.querySelector('dialog')!.outerHTML;
+  const css = ['tokens.css', 'master-shell.css', 'biorhythm.css'].map(file => readFileSync(`src/lib/styles/${file}`, 'utf8')).join('\n');
+  for (const engine of [chromium, webkit]) {
+    const browser = await engine.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.route('**/*', route => route.abort());
+      for (const viewport of [{ width: 375, height: 844 }, { width: 844, height: 390 }, { width: 1440, height: 900 }]) for (const theme of ['light', 'dark']) {
+        await page.setViewportSize(viewport);
+        await page.setContent(`<html data-native-app="true" data-theme="${theme}" style="--app-safe-top:32px;--ui-font-scale:1.2"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body>${html}</body></html>`);
+        await page.locator('dialog').evaluate(dialog => { dialog.removeAttribute('open'); (dialog as HTMLDialogElement).showModal(); });
+        const bounds = await page.locator('dialog').boundingBox();
+        expect(bounds!.y).toBeGreaterThanOrEqual(32);
+        expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+        await page.getByRole('button', { name: 'Đóng', exact: true }).click({ trial: true });
+      }
+    } finally { await browser.close(); }
+  }
+}, 30_000);
 
 it('clears a displayed profile as soon as identity resolution becomes pending', async () => {
   mocks.read.mockImplementation((owner: string) => Promise.resolve(profile(`Hồ sơ ${owner}`)));

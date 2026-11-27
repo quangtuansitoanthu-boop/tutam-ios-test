@@ -92,8 +92,8 @@ export function loadPersonalLunarEvents(strict = false): PersonalLunarEvent[] {
   return loadPersonalEventData(strict);
 }
 
-export async function syncPersonalLunarEventsWithServer(events?: PersonalLunarEvent[]): Promise<void> {
-  return syncPersonalEventData(events);
+export async function syncPersonalLunarEventsWithServer(events?: PersonalLunarEvent[], options?: { retryPull?: boolean }): Promise<void> {
+  return syncPersonalEventData(events, options);
 }
 
 export async function pullPersonalLunarEventsFromServer(): Promise<PersonalLunarEvent[] | null> {

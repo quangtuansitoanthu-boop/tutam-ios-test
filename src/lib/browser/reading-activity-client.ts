@@ -185,11 +185,15 @@ export function createReadingActivityClient(
         .filter((row) => row.id !== annotationId), principal);
   };
 
-  const read = (principal = principalId()): ReadingOperation[] => {
+  const read = (principal = principalId(), strict = true): ReadingOperation[] => {
     try {
-      const parsed = JSON.parse(scopedStorage(principal).getItem(READING_ACTIVITY_OUTBOX_KEY) || '[]');
-      return Array.isArray(parsed) ? parsed.filter(isReadingOperation) : [];
-    } catch {
+      const raw = scopedStorage(principal).getItem(READING_ACTIVITY_OUTBOX_KEY);
+      const parsed = JSON.parse(raw === null ? '[]' : raw);
+      if (!Array.isArray(parsed) || !parsed.every(isReadingOperation)) throw new Error('invalid_reading_activity_outbox');
+      return parsed;
+    } catch (cause) {
+      // Chỉ đọc trạng thái được fallback; mutation không được ghi đè queue chưa đọc trọn vẹn.
+      if (strict) throw cause;
       return [];
     }
   };
@@ -508,7 +512,7 @@ export function createReadingActivityClient(
 
     shouldOfferAnonymousAdoption(userId: string): boolean {
       if (scopedStorage(userId).getItem(READING_ANONYMOUS_ADOPTION_DECISION_KEY) !== null) return false;
-      return read(ANONYMOUS_STORAGE_PRINCIPAL).length > 0
+      return read(ANONYMOUS_STORAGE_PRINCIPAL, false).length > 0
         || readRecords<ReadingProgressRecord>(READING_PROGRESS_CACHE_KEY, ANONYMOUS_STORAGE_PRINCIPAL).length > 0
         || readRecords<ReadingAnnotationRecord>(READING_ANNOTATIONS_CACHE_KEY, ANONYMOUS_STORAGE_PRINCIPAL).length > 0
         || readRecords<unknown>(LEGACY_LOCAL_STORAGE_KEYS.bookmarks, ANONYMOUS_STORAGE_PRINCIPAL).length > 0
@@ -973,7 +977,7 @@ export function createReadingActivityClient(
     },
 
     pending(principal = principalId()): ReadonlyArray<ReadingOperation> {
-      return read(principal);
+      return read(principal, false);
     },
 
     rejected(principal = principalId()) {

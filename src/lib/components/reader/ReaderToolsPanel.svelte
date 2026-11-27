@@ -60,7 +60,7 @@
         const width = trigger?.offsetWidth || 110;
         const height = trigger?.offsetHeight || 46;
         const pos = clampToolsPosition(parsed.x, parsed.y, width, height);
-        toggleStyle = `left:${pos.left}px;top:${pos.top}px;right:auto;bottom:auto`;
+        toggleStyle = `left:${pos.left}px;--reader-tools-top:${pos.top}px;right:auto;bottom:auto`;
       }
     } catch {
       // Ignore corrupt position
@@ -87,7 +87,7 @@
     const width = button.offsetWidth || 110;
     const height = button.offsetHeight || 46;
     const pos = clampToolsPosition(dragStart.left + deltaX, dragStart.top + deltaY, width, height);
-    toggleStyle = `left:${pos.left}px;top:${pos.top}px;right:auto;bottom:auto`;
+    toggleStyle = `left:${pos.left}px;--reader-tools-top:${pos.top}px;right:auto;bottom:auto`;
   }
 
   function finishDrag(event: PointerEvent) {
@@ -140,7 +140,7 @@
       if (!toggleStyle || !trigger) return;
       const rect = trigger.getBoundingClientRect();
       const pos = clampToolsPosition(rect.left, rect.top, trigger.offsetWidth, trigger.offsetHeight);
-      toggleStyle = `left:${pos.left}px;top:${pos.top}px;right:auto;bottom:auto`;
+      toggleStyle = `left:${pos.left}px;--reader-tools-top:${pos.top}px;right:auto;bottom:auto`;
     };
     onResize();
     window.addEventListener('resize', onResize);
@@ -216,6 +216,7 @@
   @media(max-width:768px){
     .reader-tools-toggle{
       position:fixed;
+      top:clamp(calc(var(--app-safe-top, env(safe-area-inset-top, 0px)) + 8px), var(--reader-tools-top), calc(100dvh - max(var(--bottom-nav-clearance, 0px), var(--audio-player-top, 0px)) - var(--touch-target-size) - 8px));
       z-index:1050;
       left:14px;
       bottom:calc(72px + env(safe-area-inset-bottom));

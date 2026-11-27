@@ -257,6 +257,12 @@
   line-height: 1.4;
 }
 
+.dream-page .dream-sheet-title,
+.dream-page .dream-sheet-hero > p,
+.dream-page .dream-detail-section:not(.dream-note-form) {
+  font-family: var(--font-reader);
+}
+
 .dream-page .dream-sheet-hero p {
   margin: 0;
   color: var(--text2);
@@ -365,6 +371,7 @@
 }
 
 .dream-page .dream-sutra-ref-label {
+  font-family: var(--font-app);
   color: var(--brown);
   font-size: calc(var(--font-size-label) * var(--dream-reading-scale, 1));
   font-weight: 700;
@@ -500,10 +507,10 @@
 
 .dream-guide-dialog {
   position: fixed;
-  inset: 0;
-  width: min(var(--practice-dialog-width), calc(100% - var(--space-page) * 2));
+  inset: var(--app-safe-top, env(safe-area-inset-top, 0px)) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  width: min(var(--practice-dialog-width), calc(100% - var(--space-page) * 2 - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
   max-width: none;
-  max-height: var(--practice-dialog-height);
+  max-height: min(var(--practice-dialog-height), calc(100dvh - var(--space-page) * 2 - var(--app-safe-top, env(safe-area-inset-top, 0px)) - env(safe-area-inset-bottom, 0px)));
   margin: auto;
   padding: 0;
   border: 1px solid var(--border);

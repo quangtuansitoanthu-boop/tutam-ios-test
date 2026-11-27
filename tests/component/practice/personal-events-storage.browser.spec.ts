@@ -2,16 +2,21 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import PersonalEventsModal from '../../../src/lib/components/practice/reminder/PersonalEventsModal.svelte';
+import PersonalEventsSyncStatus from '../../../src/lib/components/practice/reminder/PersonalEventsSyncStatus.svelte';
 import PersonalReminderTiming from '../../../src/lib/components/practice/reminder/PersonalReminderTiming.svelte';
 import DeletePersonalEventDialog from '../../../src/lib/components/practice/reminder/DeletePersonalEventDialog.svelte';
 import HomeDailyReminders from '../../../src/lib/components/home/HomeDailyReminders.svelte';
+import NativeSelectPicker from '../../../src/lib/components/layout/NativeSelectPicker.svelte';
 import * as sessions from '../../../src/lib/stores/session.svelte';
 import { personalEventFormIssue } from '../../../src/lib/domain/personal-event-form';
+import { readFileSync } from 'node:fs';
+import { chromium, webkit } from '@playwright/test';
+import { compile } from 'svelte/compiler';
 
 const mocks = vi.hoisted(() => ({ add: vi.fn(), remove: vi.fn(), native: false, masterEnabled: true, sync: vi.fn(), alert: vi.fn() }));
 vi.mock('$lib/browser/app-dialog', () => ({ alertInApp: mocks.alert }));
 vi.mock('$lib/browser/modal-dialog', () => ({ modalDialog: () => ({ destroy() {} }) }));
-vi.mock('$lib/browser/native-platform', () => ({ isNativeApp: () => mocks.native }));
+vi.mock('$lib/browser/native-platform', () => ({ isNativeApp: () => mocks.native, nativePlatform: () => mocks.native ? 'ios' : 'web' }));
 vi.mock('$lib/browser/practice-reminder-service', () => ({
   loadReminderSettings: () => ({ masterEnabled: mocks.masterEnabled }),
   syncRemindersWithSystem: mocks.sync,
@@ -121,6 +126,122 @@ function submitAnniversary(titleText = 'Ngày lễ mới') {
   flushSync();
   title.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 }
+
+it('retries a failed calendar pull only after the Retry click and coalesces repeated clicks into one GET', async () => {
+  vi.spyOn(sessions, 'getBrowserSessionSnapshot').mockReturnValue({
+    authenticated: true, user: { id: 'retry-owner', displayName: 'Retry', role: 'user', email: '' },
+    csrfToken: null, expiresAt: null,
+  });
+  const key = 'tutam_personal_lunar_events:v2:user:retry-owner';
+  const event = { id: 'saved', title: 'Ngày lễ đã lưu', type: 'gia-dinh', lunarDay: 15, lunarMonth: 7 };
+  localStorage.setItem(key, JSON.stringify({ version: 2, events: [event], base: [event], revision: 1,
+    pending: false, status: 'error', recovery: [event], guestTransferReceipts: ['saved-receipt'] }));
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ events: [event], revision: 2 }));
+  const view = mount(PersonalEventsSyncStatus, { target: document.body });
+  try {
+    await settle();
+    expect(fetcher).not.toHaveBeenCalled();
+    const retry = [...document.querySelectorAll<HTMLButtonElement>('.sync-note button')]
+      .find(button => button.textContent?.includes('Thử lại'))!;
+    expect(retry).toBeDefined();
+    retry.click(); retry.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(document.querySelector('.sync-note')).toBeNull();
+    });
+    const [, init] = fetcher.mock.calls[0];
+    expect(init?.method ?? 'GET').toBe('GET');
+    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ status: 'synced', revision: 2,
+      events: [event], recovery: [event], guestTransferReceipts: ['saved-receipt'] });
+    expect(unhandled).toEqual([]);
+  } finally { await unmount(view); }
+});
+
+it('keeps the real anniversary select as the visible control after the shared picker chooses a value', async () => {
+  open();
+  // This file mocks the dialog action; the real app's modal owner supplies [open].
+  document.querySelector('.pem-dialog')!.setAttribute('open', '');
+  const picker = mount(NativeSelectPicker, { target: document.body, props: { route: '/', principal: null } });
+  try {
+    await settle();
+    for (const [id, value] of [['pem-select-type', 'phat-nguyen'], ['pem-select-day', '19'], ['pem-select-month', '10']]) {
+      const select = document.getElementById(id) as HTMLSelectElement;
+      for (const type of ['pointerdown', 'pointerup']) {
+        const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 40, clientY: 40 });
+        Object.assign(event, { pointerId: 1, isPrimary: true });
+        select.dispatchEvent(event);
+      }
+      await settle();
+      expect(document.querySelector('.rosary-select__dialog')).not.toBeNull();
+      expect(document.querySelector('.rosary-select__trigger')).toBeNull();
+      document.querySelector<HTMLButtonElement>(`.rosary-select__option[data-value="${value}"]`)!.click();
+      await settle();
+      expect(document.querySelector('.rosary-select__dialog')).toBeNull();
+      expect(document.getElementById(id)).toBe(select);
+      expect(select.value).toBe(value);
+      expect(select.hidden).toBe(false);
+    }
+    expect(mocks.add).not.toHaveBeenCalled();
+    expect(mocks.sync).not.toHaveBeenCalled();
+  } finally { await unmount(picker); }
+});
+
+it('keeps home anniversary control text consistent and reachable in both CSS engines', async () => {
+  open();
+  const markup = document.querySelector('.pem-dialog')!.outerHTML;
+  const filename = 'src/lib/components/practice/reminder/PersonalEventsModal.svelte';
+  const css = compile(readFileSync(filename, 'utf8'), { filename, generate: 'client', cssHash: () => 'personal-event-geometry' }).css!.code;
+  const globals = ['tokens.css', 'master-shell.css', 'ui-refresh.css', 'interaction-performance.css']
+    .map(name => readFileSync(`src/lib/styles/${name}`, 'utf8')).join('\n');
+  const violations: unknown[] = [];
+  for (const engine of [chromium, webkit]) {
+    const browser = await engine.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ hasTouch: true });
+      await page.route('**/*', route => route.abort());
+      for (const native of [false, true]) for (const theme of ['light', 'dark']) for (const viewport of [{ width: 375, height: 844 }, { width: 1440, height: 900 }, { width: 844, height: 390 }, { width: 844, height: 220 }, { width: 568, height: 180 }]) {
+        await page.setViewportSize(viewport);
+        await page.setContent(`<html data-native-app="${native}" data-theme="${theme}"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${globals}:root{--ui-font-scale:1.2}${css}</style></head><body>${markup}</body></html>`);
+        await page.locator('body *').evaluateAll(elements => elements.forEach(element => element.classList.add('personal-event-geometry')));
+        await page.locator('dialog').evaluate(dialog => (dialog as HTMLDialogElement).showModal());
+        const typography = await page.locator('dialog').evaluate(dialog => {
+          const fields = [...dialog.querySelectorAll<HTMLElement>('.pem-input,.pem-select')].map(element => {
+            const style = getComputedStyle(element);
+            return { id: element.id, size: style.fontSize, weight: style.fontWeight, family: style.fontFamily };
+          });
+          const label = getComputedStyle(dialog.querySelector('.pem-label')!);
+          const recurrence = getComputedStyle(dialog.querySelector('.pem-frequency button')!);
+          return { fields, labelSize: parseFloat(label.fontSize), recurrenceSize: parseFloat(recurrence.fontSize) };
+        });
+        const titleText = typography.fields.find(field => field.id === 'pem-input-title')!;
+        if (typography.fields.some(field => parseFloat(field.size) < 16 || field.size !== titleText.size || field.weight !== titleText.weight || field.family !== titleText.family)) {
+          violations.push({ engine: engine.name(), native, theme, viewport, typography });
+        }
+        expect(typography.labelSize).toBeLessThan(parseFloat(titleText.size));
+        expect(typography.recurrenceSize).toBeLessThan(parseFloat(titleText.size));
+        const footerTop = (await page.locator('.pem-footer').boundingBox())!.y;
+        // Use the mounted component's DOM and actual CSS; no app data, network or native keyboard is involved.
+        for (const selector of ['.pem-close-btn', '#pem-input-title', '#pem-select-type', '#pem-input-note', '.pem-done-btn', '.pem-submit-btn', '.pem-close-btn']) {
+          const result = await page.locator(selector).evaluate(async element => {
+            element.scrollIntoView({ block: 'center', inline: 'nearest' });
+            await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+            const box = element.getBoundingClientRect();
+            const dialog = element.closest('dialog')!.getBoundingClientRect();
+            const points = [[0, 0], [-21.5, 0], [21.5, 0], [0, -21.5], [0, 21.5]];
+            const hit = points.every(([x, y]) => element.contains(document.elementFromPoint(box.x + box.width / 2 + x, box.y + box.height / 2 + y)));
+            return { hit, width: box.width, height: box.height, y: box.y, bottom: box.bottom, dialogTop: dialog.top, dialogBottom: dialog.bottom };
+          });
+          if (!result.hit || result.width < 44 || result.height < 44 || result.y < result.dialogTop || result.bottom > result.dialogBottom) {
+            violations.push({ engine: engine.name(), native, theme, viewport, selector, ...result });
+          }
+          if (viewport.height >= 390) expect((await page.locator('.pem-footer').boundingBox())!.y).toBeCloseTo(footerTop);
+        }
+      }
+    } finally { await browser.close(); }
+  }
+  expect(violations).toEqual([]);
+}, 30_000);
 
 it.each([{ revision: 2 }, { events: [null], revision: 2 }])('keeps the home anniversary form usable with an invalid saved conflict snapshot %j', async remote => {
   vi.spyOn(sessions, 'getBrowserSessionSnapshot').mockReturnValue({

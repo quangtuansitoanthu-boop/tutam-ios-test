@@ -46,8 +46,8 @@ const deceasedScripture: DreamScripture[] = [
     source: 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN · HT. Thích Trí Tịnh Việt dịch',
     quotation: false,
     paragraphs: [
-      'Trong đoạn nói với Bồ Tát Phổ Quảng, kinh đề cập đến chiêm bao thấy các hình ảnh quỷ thần hoặc quyến thuộc quá khứ mang vẻ buồn khổ, sợ sệt. Lời dạy hướng người thân đến việc tạo phước và hồi hướng cho quyến thuộc.',
-      'Phương tiện được nêu trong đoạn kinh là đối trước hình tượng chư Phật, chư Bồ Tát, chí tâm tự đọc hoặc thỉnh người đọc Kinh Địa Tạng đủ ba biến hay bảy biến. Đây là diễn ý một đoạn kinh có bối cảnh cụ thể. Một giấc mơ riêng lẻ không đủ để xác định cảnh giới hay tình trạng của người đã mất.',
+      'Trong đoạn nói với Bồ Tát Phổ Quảng, kinh có nhắc đến chuyện nằm mộng thấy quỷ thần hoặc người thân quá vãng hiện về với dáng vẻ buồn khổ, sợ sệt. Lời Phật dạy không nhằm làm người ở lại hoang mang, mà chỉ rõ con đường thiết thực nhất để giúp quyến thuộc là phát tâm làm phước rồi hồi hướng công đức cho họ.',
+      'Kinh khuyên người nhà đối trước tôn tượng chư Phật, chư Bồ Tát, giữ lòng chí thành tự tụng hoặc thỉnh người tụng Kinh Địa Tạng đủ ba biến hay bảy biến. Đây là lời tóm lược theo tinh thần đoạn kinh ấy để bạn có chỗ nương tựa thực hành, chứ không nên vì một giấc mộng buồn mà vội đoán định cảnh giới của người đã khuất.',
     ],
   },
   {
@@ -55,8 +55,8 @@ const deceasedScripture: DreamScripture[] = [
     source: 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN · HT. Thích Trí Tịnh Việt dịch',
     quotation: false,
     paragraphs: [
-      'Phẩm này khuyên thân quyến vì người mới mất mà tu tạo phước lành, đặc biệt nhắc đến thời gian bốn mươi chín ngày. Nội dung đặt trọng tâm vào sự thành kính, giữ gìn điều thiện và việc làm có lợi ích cho người còn lẫn người mất.',
-      'Kinh trình bày việc hồi hướng với hình ảnh bảy phần công đức: người mất được một phần, sáu phần thuộc người đang tu tạo. Người thực hành có thể tụng kinh, niệm Phật, bố thí hoặc cúng dường tùy khả năng rồi hồi hướng. Mốc bốn mươi chín ngày trong đoạn kinh không biến mỗi giấc mơ thành một thông báo về người mất.',
+      'Phẩm kinh này khuyên thân quyến vì người mới mất mà siêng tạo phước lành, nhất là trong vòng bốn mươi chín ngày. Cốt lõi lời dạy đặt ở tấm lòng hiếu kính, giữ nếp sống thiện lành và làm những việc lợi ích thiết thực để cả người mất lẫn người đang sống đều được an ổn.',
+      'Kinh dùng hình ảnh bảy phần công đức để nhắc giá trị của sự tu tạo: người đã khuất nhận được một phần, sáu phần còn lại quay về chính người phát tâm làm lành. Việc tụng kinh, niệm Phật, bố thí hay cúng dường đều tùy theo hoàn cảnh mà làm bằng tâm thành — còn thời hạn bốn mươi chín ngày là dịp nhắc nhớ tưởng niệm và vun bồi phước đức, không phải cứ hễ mơ thấy là điềm báo chẳng lành.',
     ],
   },
 ];

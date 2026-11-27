@@ -68,6 +68,9 @@ describe('offline dream catalog', () => {
     const content = JSON.stringify(DREAM_ENTRIES);
     expect(content).not.toMatch(/https?:\/\//i);
     expect(content).not.toMatch(/đánh con gì|xổ số|lô đề|con số may mắn|sourceUrl/i);
+    expect(content).not.toMatch(
+      /lối liên tưởng văn hóa|bối cảnh riêng của người mơ|tạo ra căn cứ|không đo được mức nguy hiểm|sự mềm mại|chứng từ|kênh độc lập|kênh chính thức|nhân viên y tế|bằng việc cụ thể|cách nhìn có giới hạn|không biến mỗi giấc mơ thành một thông báo|bối cảnh giáo lý bổ sung|cảm giác mình đã bị thay thế|giá trị của bản thân không phụ thuộc|nhờ hỗ trợ khi quá tải/iu,
+    );
   });
 
   it('gives the main lookup articles sufficient scenario depth', () => {

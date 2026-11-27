@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { chromium, webkit } from '@playwright/test';
 import { flushSync, mount, unmount } from 'svelte';
 import type { DreamJournalEntry } from '$lib/browser/spiritual-tools-storage';
 import Harness from './dream-screen-harness.svelte';
 import { dreamTestPage } from './dream-page-state.svelte';
 import DreamArticle from '$lib/components/practice/divination/DreamArticle.svelte';
+import DreamGuideDialog from '$lib/components/practice/divination/DreamGuideDialog.svelte';
 import { getDreamCopy } from '$lib/i18n/dream-ui';
 
 const mocks = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn(), remove: vi.fn(), clear: vi.fn(), goto: vi.fn(), push: vi.fn(), replace: vi.fn() }));
@@ -35,6 +38,33 @@ const onSubpageHeader = (event: Event) => {
   headerBackHandler = detail?.active ? detail.onBack : undefined;
 };
 const settle = async () => { await new Promise(resolve => setTimeout(resolve, 0)); flushSync(); };
+
+it('keeps the dream guide and its close actions reachable below the native safe top in both CSS engines', async () => {
+  const guide = mount(DreamGuideDialog, { target: document.body, props: { copy: getDreamCopy(false), onClose() {} } });
+  try {
+    await settle();
+    const html = document.querySelector('dialog')!.outerHTML;
+    const css = ['tokens.css', 'master-shell.css', 'dream-interpretation.css'].map(file => readFileSync(`src/lib/styles/${file}`, 'utf8')).join('\n');
+    for (const engine of [chromium, webkit]) {
+      const browser = await engine.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.route('**/*', route => route.abort());
+        for (const viewport of [{ width: 375, height: 844 }, { width: 844, height: 390 }, { width: 1440, height: 900 }]) for (const theme of ['light', 'dark']) {
+          await page.setViewportSize(viewport);
+          await page.setContent(`<html data-native-app="true" data-theme="${theme}" style="--app-safe-top:32px;--ui-font-scale:1.2"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body>${html}</body></html>`);
+          await page.locator('dialog').evaluate(dialog => { dialog.removeAttribute('open'); (dialog as HTMLDialogElement).showModal(); });
+          const bounds = await page.locator('dialog').boundingBox();
+          expect(bounds!.y).toBeGreaterThanOrEqual(32);
+          expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+          expect(bounds!.x).toBeGreaterThanOrEqual(0);
+          expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+          for (const close of await page.getByRole('button', { name: 'Đóng', exact: true }).all()) await close.click({ trial: true });
+        }
+      } finally { await browser.close(); }
+    }
+  } finally { await unmount(guide); }
+}, 30_000);
 function journalEntry(id: string, note: string): DreamJournalEntry {
   return { id, dreamId: 'test-dream', title: id, note, createdAt: '2026-11-27T04:00:00.000Z' };
 }
@@ -313,3 +343,4 @@ it('labels dream font controls in English while preserving Vietnamese reading co
     await unmount(articleComponent);
   }
 });
+

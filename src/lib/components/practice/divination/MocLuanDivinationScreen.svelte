@@ -933,6 +933,12 @@
     text-wrap: balance;
     line-height: 1.3;
   }
+  .ml-res-title,
+  .ml-res-role,
+  .ml-topic-echo-quote,
+  .ml-completion-note {
+    font-family: var(--font-reader);
+  }
   .ml-res-role {
     margin: 0;
     font-size: 12.5px;

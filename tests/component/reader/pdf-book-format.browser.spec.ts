@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
+import { readFileSync } from 'node:fs';
+import { compile } from 'svelte/compiler';
+import { chromium, webkit } from '@playwright/test';
+import ReaderToolsPanel from '$lib/components/reader/ReaderToolsPanel.svelte';
 import Harness from './pdf-book-format-harness.svelte';
 import type { ReadingProgressRecord } from '$lib/browser/reading-activity-client';
 const io = vi.hoisted(() => ({ preserved: vi.fn(), fetch: vi.fn(), progress: vi.fn(), enqueue: vi.fn(), schedule: vi.fn() }));
@@ -23,6 +27,38 @@ afterEach(async () => { if (component) await unmount(component); component = und
 
 const journeyNotice = 'Sách này dựa trên trải nghiệm cá nhân trong các giấc mộng của cư sĩ Dương Sinh ở Thánh Hiền đường, không khẳng định tất cả đều là sự thực, do đó quý vị tin thì suy ngẫm, không tin xem giải trí, mong quý vị tôn trọng và không phỉ báng các nội dung có trong sách ạ';
 const spiritNotice = 'Các câu chuyện được kể trong album này đều từ những giấc mơ độ vong của chị Hoa và các anh thầy pháp, đây đều là các trải nghiệm cá nhân, không khẳng định tất cả đều là sự thực, do đó quý vị tin thì suy ngẫm, không tin xem giải trí, mong quý vị tôn trọng và không phỉ báng các nội dung có trong sách ạ';
+
+it('keeps restored reader tools below the native safe top and above changing player clearance in both CSS engines', async () => {
+ const snapshots: string[] = [];
+ for (const y of [0, 10000]) {
+  localStorage.setItem('tutam_reader_tools_pos', JSON.stringify({ x: 20, y }));
+  const tools = mount(ReaderToolsPanel, { target: document.body, props: { children: createRawSnippet(() => ({ render: () => '<p>Tools</p>' })) } });
+  await settle(); await settle(); snapshots.push(document.body.innerHTML); await unmount(tools);
+ }
+ const css = ['tokens.css', 'master-shell.css'].map(file => readFileSync(`src/lib/styles/${file}`, 'utf8')).join('\n')
+  + compile(readFileSync('src/lib/components/reader/ReaderToolsPanel.svelte', 'utf8'), { filename: 'ReaderToolsPanel.svelte', generate: 'client', cssHash: () => 'reader-tools-fixture' }).css!.code;
+ const failures: unknown[] = [];
+ for (const engine of [chromium, webkit]) {
+  const browser = await engine.launch({ headless: true });
+  try {
+   const page = await browser.newPage(); await page.route('**/*', route => route.abort());
+   for (const viewport of [{ width: 375, height: 844 }, { width: 768, height: 390 }]) for (const theme of ['light', 'dark']) for (const html of snapshots) {
+    await page.setViewportSize(viewport);
+    await page.setContent(`<html data-native-app="true" data-theme="${theme}" style="--bottom-nav-clearance:96px;--audio-player-top:130px"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body>${html}</body></html>`);
+    await page.locator('body *').evaluateAll(elements => elements.forEach(element => element.classList.add('reader-tools-fixture')));
+    for (const clearance of [130, 200]) {
+     await page.mouse.move(0, 0);
+     await page.locator('.reader-tools-toggle').evaluate(element => element.getAnimations().forEach(animation => animation.finish()));
+     await page.locator('html').evaluate((root, value) => (root as HTMLElement).style.setProperty('--audio-player-top', `${value}px`), clearance);
+     const bounds = await page.locator('.reader-tools-toggle').boundingBox();
+     if (!bounds || bounds.y < 40 || bounds.y + bounds.height > viewport.height - clearance || bounds.width < 44 || bounds.height < 44) failures.push({ engine: engine.name(), viewport, theme, clearance, bounds });
+     else await page.locator('.reader-tools-toggle').click({ trial: true });
+    }
+   }
+  } finally { await browser.close(); }
+ }
+ expect(failures).toEqual([]);
+}, 30_000);
 const buddhistNotice = 'Các câu chuyện được kể trong sách này đều từ những giấc mơ của phật tử, đây đều là các trải nghiệm cá nhân, không khẳng định tất cả đều là sự thực, do đó quý vị tin thì suy ngẫm, không tin xem giải trí, mong quý vị tôn trọng và không phỉ báng các nội dung có trong sách ạ';
 
 it.each([

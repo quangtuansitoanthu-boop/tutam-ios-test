@@ -1287,6 +1287,7 @@
       if (!principalChanged) return;
       const nextPrincipal = detail?.authenticated && detail.user?.id ? String(detail.user.id) : 'anonymous';
       cancelOfflineSave();
+      downloadProgressModalOpen = false;
       storagePrincipal = nextPrincipal;
       offlineRecord = null;
       const principalToken = principalGuard.capture();
@@ -1387,11 +1388,22 @@
 
           if (choice === 'download') {
             downloadProgressModalOpen = true;
+            const downloadPrincipalToken = principalGuard.capture();
+            const downloadPrincipal = storagePrincipal;
             await saveOffline();
             if (disposed || generation !== documentGeneration) return;
-            if (offlineRecord?.blob) {
-              const buffer = await offlineRecord.blob.arrayBuffer();
+            if (!principalGuard.isCurrent(downloadPrincipalToken) || storagePrincipal !== downloadPrincipal) {
+              error = localizeUi('Không thể tải PDF.');
+              return;
+            }
+            const downloadedRecord = offlineRecord;
+            if (downloadedRecord?.blob && downloadedRecord.ownerId === downloadPrincipal) {
+              const buffer = await downloadedRecord.blob.arrayBuffer();
               if (!isCurrent()) return;
+              if (!principalGuard.isCurrent(downloadPrincipalToken) || storagePrincipal !== downloadPrincipal) {
+                error = localizeUi('Không thể tải PDF.');
+                return;
+              }
               source = { data: new Uint8Array(buffer) };
               loadingProgress = 100;
             } else {
@@ -2342,5 +2354,9 @@
   .pdf-shell :is(.pdf-pager-btn,.pdf-zoom-btn,.pdf-quote-floating-btn,.pdf-bookmark-close-btn,.pdf-bookmark-del-btn){min-width:var(--touch-target-size)!important;min-height:var(--touch-target-size)!important}
   .pdf-shell .pdf-pager-zoom-text{width:var(--touch-target-size);min-width:var(--touch-target-size);max-width:var(--touch-target-size);height:var(--touch-target-size);flex-basis:var(--touch-target-size)}
   .pdf-shell .pdf-bookmark-jump-btn{min-height:var(--touch-target-size)!important}
+  :global(:root[data-native-app='true']) .pdf-controls{height:auto;min-height:var(--touch-target-size)}
+  :global(:root[data-native-app='true']) .pdf-controls :is(button,input,select){min-width:var(--touch-target-size);min-height:var(--touch-target-size)}
+  @media(max-width:768px){.pdf-controls button{min-width:var(--touch-target-size)}}
+  @media(min-width:769px){:global(:root[data-native-app='true']) .pdf-page-status{min-width:max-content;flex:none}}
   .pdf-bookmark-panel{padding-bottom:env(safe-area-inset-bottom,0px)}
 </style>

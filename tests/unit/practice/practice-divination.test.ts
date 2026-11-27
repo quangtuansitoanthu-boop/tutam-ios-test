@@ -26,12 +26,36 @@ describe('Quan Âm Linh Xăm domain & data integrity', () => {
       const stick = getQuanAmStick(id);
       expect(stick, `Stick ${id}`).not.toBeNull();
       expect(stick!.id).toBe(id);
-      if (id === 58) expect(stick!.poem).toEqual([]);
-      else expect(stick!.poem.length).toBeGreaterThanOrEqual(4);
+      expect(stick!.poem.length, `Stick ${id} poem`).toBeGreaterThanOrEqual(4);
       expect(stick!.poemPhonetic.length).toBeGreaterThanOrEqual(4);
+      expect(stick!.omen.trim().length, `Stick ${id} omen`).toBeGreaterThan(0);
+      expect(stick!.comment, `Stick ${id} comment`).not.toMatch(/Đi[eê]m quẻ ứng/iu);
       expect(stick!.aspects.length).toBeGreaterThan(0);
+      for (const aspect of stick!.aspects) {
+        expect(aspect.value, `Stick ${id} aspect ${aspect.label}`).not.toMatch(/\*/u);
+        expect(aspect.value, `Stick ${id} aspect ${aspect.label}`).not.toMatch(
+          /\.\s*(Cầu tài|Gia đạo|Hôn nhân|Lục súc|Tìm người|Kiện tụng|Di dời|Vật mất|Bệnh tật|Phong thủy)/u,
+        );
+        expect(aspect.value, `Stick ${id} aspect ${aspect.label}`).not.toMatch(
+          /ngại ngại|Lục suc|Tim người|Kiên tụng|Kiện thụng|Gai đạo|Khó hơp|\bCác$/u,
+        );
+        if (aspect.label === 'Phương diện khác') {
+          expect(aspect.value.trim(), `Stick ${id} loose aspect`).not.toMatch(/^(Gia đạo|Người đi)$/u);
+        }
+      }
+      const sourceText = [...stick!.poem, stick!.comment, stick!.omen].join('\n');
+      expect(sourceText, `Stick ${id} source typo`).not.toMatch(
+        /cữa|vui vẽ|chẵng|điều tốt|mõm non|quẻ quế|bảo tháo|trong gắp|bón biển|tổ vở|đã vở|thanh thảng|sau dể|giử cũ|chỉ rỏ|rỏ ràng|hưu nhỏ|mợi sự/iu,
+      );
       expect(stick!.analysis.split('\n\n').length).toBeGreaterThanOrEqual(3);
       expect(stick!.cultivationAdvice.length).toBeGreaterThan(400);
+      const prose = `${stick!.analysis}\n${stick!.cultivationAdvice}`;
+      expect(prose, `Stick ${id} robotic prose`).not.toMatch(
+        /Nó (khuyên|mời|nhấn|gợi)|dữ kiện|chứng từ|cơ quan có trách nhiệm|tài liệu chính thức|truyền bản|cổ bản|dị bản|phiên âm của quẻ|bằng giọng dịu hơn|khả năng có mặt|động tác trở về|bảo toàn con người|thay phương thức can thiệp|bất tương xứng/iu,
+      );
+      expect(stick!.cultivationAdvice, `Stick ${id} journaling homework`).not.toMatch(
+        /^(Hãy viết|Viết riêng|Viết một|Ghi lại một việc)/u,
+      );
     }
     expect(new Set(sticks.map(stick => stick.analysis)).size).toBe(100);
     expect(new Set(sticks.map(stick => stick.cultivationAdvice)).size).toBe(100);
@@ -165,6 +189,10 @@ describe('Mộc Luân Chiêm Sát domain & 189 canonical verses', () => {
       expect(entry!.deepMeaning.length).toBeGreaterThan(650);
       expect(entry!.guidance.length).toBeGreaterThan(80);
       expect(entry!.practice.length).toBeGreaterThan(40);
+      const mlProse = `${entry!.lecture}\n${entry!.deepMeaning}\n${entry!.guidance}\n${entry!.practice}`;
+      expect(mlProse, `Mộc Luân ${n} robotic prose`).not.toMatch(
+        /dữ kiện|chứng từ|lịch hẹn|nhân viên y tế|thô tháo|có căn cứ hơn|kết nối người có chuyên môn|đánh dấu sau mỗi lần|ngừng chuyển tiếp|người hiểu việc|kiểm soát mọi tình huống|bàn chân, hơi thở|lời giải tập trung làm rõ danh xưng|không mở rộng thành một lời bảo đảm|không cung cấp cách xác định nguyên nhân/iu,
+      );
       analyses.add(entry!.deepMeaning);
       guidance.add(entry!.guidance);
       practices.add(entry!.practice);

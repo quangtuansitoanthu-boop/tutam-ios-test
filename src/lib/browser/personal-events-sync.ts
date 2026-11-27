@@ -53,7 +53,7 @@ function selectOwner(): string {
 }
 function read(owner: string): StoredEvents {
   const raw = localStorage.getItem(key(owner));
-  if (raw) {
+  if (raw !== null) {
     const parsed = JSON.parse(raw) as StoredEvents;
     if (parsed.version !== 2 || !Array.isArray(parsed.events) || !Array.isArray(parsed.base)) throw new Error('Invalid personal event storage');
     if (parsed.status === 'syncing') parsed.status = parsed.remote ? 'conflict' : parsed.pending ? 'pending' : 'synced';
@@ -62,7 +62,7 @@ function read(owner: string): StoredEvents {
   // Keep legacy bytes intact. A login transfers the guest copy through the
   // durable import below, rather than exposing it to every account that loads.
   const legacy = !owner ? localStorage.getItem(LEGACY_KEY) : null;
-  const events = legacy ? JSON.parse(legacy) : [];
+  const events = legacy === null ? [] : JSON.parse(legacy);
   if (!Array.isArray(events)) throw new Error('Invalid legacy event storage');
   return { version: 2, events, base: [], revision: null, pending: false, status: 'local' };
 }
@@ -216,7 +216,7 @@ async function fetchRemote(owner: string, token: number): Promise<Snapshot | nul
   if (!response.ok) throw await requestError(owner, response);
   const payload = await response.json();
   if (!current(owner, token)) return null;
-  if (!Array.isArray(payload?.events) || payload.events.some((event: unknown) => !event || typeof event !== 'object' || typeof (event as PersonalLunarEvent).id !== 'string')) throw new Error('Invalid personal event response');
+  if (!validEventList(payload?.events)) throw new Error('Invalid personal event response');
   return { events: payload.events, revision: Number.isSafeInteger(payload.revision) && payload.revision >= 0 ? payload.revision : 0 };
 }
 export async function pullPersonalEventData(): Promise<PersonalLunarEvent[] | null> {
@@ -237,7 +237,7 @@ function markError(owner: string): void {
   try { const record = read(owner); write(owner, { ...record, status: record.remote ? 'conflict' : 'error' }); } catch { /* Keep existing bytes when storage is full or corrupt. */ }
   announce();
 }
-export async function syncPersonalEventData(events?: PersonalLunarEvent[]): Promise<void> {
+export async function syncPersonalEventData(events?: PersonalLunarEvent[], { retryPull = false }: { retryPull?: boolean } = {}): Promise<void> {
   if (events) savePersonalEventData(events);
   const owner = selectOwner(), token = generation;
   if (!owner || typeof localStorage === 'undefined') return;
@@ -246,7 +246,7 @@ export async function syncPersonalEventData(events?: PersonalLunarEvent[]): Prom
   clearTimeout(timer);
   const existing = inFlight.get(owner);
   if (existing?.generation === token) return existing.promise;
-  const promise = enqueue(owner, () => current(owner, token) ? flush(owner, token) : Promise.resolve());
+  const promise = enqueue(owner, () => current(owner, token) ? flush(owner, token, retryPull) : Promise.resolve());
   inFlight.set(owner, { generation: token, promise });
   try { await promise; }
   finally {
@@ -256,9 +256,19 @@ export async function syncPersonalEventData(events?: PersonalLunarEvent[]): Prom
     }
   }
 }
-async function flush(owner: string, token: number): Promise<void> {
+async function flush(owner: string, token: number, retryPull: boolean): Promise<void> {
   try {
     let record = read(owner);
+    const invalidConflict = (record.remote || record.status === 'conflict') && !validConflict(record);
+    // Chỉ thao tác Thử lại mới đọc lại lỗi pull; chuỗi pull → sync tự động không gửi GET lỗi lần hai.
+    if (retryPull && ((!record.pending && record.status === 'error') || invalidConflict)) {
+      if (!validEventList(record.events) || !validEventList(record.base)) throw new Error('Invalid personal event storage');
+      const snapshot = await fetchRemote(owner, token);
+      if (!snapshot || !current(owner, token)) return;
+      applyRemote(owner, snapshot);
+      announce();
+      record = read(owner);
+    }
     if (!record.pending || record.remote) return;
     if (record.revision === null) {
       const snapshot = await fetchRemote(owner, token);

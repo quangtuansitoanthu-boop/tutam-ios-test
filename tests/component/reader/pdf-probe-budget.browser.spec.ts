@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Harness from './pdf-probe-budget-harness.svelte';
+import { SESSION_CHANGE_EVENT } from '$lib/stores/session.svelte';
 
-const mocks = vi.hoisted(() => ({ stored: false, getDocument: vi.fn(), probe: vi.fn(), version: vi.fn(), bytes: vi.fn(), worker: {}, gestures: vi.fn(() => vi.fn()) }));
+const mocks = vi.hoisted(() => ({ stored: false, getDocument: vi.fn(), probe: vi.fn(), version: vi.fn(), bytes: vi.fn(), download: vi.fn(), worker: {}, gestures: vi.fn(() => vi.fn()) }));
 vi.mock('$lib/components/comments/CommentsPanel.svelte', () => ({ default: () => ({}) }));
 vi.mock('$lib/components/reader/ReaderToolsPanel.svelte', () => ({ default: () => ({}) }));
 vi.mock('$lib/components/reader/MostViewedArticles.svelte', () => ({ default: () => ({}) }));
@@ -20,7 +21,7 @@ vi.mock('$lib/browser/pdf-offline-downloads', () => ({
   resolvePdfRequestUrl: (source: string) => source,
   readPdfOfflineState: async () => mocks.stored ? { ownerId: 'anonymous', sourceUrl: '/probe.pdf', sourceVersion: 'size:9', sizeBytes: 9,
     blob: { arrayBuffer: async () => new TextEncoder().encode('%PDF-test').buffer } } : null,
-  offlinePdfNeedsUpdate: () => false, downloadPdfForOffline: vi.fn(), removePdfOfflineCopy: vi.fn(),
+  offlinePdfNeedsUpdate: () => false, downloadPdfForOffline: mocks.download, removePdfOfflineCopy: vi.fn(),
 }));
 
 let component: ReturnType<typeof Harness> | undefined;
@@ -31,6 +32,7 @@ beforeEach(() => {
   mocks.probe.mockReset().mockResolvedValue(1000);
   mocks.version.mockReset().mockResolvedValue(null);
   mocks.bytes.mockReset().mockRejectedValue(new TypeError('Network unavailable'));
+  mocks.download.mockReset();
   mocks.gestures.mockClear();
   mocks.getDocument.mockReset().mockImplementation(() => ({ promise: new Promise(() => {}), destroy: async () => {} }));
   vi.stubGlobal('indexedDB', {});
@@ -61,6 +63,67 @@ it('performs no size or version probe when opening a stored PDF while offline', 
   await vi.waitFor(() => expect(mocks.getDocument).toHaveBeenCalledTimes(1));
   expect(mocks.getDocument).toHaveBeenCalledWith(expect.objectContaining({ data: expect.any(Uint8Array) }));
   expect(mocks.probe).not.toHaveBeenCalled(); expect(mocks.version).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('does not pass the previous principal downloaded bytes after a switch during Blob reading (switch back: %s)', async switchBack => {
+  let complete!: (bytes: ArrayBuffer) => void;
+  const arrayBuffer = vi.fn(() => new Promise<ArrayBuffer>(resolve => { complete = resolve; }));
+  const saved = { ownerId: 'anonymous', sourceUrl: '/probe.pdf', sizeBytes: 20, blob: { arrayBuffer } };
+  mocks.download.mockResolvedValue(saved);
+  component = mount(Harness, { target: document.body }); flushSync();
+  await vi.waitFor(() => expect(document.querySelector('.btn-confirm')).not.toBeNull());
+  document.querySelector<HTMLButtonElement>('.btn-confirm')!.click(); flushSync();
+  await vi.waitFor(() => expect(arrayBuffer).toHaveBeenCalledTimes(1));
+
+  window.dispatchEvent(new CustomEvent(SESSION_CHANGE_EVENT, {
+    detail: { authenticated: true, user: { id: 'reader-B' }, csrfToken: 'B' },
+  }));
+  if (switchBack) window.dispatchEvent(new CustomEvent(SESSION_CHANGE_EVENT, {
+    detail: { authenticated: false, user: null },
+  }));
+  flushSync();
+  complete(new TextEncoder().encode('account-A-only bytes').buffer);
+  await Promise.resolve(); await Promise.resolve(); flushSync();
+
+  expect(mocks.download).toHaveBeenCalledTimes(1);
+  expect(mocks.getDocument).not.toHaveBeenCalled();
+  expect(document.querySelector('.pdf-error-retry-btn')).not.toBeNull();
+});
+
+it('uses the downloaded bytes when their captured principal remains current', async () => {
+  const bytes = new TextEncoder().encode('%PDF-same-principal').buffer;
+  const saved = { ownerId: 'anonymous', sourceUrl: '/probe.pdf', sizeBytes: bytes.byteLength,
+    blob: { arrayBuffer: async () => bytes } };
+  mocks.download.mockResolvedValue(saved);
+  component = mount(Harness, { target: document.body }); flushSync();
+  await vi.waitFor(() => expect(document.querySelector('.btn-confirm')).not.toBeNull());
+  document.querySelector<HTMLButtonElement>('.btn-confirm')!.click(); flushSync();
+  await vi.waitFor(() => expect(mocks.getDocument).toHaveBeenCalledTimes(1));
+  expect(mocks.getDocument).toHaveBeenCalledWith(expect.objectContaining({ data: new Uint8Array(bytes) }));
+  expect(mocks.download).toHaveBeenCalledTimes(1);
+});
+
+it('closes the canceled old-principal download modal and offers retry after its late receipt', async () => {
+  let complete!: (record: unknown) => void;
+  mocks.download.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  component = mount(Harness, { target: document.body }); flushSync();
+  await vi.waitFor(() => expect(document.querySelector('.btn-confirm')).not.toBeNull());
+  document.querySelector<HTMLButtonElement>('.btn-confirm')!.click(); flushSync();
+  await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledTimes(1));
+  expect(document.querySelector('#pdf-dl-progress-title')).not.toBeNull();
+
+  window.dispatchEvent(new CustomEvent(SESSION_CHANGE_EVENT, {
+    detail: { authenticated: true, user: { id: 'reader-B' }, csrfToken: 'B' },
+  }));
+  flushSync();
+  expect(mocks.download.mock.calls[0][1].signal.aborted).toBe(true);
+  complete({ ownerId: 'anonymous', sourceUrl: '/probe.pdf', sizeBytes: 20,
+    blob: { arrayBuffer: async () => new TextEncoder().encode('old receipt').buffer } });
+  await Promise.resolve(); await Promise.resolve(); flushSync();
+
+  expect(document.querySelector('#pdf-dl-progress-title')).toBeNull();
+  await vi.waitFor(() => expect(document.querySelector('.pdf-error-retry-btn')).not.toBeNull());
+  expect(mocks.getDocument).not.toHaveBeenCalled();
 });
 
 it('aborts a pending document size probe when the reader unmounts', async () => {

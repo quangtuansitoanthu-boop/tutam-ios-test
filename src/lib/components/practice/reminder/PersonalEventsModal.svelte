@@ -608,6 +608,8 @@
   .pem-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
   .pem-label { font-size: var(--font-size-label); font-weight: 600; color: var(--text2); line-height: 1.4; }
   .pem-input, .pem-select { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--touch-target-size); padding: 9px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text); font: inherit; font-size: var(--font-size-input); }
+  /* Giá trị lựa chọn cùng độ đậm với ô nhập, không kế thừa select toàn cục 700. */
+  .pem-dialog .pem-input, .pem-dialog .pem-select { font-weight: 400; }
   .pem-select:disabled { background: var(--bg2); color: var(--muted); cursor: not-allowed; }
   .pem-mode-tabs, .pem-frequency { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; gap: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg2); }
   .pem-mode-switch-wrap { min-width: 0; }
@@ -641,6 +643,12 @@
   .pem-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 12px 14px max(12px, env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border2); background: var(--card); flex: none; }
   .pem-done-btn { min-height: var(--touch-target-size); padding: 0 18px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg2); color: var(--text2); font-weight: 700; }
   .pem-submit-btn { min-height: var(--touch-target-size); padding: 0 18px; border-radius: 12px; border: 0; background: var(--gold); color: var(--on-gold); font-weight: 800; box-shadow: 0 3px 12px color-mix(in srgb, var(--gold) 28%, transparent); }
+  @media (max-height: 320px) {
+    /* Bàn phím ngang có thể không chừa đủ một vùng chạm giữa header/footer cố định. */
+    .pem-dialog[open] { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .pem-form, .pem-body { flex: none; }
+    .pem-body { overflow-y: visible; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .pem-mode-tabs button, .pem-frequency button { transition: none; }
   }

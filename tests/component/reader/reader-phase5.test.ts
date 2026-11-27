@@ -11,6 +11,51 @@ import { createEpub } from '../../../src/lib/components/reader/epub';
 const article: LibraryArticle = { id:'reader-1',title:'Bài đọc',summary:'Tóm tắt',content:'<p>Nội dung đã lọc</p>',category:'SÁCH KHUYẾN THIỆN',tags:[],author:'Quang Từ',imageUrl:'',featured:false,publishedAt:'',hasTableOfContents:false,volumeCount:0,status:'',pdfUrl:'' };
 
 describe('phase 5 reader and admin contracts',()=>{
+  it('keeps the real native PDF toolbar controls at 44px in portrait and landscape without clipping', async () => {
+    const css = ['src/lib/components/library/ReaderBoundary.svelte', 'src/lib/components/reader/PdfCanvasReader.svelte', 'src/lib/components/reader/ReaderToolsPanel.svelte']
+      .map(filename => compile(readFileSync(filename, 'utf8'), { filename, generate: 'client', cssHash: () => 'pdf-toolbar-fixture' }).css!.code).join('\n');
+    const globals = ['tokens.css', 'master-shell.css', 'ui-refresh.css'].map(name => readFileSync(`src/lib/styles/${name}`, 'utf8')).join('\n');
+    const html = render(ReaderBoundary, { props: { article: { ...article, content: '', pdfUrl: '/fixture.pdf' }, session: { authenticated: false } } }).body;
+    const failures: unknown[] = [];
+    for (const engine of [chromium, webkit]) {
+      const browser = await engine.launch({ headless: true });
+      try {
+        const page = await browser.newPage(); await page.emulateMedia({ reducedMotion: 'reduce' }); await page.route('**/*', route => route.abort());
+        for (const viewport of [{ width: 375, height: 844 }, { width: 844, height: 390 }, { width: 1440, height: 900 }]) for (const theme of ['light', 'dark']) {
+          await page.setViewportSize(viewport);
+          await page.setContent(`<html data-native-app="true" data-theme="${theme}"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${globals}${css}</style></head><body>${html}</body></html>`);
+          await page.locator('body *').evaluateAll(elements => elements.forEach(element => element.classList.add('pdf-toolbar-fixture')));
+          await page.locator('.reader-tools-panel').evaluate(panel => {
+            panel.classList.add('open'); panel.setAttribute('data-dialog-glass', 'true');
+            const toggle = document.querySelector('.reader-tools-toggle')!;
+            toggle.classList.add('open'); toggle.setAttribute('aria-expanded', 'true');
+            const backdrop = document.createElement('div'); backdrop.className = 'reader-tools-backdrop pdf-toolbar-fixture';
+            backdrop.setAttribute('role', 'presentation'); backdrop.setAttribute('aria-hidden', 'true'); panel.before(backdrop);
+          });
+          const controls = page.locator('.pdf-controls :is(button,input,select)');
+          expect(await controls.count()).toBeGreaterThan(0);
+          for (const control of await controls.all()) {
+            const result = await control.evaluate(element => {
+              // Scroll the same owner as a user; scrollIntoView also moves clipped reader ancestors.
+              const scroller = element.closest<HTMLElement>(matchMedia('(max-width:768px)').matches ? '.reader-tools-content' : '.pdf-controls')!;
+              const before = element.getBoundingClientRect();
+              const owner = scroller.getBoundingClientRect();
+              scroller.scrollTo({ left: scroller.scrollLeft + before.left - owner.left - (scroller.clientWidth - before.width) / 2, top: scroller.scrollTop + before.top - owner.top - (scroller.clientHeight - before.height) / 2, behavior: 'instant' });
+              const box = element.getBoundingClientRect();
+              const points = [[0, 0], [-21.5, 0], [21.5, 0], [0, -21.5], [0, 21.5]];
+              const misses = points.flatMap(([x, y]) => {
+                const target = document.elementFromPoint(box.left + box.width / 2 + x, box.top + box.height / 2 + y);
+                return element.contains(target) ? [] : [{ x, y, target: target?.tagName + '.' + target?.className }];
+              });
+              return { width: box.width, height: box.height, hit: misses.length === 0, misses, label: element.getAttribute('aria-label') || element.textContent };
+            });
+            if (result.width < 44 || result.height < 44 || !result.hit) failures.push({ engine: engine.name(), viewport, theme, ...result });
+          }
+        }
+      } finally { await browser.close(); }
+    }
+    expect(failures).toEqual([]);
+  }, 30_000);
   it('keeps PDF reset, bookmark jump and the quote shelf link inside 44px hit targets in both CSS engines', async () => {
     const css = ['src/lib/components/reader/PdfCanvasReader.svelte', 'src/lib/components/library/ContinueReadingShelf.svelte']
       .map(filename => compile(readFileSync(filename, 'utf8'), { filename, generate: 'client', cssHash: () => 'reader-touch-fixture' }).css!.code).join('\n');

@@ -25,7 +25,7 @@
     {:else if syncError && syncError.status >= 500}
       <p>{isEn ? 'The server is temporarily unavailable. Please try again later.' : 'Máy chủ tạm thời gặp lỗi. Vui lòng thử lại sau.'}</p>
     {/if}
-    <button type="button" onclick={() => void syncPersonalLunarEventsWithServer()}>{isEn ? 'Retry' : 'Thử lại'}</button>
+    <button type="button" onclick={() => void syncPersonalLunarEventsWithServer(undefined, { retryPull: true })}>{isEn ? 'Retry' : 'Thử lại'}</button>
   </div>
 {:else if status === 'conflict'}
   <div class="sync-note" role="status">
