@@ -526,7 +526,7 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
     }
 
     @MainActor
-    private func recognizeScreenText(_ screenshot: XCUIScreenshot) throws -> String {
+    private func recognizeScreenTextObservations(_ screenshot: XCUIScreenshot) throws -> [VNRecognizedTextObservation] {
         guard let image = screenshot.image.cgImage else {
             throw NSError(domain: "NativeGuestSmokeTests.ScreenCapture", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "The screen capture has no image pixels"])
@@ -536,7 +536,111 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         let request = VNRecognizeTextRequest(completionHandler: nil)
         request.recognitionLevel = .accurate
         try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
-        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        return request.results ?? []
+    }
+
+    @MainActor
+    private func recognizeScreenText(_ screenshot: XCUIScreenshot) throws -> String {
+        return try recognizeScreenTextObservations(screenshot).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+    }
+
+    private enum NativePickerSaveAction {
+        case accessibility(XCUIElement)
+        case recognizedText(CGRect)
+    }
+
+    @MainActor
+    private func waitForNativePickerSave(_ app: XCUIApplication) -> NativePickerSaveAction? {
+        let deadline = ProcessInfo.processInfo.systemUptime + 20
+        let sheet = app.otherElements["Browse View (Picker)"].firstMatch
+        let navigation = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].firstMatch
+        let save = navigation.buttons.matching(NSPredicate(format: "label IN %@", ["Lưu", "Save"] as NSArray)).firstMatch
+        var screenshot = XCUIScreen.main.screenshot()
+        var recognizedText = ""
+        var selectedNativeLocation = false
+        repeat {
+            if app.state == .runningForeground && sheet.exists && navigation.exists {
+                let screen = app.frame
+                let sheetFrame = sheet.frame
+                let header = screen.intersection(sheetFrame).intersection(navigation.frame)
+                if save.exists && save.isHittable && header.contains(save.frame) {
+                    return .accessibility(save)
+                }
+                screenshot = XCUIScreen.main.screenshot()
+                do {
+                    let observations = try recognizeScreenTextObservations(screenshot)
+                    recognizedText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+                    let size = screenshot.image.size
+                    guard screen.width > 0, screen.height > 0, size.width > 0, size.height > 0,
+                          abs(size.width / size.height - screen.width / screen.height) < 0.01 else {
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+                        continue
+                    }
+                    let recognizedControls = observations.compactMap { observation -> (label: String, frame: CGRect)? in
+                        guard let text = observation.topCandidates(1).first?.string else { return nil }
+                        // Vision trả tọa độ ảnh chuẩn hóa với gốc ở góc trái dưới.
+                        // https://developer.apple.com/documentation/vision/vndetectedobjectobservation/boundingbox
+                        let box = observation.boundingBox
+                        let frame = CGRect(x: screen.minX + box.minX * screen.width,
+                                           y: screen.minY + (1 - box.maxY) * screen.height,
+                                           width: box.width * screen.width, height: box.height * screen.height)
+                        return frame.width > 0 && frame.height > 0 ? (self.normalizedQuoteFeedback(text), frame) : nil
+                    }
+                    let candidates = recognizedControls.filter {
+                        ["luu", "save"].contains($0.label) && header.contains($0.frame)
+                    }.map { $0.frame }
+                    if candidates.count == 1, let frame = candidates.first {
+                        let image = XCTAttachment(screenshot: screenshot)
+                        image.name = "quote-native-picker-visible-save-screen"
+                        image.lifetime = .keepAlways
+                        add(image)
+                        let text = XCTAttachment(string: "Visible native Save bounds: \(frame)\n" + recognizedText)
+                        text.name = "quote-native-picker-visible-save-recognized-text"
+                        text.lifetime = .keepAlways
+                        add(text)
+                        return .recognizedText(frame)
+                    }
+                    // Bộ chọn mới có thể dừng ở Duyệt. Chọn vị trí thật một lần
+                    // trong cùng ngân sách20giây, trước khi yêu cầu nút Lưu xuất hiện.
+                    let browseHeaderVisible = recognizedControls.contains {
+                        ["duyet", "browse"].contains($0.label) && header.contains($0.frame)
+                    }
+                    let locations = recognizedControls.filter {
+                        ["tren iphone", "on my iphone"].contains($0.label) &&
+                        screen.contains($0.frame) && sheetFrame.contains($0.frame) && $0.frame.minY >= header.maxY
+                    }
+                    let location = sheet.staticTexts.matching(NSPredicate(format: "label IN %@", ["Trên iPhone", "On My iPhone"] as NSArray)).firstMatch
+                    if !selectedNativeLocation && browseHeaderVisible && locations.count == 1 && location.exists {
+                        let frame = location.frame
+                        if screen.contains(frame) && sheetFrame.contains(frame) &&
+                            frame.intersects(locations[0].frame) && location.isHittable {
+                            selectedNativeLocation = true
+                            let image = XCTAttachment(screenshot: screenshot)
+                            image.name = "quote-native-picker-before-location-selection"
+                            image.lifetime = .keepAlways
+                            add(image)
+                            let text = XCTAttachment(string: "Selecting native location once: \(frame)\n" + recognizedText)
+                            text.name = "quote-native-picker-location-recognized-text"
+                            text.lifetime = .keepAlways
+                            add(text)
+                            location.tap()
+                        }
+                    }
+                } catch {
+                    recognizedText = "Vision text recognition failed: \(error)"
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        let image = XCTAttachment(screenshot: screenshot)
+        image.name = "quote-native-picker-save-not-found-screen"
+        image.lifetime = .keepAlways
+        add(image)
+        let text = XCTAttachment(string: recognizedText)
+        text.name = "quote-native-picker-save-not-found-recognized-text"
+        text.lifetime = .keepAlways
+        add(text)
+        return nil
     }
 
     @MainActor
@@ -585,14 +689,15 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
 
         // iOS 26 exposes an off-sheet “Hủy” at the same screen position as the Files More button.
         let pickerNavigation = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].firstMatch
-        let pickerSave = pickerNavigation.buttons.matching(NSPredicate(format: "label IN %@", ["Lưu", "Save"] as NSArray)).firstMatch
-        XCTAssertTrue(pickerSave.waitForExistence(timeout: 20), "PNG export must present the native Files destination picker instead of a blob navigation")
+        let firstSaveAction = waitForNativePickerSave(app)
+        XCTAssertNotNil(firstSaveAction, "PNG export must present the native Files destination picker instead of a blob navigation")
+        guard let firstSaveAction = firstSaveAction else { return }
         XCTAssertTrue(pickerNavigation.exists, "The save action must belong to the native Files navigation")
         XCTAssertFalse(saveImage.isEnabled, "The export promise must remain pending while the native picker owns the file")
         evidence("quote-image-native-files-picker", app: app)
         let cancelLabels = NSPredicate(format: "label IN %@", ["Hủy", "Cancel"] as NSArray)
         let cancel = pickerNavigation.buttons.matching(cancelLabels).firstMatch
-        if cancel.exists && cancel.isHittable {
+        if case .accessibility(_) = firstSaveAction, cancel.exists && cancel.isHittable {
             cancel.tap()
         } else {
             let sheet = app.otherElements["Browse View (Picker)"].firstMatch
@@ -621,13 +726,28 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
             return
         }
         tap(saveImage, app: app)
-        XCTAssertTrue(pickerSave.waitForExistence(timeout: 20), "A second export must open a fresh native destination after cancellation")
+        let secondSaveAction = waitForNativePickerSave(app)
+        XCTAssertNotNil(secondSaveAction, "A second export must open a fresh native destination after cancellation")
+        guard let secondSaveAction = secondSaveAction else { return }
         XCTAssertFalse(saveImage.isEnabled, "The second export must keep its source file until native completion")
-        XCTAssertTrue(pickerSave.isHittable)
-        pickerSave.tap()
+        switch secondSaveAction {
+        case .accessibility(let pickerSave):
+            XCTAssertTrue(pickerSave.isHittable)
+            pickerSave.tap()
+        case .recognizedText(let frame):
+            let viewport = app.frame
+            let sheet = app.otherElements["Browse View (Picker)"].firstMatch
+            guard app.state == .runningForeground && sheet.exists && pickerNavigation.exists && viewport.contains(frame) &&
+                  sheet.frame.contains(frame) && pickerNavigation.frame.contains(frame) else {
+                XCTFail("The recognized Save control must remain inside the foreground native picker header")
+                return
+            }
+            app.coordinate(withNormalizedOffset: CGVector(dx: (frame.midX - viewport.minX) / viewport.width,
+                dy: (frame.midY - viewport.minY) / viewport.height)).tap()
+        }
         waitForVisibleQuoteSaveFeedback()
         waitUntil("Saving the native PNG must return to the usable quote dialog") {
-            !pickerSave.exists && title.exists && saveImage.exists && saveImage.isEnabled
+            !pickerNavigation.exists && title.exists && saveImage.exists && saveImage.isEnabled
         }
         evidence("quote-image-native-save-completed", app: app)
         tap(app.buttons["Đóng"].firstMatch, app: app)

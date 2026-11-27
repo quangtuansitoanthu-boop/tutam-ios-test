@@ -491,10 +491,11 @@
         {/if}
 
         <div class="ml-canon-box">
-          <span class="ml-canon-eyebrow">NGUYÊN VĂN KINH CHIÊM SÁT</span>
+          <span class="ml-canon-eyebrow">{resolvedEntry.quotation ? 'NGUYÊN VĂN KINH CHIÊM SÁT' : 'DIỄN Ý CÂU KINH CHIÊM SÁT'}</span>
           <p class="ml-canon-quote">{resolvedEntry.text}</p>
           <p class="ml-canon-source">
             Kinh Chiêm Sát Thiện Ác Nghiệp Báo · Quyển Thượng · Câu số {resolvedEntry.id} / 189
+            {#if resolvedEntry.quotation} · Chuyển ngữ: Như Hòa{:else} · Đối chiếu bản Hán T0839{/if}
           </p>
         </div>
       </header>

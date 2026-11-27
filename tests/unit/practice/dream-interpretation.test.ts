@@ -82,6 +82,16 @@ describe('offline dream catalog', () => {
     expect(caseCount('vo-guong')).toBeGreaterThanOrEqual(6);
   });
 
+  it('keeps the specific snake and dog bite meanings attached to their matching details', () => {
+    const cases = (id: string) => getDreamEntry(id)!.scenarioGroups.flatMap(group => group.items);
+    const handBleeding = cases('ran-bi-can').find(item => /tay/u.test(item.title) && /chảy máu/u.test(item.title));
+    expect(handBleeding).toBeDefined();
+    expect(handBleeding!.paragraphs[0]).toMatch(/tiền (?:bạc|nong)|tài chính/u);
+    const dogHand = cases('cho').find(item => /cắn tay/u.test(item.title) && !/máu/u.test(item.title));
+    expect(dogHand).toBeDefined();
+    expect(dogHand!.paragraphs[0]).toMatch(/công việc|giao dịch/u);
+  });
+
   it('returns exactly 10 unique popular dreams for the default list', () => {
     const popular = getPopularDreamEntries();
     expect(popular).toHaveLength(10);

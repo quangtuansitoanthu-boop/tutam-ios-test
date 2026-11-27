@@ -15,6 +15,8 @@ on:
           - typing
           - audit
           - home
+          - personal
+          - diagnostic
   push:
     branches:
       - 'codex/qa-*'
@@ -35,7 +37,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        suite: ${{ fromJSON(inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
+        suite: ${{ fromJSON(inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || inputs.test_suite == 'diagnostic' && '["smoke","personal"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     env:
       TUTAM_BUNDLE_SYNCED: '1'
       VITE_GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
@@ -319,6 +321,22 @@ jobs:
           mkdir -p build/release-evidence
           if [ -n "${TUTAM_QA_SIMULATOR:-}" ]; then
             xcrun simctl io "$TUTAM_QA_SIMULATOR" screenshot build/release-evidence/native-ui-final.png
+            if qa_app_data="$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam data 2>build/release-evidence/native-qa-cache-export.log)"; then
+              qa_events_file="$qa_app_data/Library/Caches/tutam-qa-events.jsonl"
+              if [ -f "$qa_events_file" ]; then
+                cp "$qa_events_file" build/release-evidence/native-qa-events.jsonl
+                qa_events_bytes="$(wc -c < "$qa_events_file")"
+                printf 'Exported existing QA event cache: %s bytes; writer cap is 262144 bytes.\n' "$qa_events_bytes" >> build/release-evidence/native-qa-cache-export.log
+              else
+                printf 'The existing QA event cache was not created.\n' >> build/release-evidence/native-qa-cache-export.log
+              fi
+            fi
+            # NSLog vẫn ghi sau khi tệp JSONL đạt giới hạn kích thước.
+            if ! xcrun simctl spawn "$TUTAM_QA_SIMULATOR" log show --style json --info --debug --last 2h \
+              --predicate 'eventMessage CONTAINS "[TutamQA]"' \
+              > build/release-evidence/native-qa-unified-log.json 2>build/release-evidence/native-qa-unified-log-export.log; then
+              printf 'Filtered simulator unified-log export failed; see the preceding error.\n' >> build/release-evidence/native-qa-unified-log-export.log
+            fi
           fi
           result=build/release-evidence/NativeGuestSmoke.xcresult
           if [ -d "$result" ]; then

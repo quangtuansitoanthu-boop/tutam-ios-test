@@ -95,9 +95,37 @@ it('uses the bundled Bookerly only for dream and divination result content in bo
             : '.div-subbar-title,.div-guide-btn,.div-section-accent-heading,.div-btn';
           const uiFamilies = await page.locator(uiSelectors).evaluateAll(nodes => nodes.map(node => getComputedStyle(node).fontFamily));
           expect(uiFamilies.every(family => !family.includes('Bookerly'))).toBe(true);
-          await page.evaluate(async () => { await document.fonts.ready; await document.fonts.load('400 16px Bookerly','Tiếng Việt'); });
-          const faces = await page.evaluate(() => [...document.fonts].map(face => ({family:face.family.replaceAll(/["']/gu,''),status:face.status})));
-          expect(faces.some(face => face.family === 'Bookerly' && face.status === 'loaded'),`${engine.name()} ${kind}: ${JSON.stringify(faces)}`).toBe(true);
+          // Style vừa gắn có thể làm promise ready cũ của WebKit hết hiệu lực.
+          // Chờ render hiện tại rồi kiểm tra FontFaceSet mới; kết quả load rỗng
+          // không được coi là đã tải được font để hiển thị chữ Việt.
+          await expect.poll(async () => ({
+            ...await page.evaluate(async () => {
+              await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+              document.body.getBoundingClientRect();
+              const font = 'normal 400 16px "Bookerly"';
+              const text = 'Tiếng Việt';
+              let requested: FontFace[] = [];
+              let loadError: string | null = null;
+              try {
+                requested = await document.fonts.load(font,text);
+                await document.fonts.ready;
+              } catch (error) {
+                loadError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+              }
+              const describe = (face: FontFace) => ({family:face.family.replaceAll(/["']/gu,''),weight:face.weight,style:face.style,status:face.status});
+              const returnedFaces = requested.map(describe);
+              const currentFaces = [...document.fonts].map(describe);
+              return {
+                requestedNonempty: returnedFaces.length > 0,
+                requestedLoaded: returnedFaces.every(face => face.family === 'Bookerly' && face.weight === '400' && face.style === 'normal' && face.status === 'loaded'),
+                currentLoaded: currentFaces.some(face => face.family === 'Bookerly' && face.weight === '400' && face.style === 'normal' && face.status === 'loaded'),
+                glyphsReady: document.fonts.check(font,text),
+                loadError,returnedFaces,currentFaces,
+              };
+            }),
+            requests: requests.filter(request => request.startsWith('/fonts/')),
+          }), {timeout:5_000,interval:100,message:`${engine.name()} ${kind} native=${native} ${viewport.width}x${viewport.height} ${theme}`})
+            .toMatchObject({requestedNonempty:true,requestedLoaded:true,currentLoaded:true,glyphsReady:true,loadError:null});
           if (kind === 'dream') {
             const paragraph = page.locator('.dream-detail-section:not(.dream-note-form) > p').first();
             const increase = page.getByRole('button',{name:'Tăng cỡ chữ bài giải mộng'});
@@ -113,6 +141,7 @@ it('uses the bundled Bookerly only for dream and divination result content in bo
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         }
       }
+      expect(requests).toContain('/fonts/bookerly/bookerly-regular.ttf');
       expect(requests.some(request => request.startsWith('/api/'))).toBe(false);
     } finally { await browser.close(); }
   }

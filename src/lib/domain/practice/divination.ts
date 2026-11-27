@@ -82,6 +82,7 @@ export interface MocLuanResolvedEntry {
   id: number;
   scope: MocLuanScopeInfo;
   text: string;
+  quotation: boolean;
   lecture: string;
   deepMeaning: string;
   guidance: string;
@@ -164,6 +165,7 @@ interface RawMocLuanDataset {
   verses: Array<{
     id: number;
     text: string;
+    quotation?: boolean;
     analysis: string;
     lectureSummary: string;
     guidance: string;
@@ -306,11 +308,14 @@ export function resolveMocLuanEntry(total: number): MocLuanResolvedEntry | null 
   if (!raw) return null;
 
   const scope = getMocLuanScope(total);
+  const text = raw.text.endsWith('.') ? raw.text : `${raw.text}.`;
+  const quotation = raw.quotation !== false;
 
   return {
     id: total,
     scope,
-    text: `“${raw.text.endsWith('.') ? raw.text : `${raw.text}.`}”`,
+    text: quotation ? `“${text}”` : text,
+    quotation,
     lecture: raw.lectureSummary,
     deepMeaning: raw.analysis,
     guidance: raw.guidance,

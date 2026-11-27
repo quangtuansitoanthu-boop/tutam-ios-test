@@ -259,6 +259,15 @@ describe('Mộc Luân Chiêm Sát domain & 189 canonical verses', () => {
     expect(raw).not.toMatch(/s ẽ|cùng dường|cho quý đi|liễu tử sanh|:\s*\.\s*Địa Tạng/u);
   });
 
+  it('labels the three rephrased scripture answers separately from the chosen verbatim translation', () => {
+    const paraphrased = new Set([134, 146, 147]);
+    for (let id = 1; id <= 189; id += 1) {
+      const entry = resolveMocLuanEntry(id)!;
+      expect(entry.quotation, `Tướng ${id}`).toBe(!paraphrased.has(id));
+      if (paraphrased.has(id)) expect(entry.text).not.toMatch(/^[“”]/u);
+    }
+  });
+
   it('parses parenthetical instructions into italic-marked segments cleanly', () => {
     const segs = parseParentheticalSegments('Đảnh lễ Phật (3 lễ), xưng danh hiệu (1.000 biến).');
     expect(segs).toEqual([
