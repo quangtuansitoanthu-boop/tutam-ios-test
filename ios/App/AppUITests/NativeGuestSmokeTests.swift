@@ -350,7 +350,10 @@ class NativeGuestUITestCase: XCTestCase {
     func openSettings(_ app: XCUIApplication, captureNavigationEvidence: Bool = true) {
         let master = app.switches["Bật thông báo nhắc nhở tu tập"].firstMatch
         // Quay lại từ Notification Center vẫn ở settings; bấm lại tab hiện tại không xóa query tab=settings.
-        if master.exists && master.frame.width > 0 && master.frame.height > 0 { return }
+        if master.exists {
+            let frame = master.frame
+            if frame.width > 0 && frame.height > 0 { return }
+        }
         navigate("Cá nhân", app: app, captureNavigationEvidence: captureNavigationEvidence)
         let settings = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Cài đặt ứng dụng")).firstMatch
         tap(settings, app: app)
@@ -377,11 +380,12 @@ class NativeGuestUITestCase: XCTestCase {
 
     @MainActor
     func checked(_ element: XCUIElement) -> Bool? {
-        if let value = element.value as? String {
-            if ["1", "true"].contains(value.lowercased()) { return true }
-            if ["0", "false"].contains(value.lowercased()) { return false }
+        let value = element.value
+        if let text = value as? String {
+            if ["1", "true"].contains(text.lowercased()) { return true }
+            if ["0", "false"].contains(text.lowercased()) { return false }
         }
-        return (element.value as? NSNumber)?.boolValue
+        return (value as? NSNumber)?.boolValue
     }
 
     @MainActor
@@ -395,14 +399,12 @@ class NativeGuestUITestCase: XCTestCase {
 
     @MainActor
     func revealContentControl(_ card: XCUIElement, app: XCUIApplication) {
-        func contentViewport() -> CGRect? {
-            let frame = app.frame
+        func contentViewport(_ frame: CGRect) -> CGRect? {
             let chromeTolerance: CGFloat = 2
             guard frame.width.isFinite && frame.height.isFinite && frame.minX.isFinite && frame.minY.isFinite,
                   frame.width > 0 && frame.height > 0 else { return nil }
             let headers = app.otherElements.matching(NSPredicate(format: "label == %@ OR label == %@ OR label == %@ OR label == %@ OR label == %@ OR label == %@", "biểu ngữ", "banner", "Tu tập Phật pháp, điều hướng", "Tu Tập Phật Pháp, điều hướng", "Tu tập Phật pháp, navigation", "Tu Tập Phật Pháp, navigation")).allElementsBoundByIndex
-            guard let header = headers.first(where: {
-                let bounds = $0.frame
+            guard let headerFrame = headers.lazy.map({ $0.frame }).first(where: { bounds in
                 return bounds.width > 0 && bounds.height > 0 && bounds.intersects(frame)
                     && bounds.minX >= frame.minX - chromeTolerance && bounds.maxX <= frame.maxX + chromeTolerance
                     && bounds.minY <= frame.minY + chromeTolerance && bounds.maxY > frame.minY && bounds.maxY < frame.midY
@@ -416,7 +418,7 @@ class NativeGuestUITestCase: XCTestCase {
                   footer.minX >= frame.minX - chromeTolerance && footer.maxX <= frame.maxX + chromeTolerance,
                   clippedFooter.width > 0 && clippedFooter.height >= 44,
                   clippedFooter.minY > frame.midY && clippedFooter.minY < frame.maxY else { return nil }
-            let clippedHeader = header.frame.intersection(frame)
+            let clippedHeader = headerFrame.intersection(frame)
             guard clippedHeader.width > 0 && clippedHeader.height > 0 else { return nil }
             let top = clippedHeader.maxY
             let bottom = clippedFooter.minY
@@ -424,7 +426,9 @@ class NativeGuestUITestCase: XCTestCase {
             return CGRect(x: frame.minX, y: top, width: frame.width, height: bottom - top)
         }
         for attempt in 0..<14 {
-            guard let viewport = contentViewport() else {
+            // Chỉ dùng chung scalar trong lượt này; sau mỗi cử chỉ vòng lặp đọc AX mới.
+            let frame = app.frame
+            guard let viewport = contentViewport(frame) else {
                 evidence("missing-content-control-chrome", app: app)
                 XCTFail("Content control scrolling requires actual header and footer accessibility frames")
                 return
@@ -449,15 +453,14 @@ class NativeGuestUITestCase: XCTestCase {
             let limit = viewport.height * 0.5
             delta = max(-limit, min(limit, delta))
             let x = bounds.width > 0 ? min(viewport.maxX - margin, max(viewport.minX + margin, bounds.midX)) : viewport.midX
-            let frame = app.frame
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: (x - frame.minX) / frame.width, dy: (viewport.midY + delta / 2 - frame.minY) / frame.height))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: (x - frame.minX) / frame.width, dy: (viewport.midY - delta / 2 - frame.minY) / frame.height))
             start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
         }
-        if let viewport = contentViewport(), card.exists, viewport.contains(card.frame), card.isHittable { return }
+        if let viewport = contentViewport(app.frame), card.exists, viewport.contains(card.frame), card.isHittable { return }
         evidence("unreachable-content-control", app: app)
         XCTAssertTrue(card.exists, "Content control must exist after bounded content scrolling")
-        if let viewport = contentViewport() {
+        if let viewport = contentViewport(app.frame) {
             XCTAssertTrue(insideViewport(card, viewport: viewport), "Whole control must fit between the actual header and footer")
             XCTAssertTrue(card.isHittable, "Content control must receive the single real tap")
         } else {
@@ -1417,7 +1420,9 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     private func openPersonal(_ app: XCUIApplication, requestPermission: Bool = false) {
         if requestPermission { allowPersonalNotificationPermission(app) }
         let enabled = app.switches["Ngày Lễ Cá Nhân"].firstMatch
-        if !enabled.exists || enabled.frame.width == 0 || enabled.frame.height == 0 {
+        let enabledExists = enabled.exists
+        let enabledFrame = enabledExists ? enabled.frame : .zero
+        if !enabledExists || enabledFrame.width == 0 || enabledFrame.height == 0 {
             let summary = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ngày lễ cá nhân ")).firstMatch
             tap(summary, app: app)
         }
@@ -1444,13 +1449,32 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         let findControl = { () -> XCUIElement? in
             var fallback: XCUIElement?
             for element in matches.allElementsBoundByIndex {
+                // Một snapshot cho các thuộc tính cùng candidate; không giữ qua reveal/tap/wait.
+                let type: XCUIElement.ElementType
+                let frame: CGRect
+                let value: String?
+                let label: String
+                if let snapshot = try? element.snapshot() {
+                    type = snapshot.elementType
+                    frame = snapshot.frame
+                    value = snapshot.value as? String
+                    label = snapshot.label
+                } else {
+                    // Nếu snapshot không có, giữ cả thứ tự short-circuit của đường đọc cũ.
+                    type = element.elementType
+                    guard type != .staticText else { continue }
+                    frame = element.frame
+                    guard frame.width > 0 && frame.height > 0 else { continue }
+                    value = element.value as? String
+                    guard value.map({ !$0.isEmpty }) ?? false else { continue }
+                    label = element.label
+                }
                 // Caption Other không có value; select Other có value dù AX nội bộ chỉ cao 35pt.
-                guard element.elementType != .staticText else { continue }
-                let frame = element.frame
+                guard type != .staticText else { continue }
                 guard frame.width > 0 && frame.height > 0 &&
-                    ((element.value as? String).map { !$0.isEmpty } ?? false) else { continue }
+                    (value.map { !$0.isEmpty } ?? false) else { continue }
                 if fallback == nil { fallback = element }
-                if element.label == caption { return element }
+                if label == caption { return element }
             }
             return fallback
         }

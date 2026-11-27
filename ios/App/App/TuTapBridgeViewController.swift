@@ -486,7 +486,7 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
         let allowedDomains = ["NSCocoaErrorDomain", "NSPOSIXErrorDomain", "NSURLErrorDomain"]
         let domain = nativeError.map { allowedDomains.contains($0.domain) ? $0.domain : "other" } ?? "none"
         let code = nativeError?.code ?? 0
-        let window = onMain ? (presenter?.viewIfLoaded?.window ?? bridge?.viewController.viewIfLoaded?.window) : nil
+        let window = onMain ? (presenter?.viewIfLoaded?.window ?? bridge?.viewController?.viewIfLoaded?.window) : nil
         let event = TuTapQAImageExportEvent(
             phase: phase, operationId: qaExportOperationId, pid: Int(ProcessInfo.processInfo.processIdentifier),
             uptime: ProcessInfo.processInfo.systemUptime, mainThread: onMain,
