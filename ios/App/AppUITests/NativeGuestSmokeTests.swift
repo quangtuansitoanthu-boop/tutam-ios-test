@@ -308,6 +308,7 @@ class NativeGuestUITestCase: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: (target.x - targetViewport.minX) / targetViewport.width, dy: (target.y - targetViewport.minY) / targetViewport.height)).tap()
         let marker: XCUIElement
         switch label {
+        case "Trang chủ": marker = app.buttons["Tạo ảnh"].firstMatch
         case "Cá nhân": marker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Cài đặt ứng dụng ")).firstMatch
         case "Kinh sách": marker = app.staticTexts["Kho Kinh Sách"].firstMatch
         case "Pháp thoại": marker = app.searchFields["Tìm kiếm album..."].firstMatch
@@ -1298,10 +1299,11 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     }
 
     @MainActor
-    private func replaceName(_ text: String, app: XCUIApplication) {
-        let field = app.textFields["Tên ngày lễ *"].firstMatch
+    private func replaceName(_ text: String, app: XCUIApplication, fieldLabel: String = "Tên ngày lễ *") {
+        let field = app.textFields[fieldLabel].firstMatch
         // WebKit can report the input as hittable while it is behind the fixed header.
-        revealContentControl(field, app: app)
+        if fieldLabel == "Tên ngày lễ *" { revealContentControl(field, app: app) }
+        else { reveal(field, app: app) }
         field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(existsOrWait(app.keyboards.firstMatch, timeout: 10),
                       "Tapping the visible title field must open the native keyboard before typing")
@@ -1475,6 +1477,127 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
             }
         }
         waitPersonalUntil("Confirmed deletion must remove only the named QA event") { !app.staticTexts[title].firstMatch.exists }
+    }
+
+    @MainActor
+    private func homePersonalDialog(_ app: XCUIApplication) -> XCUIElement {
+        app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Quản lý Ngày Lễ Cá Nhân")).firstMatch
+    }
+
+    @MainActor
+    private func openHomePersonal(_ app: XCUIApplication) {
+        tap(app.buttons["Thêm ngày lễ cá nhân"].firstMatch, app: app)
+        XCTAssertTrue(homePersonalDialog(app).waitForExistence(timeout: 15), "Home's actual Add button must open its own anniversary dialog")
+        XCTAssertTrue(app.textFields["Tên ngày lễ / Sự kiện *"].firstMatch.exists)
+        XCTAssertEqual(app.textFields.matching(identifier: "Tên ngày lễ / Sự kiện *").count, 1, "Repeated Home opens must not stack duplicate editors")
+    }
+
+    @MainActor
+    private func saveHomePersonal(_ title: String, app: XCUIApplication) {
+        dismissPersonalKeyboard(app)
+        let save = homePersonalDialog(app).buttons["Lưu ngày lễ"].firstMatch
+        reveal(save, app: app)
+        XCTAssertTrue(app.frame.contains(save.frame) && save.isHittable, "Home Save must be reachable above the safe-area edge")
+        XCTAssertGreaterThanOrEqual(save.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(save.frame.height, 44)
+        save.tap()
+        // Saving from Home is an explicit reminder action and can prompt on a fresh install.
+        allowExpectedNotificationPermission(app, required: false)
+        let alert = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Đã thêm ngày lễ cá nhân")).firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 15), "One Save tap must show Home's actual saved alert")
+        alert.buttons["Đóng"].firstMatch.tap()
+        waitPersonalUntil("Saved alert must close while Home's manager stays open") { !alert.exists && self.homePersonalDialog(app).exists }
+        let saved = homePersonalDialog(app).staticTexts[title].firstMatch
+        reveal(saved, app: app)
+        XCTAssertTrue(saved.exists, "The exact saved QA anniversary must appear in Home's manager")
+        XCTAssertEqual(homePersonalDialog(app).staticTexts.matching(identifier: title).count, 1, "A single Save must create exactly one row")
+        let field = app.textFields["Tên ngày lễ / Sự kiện *"].firstMatch
+        reveal(field, app: app)
+        XCTAssertTrue(field.exists)
+        let value = field.value as? String ?? ""
+        XCTAssertTrue(value.isEmpty || value == (field.placeholderValue ?? ""), "Home Save must reset its draft without closing the manager")
+    }
+
+    @MainActor
+    private func deleteHomePersonal(_ title: String, cancelFirst: Bool, app: XCUIApplication) {
+        for action in (cancelFirst ? ["Giữ lại", "Xóa lịch"] : ["Xóa lịch"]) {
+            tap(homePersonalDialog(app).buttons["Xóa " + title].firstMatch, app: app)
+            let confirm = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Xóa lịch cá nhân?")).firstMatch
+            XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+            XCTAssertTrue(confirm.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "“\(title)”")).firstMatch.exists,
+                          "Delete confirmation must identify only this test's event")
+            let choice = confirm.buttons[action].firstMatch
+            XCTAssertTrue(choice.isHittable)
+            choice.tap()
+            waitPersonalUntil("Home delete choice must close after one tap") { !confirm.exists }
+            if action == "Giữ lại" {
+                XCTAssertTrue(homePersonalDialog(app).staticTexts[title].firstMatch.exists)
+            }
+        }
+        waitPersonalUntil("Home deletion must remove the named QA event") { !self.homePersonalDialog(app).staticTexts[title].firstMatch.exists }
+    }
+
+    @MainActor
+    func testHomePersonalAnniversariesLunarSolarCancelSaveDeleteAndPersistence() {
+        let app = launchGuest()
+        navigate("Trang chủ", app: app, captureNavigationEvidence: false)
+        let suffix = String(UUID().uuidString.prefix(8))
+        let lunar = "QA trang chủ âm " + suffix
+        let solar = "QA trang chủ dương " + suffix
+        let cancelled = "QA chưa lưu " + suffix
+        openHomePersonal(app)
+        replaceName(cancelled, app: app, fieldLabel: "Tên ngày lễ / Sự kiện *")
+        let field = app.textFields["Tên ngày lễ / Sự kiện *"].firstMatch
+        XCTAssertTrue(app.frame.contains(field.frame))
+        XCTAssertLessThanOrEqual(field.frame.maxY, app.keyboards.firstMatch.frame.minY, "Home's focused title must remain above the native keyboard")
+        dismissPersonalKeyboard(app)
+        select("Ngày Âm", option: "Ngày 15", app: app)
+        select("Tháng Âm", option: "Tháng 7", app: app)
+        tap(homePersonalDialog(app).buttons["Đóng cửa sổ"].firstMatch, app: app)
+        waitPersonalUntil("Closing the Home draft must dismiss the manager") { !self.homePersonalDialog(app).exists }
+        XCTAssertFalse(app.staticTexts[cancelled].firstMatch.exists, "Closing an unsaved draft must not persist an event")
+        openHomePersonal(app)
+        replaceName(lunar, app: app, fieldLabel: "Tên ngày lễ / Sự kiện *")
+        dismissPersonalKeyboard(app)
+        XCTAssertEqual(namedControl("Ngày Âm", app: app).value as? String, "Ngày 15", "Reopening must retain the unsaved lunar draft")
+        XCTAssertEqual(namedControl("Tháng Âm", app: app).value as? String, "Tháng 7")
+        saveHomePersonal(lunar, app: app)
+        replaceName(solar, app: app, fieldLabel: "Tên ngày lễ / Sự kiện *")
+        selectPersonalSegment("Dương lịch", app: app)
+        select("Ngày Dương", option: "Ngày 07", app: app)
+        select("Tháng Dương", option: "Tháng 11", app: app)
+        saveHomePersonal(solar, app: app)
+        tap(homePersonalDialog(app).buttons["Đóng cửa sổ"].firstMatch, app: app)
+        waitPersonalUntil("Home must remain usable after closing its manager") { !self.homePersonalDialog(app).exists }
+        reveal(app.staticTexts[lunar].firstMatch, app: app)
+        XCTAssertTrue(app.staticTexts[lunar].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts[solar].firstMatch.exists)
+        evidence("home-personal-lunar-solar-saved", app: app)
+        app.terminate()
+        app.launch()
+        waitForStartupCoverToClear(app)
+        deferStartupNotificationPrompt(app, timeout: 7)
+        navigate("Trang chủ", app: app, captureNavigationEvidence: false)
+        openHomePersonal(app)
+        reveal(homePersonalDialog(app).staticTexts[lunar].firstMatch, app: app)
+        XCTAssertTrue(homePersonalDialog(app).staticTexts[lunar].firstMatch.exists, "Home lunar anniversary must survive a relaunch")
+        reveal(homePersonalDialog(app).staticTexts[solar].firstMatch, app: app)
+        XCTAssertTrue(homePersonalDialog(app).staticTexts[solar].firstMatch.exists, "Home solar anniversary must survive a relaunch")
+        deleteHomePersonal(solar, cancelFirst: true, app: app)
+        deleteHomePersonal(lunar, cancelFirst: false, app: app)
+        tap(homePersonalDialog(app).buttons["Đóng cửa sổ"].firstMatch, app: app)
+        waitPersonalUntil("Cleanup must leave Home without a modal") { !self.homePersonalDialog(app).exists }
+        app.terminate()
+        app.launch()
+        waitForStartupCoverToClear(app)
+        deferStartupNotificationPrompt(app, timeout: 7)
+        navigate("Trang chủ", app: app, captureNavigationEvidence: false)
+        openHomePersonal(app)
+        XCTAssertFalse(homePersonalDialog(app).staticTexts[lunar].firstMatch.exists)
+        XCTAssertFalse(homePersonalDialog(app).staticTexts[solar].firstMatch.exists)
+        XCTAssertFalse(homePersonalDialog(app).staticTexts[cancelled].firstMatch.exists)
+        tap(homePersonalDialog(app).buttons["Đóng cửa sổ"].firstMatch, app: app)
+        evidence("home-personal-crud-cleanup-persisted", app: app)
     }
 
     @MainActor
