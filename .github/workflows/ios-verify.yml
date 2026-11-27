@@ -46,7 +46,7 @@ jobs:
       matrix:
         suite: ${{ fromJSON(inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || inputs.test_suite == 'diagnostic' && '["smoke","personal"]' || inputs.test_suite == 'trace' && '["quote","navigation"]' || inputs.test_suite == 'tools' && '["quote","dream","biorhythm","typing","audio"]' || inputs.test_suite == 'followup' && '["dream","biorhythm","share"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
       TUTAM_BUNDLE_SYNCED: '1'
       VITE_GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
       # Each audit class gets a fresh runner/install; permission grants must not leak into Typing.
@@ -69,9 +69,9 @@ jobs:
           test -d "$DEVELOPER_DIR"
           xcode_version="$(xcodebuild -version)"
           printf '%s\n' "$xcode_version"
-          test "$(printf '%s\n' "$xcode_version" | head -n 1)" = 'Xcode 26.2'
+          test "$(printf '%s\n' "$xcode_version" | head -n 1)" = 'Xcode 16.4'
           simulator_sdk="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-          test "$simulator_sdk" = '26.2'
+          test "$simulator_sdk" = '18.5'
           printf 'TUTAM_QA_SIMULATOR_SDK_VERSION=%s\n' "$simulator_sdk" >> "$GITHUB_ENV"
           pod --version
       - name: Install locked dependencies
