@@ -2865,6 +2865,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     private let libraryLabels = ["Library", "Thư viện", "Photos", "Ảnh"]
     private let emptyLabels = ["No Photos or Videos", "No Photos", "Không có ảnh hoặc video", "Không có ảnh hay video", "Không có ảnh"]
     private var continuedPhotosWelcome = false
+    private var declinedPhotosNotifications = false
     private var lastImageOCR = "Chưa đến bước OCR ảnh mới trong Photos"
 
     override func tearDown() async throws {
@@ -2943,6 +2944,44 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     }
 
     @MainActor
+    private func dismissPhotosNotificationsIfPresent(_ photos: XCUIApplication, phase: String) -> Bool {
+        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let candidates: [(owner: String, alert: XCUIElement)] =
+            system.alerts.allElementsBoundByIndex.map { (owner: "springboard", alert: $0) } +
+            photos.alerts.allElementsBoundByIndex.map { (owner: "photos", alert: $0) }
+        let expected = "photos would like to send you notifications"
+        let matches = candidates.filter { candidate in
+            // Chỉ title đã thấy ở Photos72; không khớp Tu tập hoặc quyền thêm ảnh.
+            normalized(candidate.alert.label) == expected ||
+                candidate.alert.staticTexts.allElementsBoundByIndex.contains { normalized($0.label) == expected }
+        }
+        guard !matches.isEmpty else { return false }
+        guard !declinedPhotosNotifications else { return true }
+        let systemMatches = matches.filter { $0.owner == "springboard" }
+        let photosMatches = matches.filter { $0.owner == "photos" }
+        let frames = Set(matches.map { String(describing: $0.alert.frame) })
+        evidence(phase + "-photos-notifications-before-deny", app: system)
+        note(phase + "-photos-notification-owners",
+             "owners=\(matches.map { $0.owner })\nverifiedTitle=\(expected)\nframes=\(frames)")
+        XCTAssertTrue(systemMatches.count <= 1 && photosMatches.count <= 1 && frames.count == 1,
+                      "Photos notification phải là một alert duy nhất; hai owner chỉ được phản chiếu cùng khung")
+        guard systemMatches.count <= 1, photosMatches.count <= 1, frames.count == 1 else { return true }
+        // Ưu tiên owner hệ thống khi cả Photos và SpringBoard expose cùng một alert.
+        let alert = systemMatches.count == 1 ? systemMatches[0].alert : photosMatches[0].alert
+        let alertFrame = alert.frame
+        let viewport = system.frame
+        let deny = alert.buttons.matching(NSPredicate(format: "label == %@", "Don’t Allow"))
+            .allElementsBoundByIndex.filter {
+                $0.isEnabled && self.insideViewport($0, viewport: viewport) && alertFrame.contains($0.frame)
+            }
+        XCTAssertEqual(deny.count, 1, "Chỉ chạm một Don’t Allow thật bên trong Photos notification đã xác minh")
+        guard deny.count == 1 else { return true }
+        declinedPhotosNotifications = true
+        deny[0].tap()
+        return true
+    }
+
+    @MainActor
     private func openPhotosLibrary(_ photos: XCUIApplication, phase: String) -> Bool {
         evidence(phase + "-before-navigation", app: photos)
         let tabs = photos.tabBars.buttons.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
@@ -2953,21 +2992,18 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         let heading = photos.navigationBars.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
         let title = photos.staticTexts.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
         let welcome = photos.staticTexts.matching(NSPredicate(format: "label == %@", "What’s New in Photos"))
-        var capturedWelcome = false
-        // Cả Continue và Library dùng chung ngân sách 20 giây, không mở lượt chờ thứ hai.
+        // Welcome, Photos notification và Library dùng chung ngân sách 20 giây.
         waitUntil("Photos phải đóng welcome đã xác minh và hiển thị Library thực", timeout: 20) {
+            if self.dismissPhotosNotificationsIfPresent(photos, phase: phase) { return false }
             if welcome.count > 0 {
                 let titles = welcome.allElementsBoundByIndex
-                if !capturedWelcome {
-                    self.evidence(phase + "-observed-welcome", app: photos)
-                    capturedWelcome = true
-                }
                 guard titles.count == 1, self.insideViewport(titles[0], app: photos),
                       !self.continuedPhotosWelcome else { return false }
                 let controls = self.visibleButtons(photos, labels: ["Continue"])
                 guard controls.count == 1 else { return false }
                 self.evidence(phase + "-welcome-before-continue", app: photos)
                 self.continuedPhotosWelcome = true
+                self.note(phase + "-welcome-continue-count", "continueTapCount=1")
                 controls[0].tap()
                 return false
             }
@@ -2993,8 +3029,9 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         // AX Photos 26.2: ảnh thật là Image trong scroll view Library, không phải collection cell.
         let libraries = photos.scrollViews.matching(identifier: "content_scroll_view").allElementsBoundByIndex
         guard libraries.count == 1 else { return [] }
+        let viewport = photos.frame
         return libraries[0].images.matching(identifier: "PXGGridLayout-Info").allElementsBoundByIndex.filter {
-            $0.exists && self.insideViewport($0, app: photos)
+            self.insideViewport($0, viewport: viewport)
         }
     }
 
