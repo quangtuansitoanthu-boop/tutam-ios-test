@@ -160,6 +160,16 @@ jobs:
           with open(os.environ['GITHUB_ENV'],'a') as output:
               output.write('TUTAM_QA_HOSTS_ISOLATED=1\n')
           PY
+      - name: Prepare installed simulator dyld shared caches
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          mkdir -p build/release-evidence
+          dyld_status=0
+          xcrun simctl runtime dyld_shared_cache update --all > build/release-evidence/simulator-dyld-cache-update.log 2>&1 || dyld_status=$?
+          printf '%s\n' "$dyld_status" > build/release-evidence/simulator-dyld-cache-update-exit-code.txt
+          printf 'Installed runtime dyld cache preparation exit code: %s\n' "$dyld_status"
+          exit "$dyld_status"
       - name: Select and boot an available iPhone simulator
         run: |
           set -euo pipefail
