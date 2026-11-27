@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       test_suite:
-        description: 'XCTest suite scope to execute on iPhone Simulator'
+        description: 'XCTest scope on iPhone Simulator (trace runs 2 diagnostic tests)'
         required: false
         default: 'smoke'
         type: choice
@@ -17,6 +17,7 @@ on:
           - home
           - personal
           - diagnostic
+          - trace
   push:
     branches:
       - 'codex/qa-*'
@@ -37,7 +38,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        suite: ${{ fromJSON(inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || inputs.test_suite == 'diagnostic' && '["smoke","personal"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
+        suite: ${{ fromJSON(inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || inputs.test_suite == 'diagnostic' && '["smoke","personal"]' || inputs.test_suite == 'trace' && '["quote","navigation"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     env:
       TUTAM_BUNDLE_SYNCED: '1'
       VITE_GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
@@ -186,6 +187,10 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
           elif [ "$IOS_TEST_SUITE" = "home" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testHomePersonalAnniversariesLunarSolarCancelSaveDeleteAndPersistence)
+          elif [ "$IOS_TEST_SUITE" = "quote" ]; then
+            testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests/testQuoteImageUsesNativeSavePickerAndCancelKeepsDialogUsable)
+          elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalNearFutureReminderDeliversToSystemAndCanBeDeleted)
           elif [ "$IOS_TEST_SUITE" = "extended" ]; then
             testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
           elif [ "$IOS_TEST_SUITE" = "personal" ]; then
@@ -267,6 +272,10 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
           elif [ "$IOS_TEST_SUITE" = "home" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testHomePersonalAnniversariesLunarSolarCancelSaveDeleteAndPersistence)
+          elif [ "$IOS_TEST_SUITE" = "quote" ]; then
+            testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests/testQuoteImageUsesNativeSavePickerAndCancelKeepsDialogUsable)
+          elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalNearFutureReminderDeliversToSystemAndCanBeDeleted)
           elif [ "$IOS_TEST_SUITE" = "extended" ]; then
             testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
           elif [ "$IOS_TEST_SUITE" = "personal" ]; then
@@ -309,11 +318,14 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1}[suite]
+          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1, 'quote': 1, 'navigation': 1}[suite]
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
           assert data['failedTests'] == 0, 'Native UI test failures'
           assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'
           print(f'Verified native UI test execution ({suite}):',data['passedTests'],'passed, 0 failed, 0 skipped')
+          if suite in {'quote', 'navigation'}:
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
+                  summary.write(f'Native iOS trace diagnostic ({suite}): {data["passedTests"]} passed, 0 failed, 0 skipped. The full 18-test audit remains required.\n')
           PY
       - name: Capture native simulator evidence
         if: always()
@@ -336,6 +348,12 @@ jobs:
               --predicate 'eventMessage CONTAINS "[TutamQA]"' \
               > build/release-evidence/native-qa-unified-log.json 2>build/release-evidence/native-qa-unified-log-export.log; then
               printf 'Filtered simulator unified-log export failed; see the preceding error.\n' >> build/release-evidence/native-qa-unified-log-export.log
+            fi
+            # Chỉ lấy dịch vụ chọn tệp gần ca kiểm thử; không thu toàn bộ nhật ký hệ thống.
+            if ! xcrun simctl spawn "$TUTAM_QA_SIMULATOR" log show --style json --info --debug --last 20m \
+              --predicate 'subsystem CONTAINS[c] "DocumentManager" OR subsystem CONTAINS[c] "FileProvider" OR process CONTAINS[c] "DocumentManager" OR process CONTAINS[c] "FileProvider"' \
+              > build/release-evidence/native-file-services-unified-log.json 2>build/release-evidence/native-file-services-unified-log-export.log; then
+              printf 'Filtered file-services unified-log export failed; see the preceding error.\n' >> build/release-evidence/native-file-services-unified-log-export.log
             fi
           fi
           result=build/release-evidence/NativeGuestSmoke.xcresult

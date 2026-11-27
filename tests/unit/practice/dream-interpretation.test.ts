@@ -51,6 +51,38 @@ describe('offline dream catalog', () => {
     expect(getDreamEntry('missing-id')).toBeUndefined();
   });
 
+  it('ranks exact keywords and case titles before ambiguous scattered tokens', () => {
+    expect(filterDreamEntries('cho can')[0].id).toBe('cho');
+    expect(filterDreamEntries('chó cắn tay mình')[0].id).toBe('cho');
+    expect(filterDreamEntries('Rắn cắn tay chảy máu')[0].id).toBe('ran-bi-can');
+    // Keep broad token matches available; this correction changes their order, not membership.
+    expect(filterDreamEntries('cho can').some(entry => entry.id === 'quan-am')).toBe(true);
+  });
+
+  it('normalizes keyword ranking across accents, case and query whitespace', () => {
+    for (const query of ['chó cắn', 'CHO CAN', 'chó cắn'.normalize('NFD'), ' \tcho   can\n ']) {
+      expect(filterDreamEntries(query)[0].id, query).toBe('cho');
+    }
+  });
+
+  it('keeps a main-title phrase ahead of an exact keyword on another entry', () => {
+    const results = filterDreamEntries('người chết');
+    expect(results[0].id).toBe('nhieu-nguoi-mat');
+    expect(results.findIndex(entry => entry.id === 'nguoi-mat')).toBeGreaterThan(0);
+  });
+
+  it('preserves catalog order for ties and empty queries while respecting the topic', () => {
+    const original = DREAM_ENTRIES.map(entry => entry.id);
+    expect(filterDreamEntries('').map(entry => entry.id)).toEqual(original);
+    expect(filterDreamEntries(' \t\n ').map(entry => entry.id)).toEqual(original);
+    const tiedIds = ['ran-bi-can', 'cho'];
+    expect(filterDreamEntries('tay can', 'con-vat').filter(entry => tiedIds.includes(entry.id)).map(entry => entry.id))
+      .toEqual(original.filter(id => tiedIds.includes(id)));
+    const animalMatches = filterDreamEntries('cho can', 'con-vat');
+    expect(animalMatches[0].id).toBe('cho');
+    expect(animalMatches.every(entry => entry.category === 'con-vat')).toBe(true);
+  });
+
   it('supplements every deceased topic with clearly attributed scripture explanations', () => {
     const entries = filterDreamEntries('', 'nguoi-da-khuat');
     expect(entries.length).toBeGreaterThanOrEqual(12);

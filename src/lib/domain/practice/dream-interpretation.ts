@@ -111,15 +111,19 @@ export function getPopularDreamEntries(limit = 10): DreamEntry[] {
 }
 
 export function filterDreamEntries(query: string, category = 'all'): DreamEntry[] {
-  const phrase = removeVietnameseDiacritics(query);
+  const normalizePhrase = (value: string) => removeVietnameseDiacritics(value).replace(/\s+/g, ' ');
+  const phrase = normalizePhrase(query);
+  const rank = (entry: DreamEntry): number => {
+    if (!phrase) return 0;
+    if (normalizePhrase(entry.title).includes(phrase)) return 2;
+    return Number(entry.keywords.some(keyword => normalizePhrase(keyword) === phrase)
+      || entry.scenarioGroups.some(group => group.items.some(scenario => normalizePhrase(scenario.title) === phrase)));
+  };
   return DREAM_ENTRIES.filter(entry =>
     (category === 'all' || entry.category === category)
     && matchesVietnameseSearch([
       entry.title, entry.short, ...entry.keywords,
       ...entry.scenarioGroups.flatMap(group => group.items.map(scenario => scenario.title)),
     ], query),
-  ).sort((left, right) =>
-    Number(removeVietnameseDiacritics(right.title).includes(phrase))
-    - Number(removeVietnameseDiacritics(left.title).includes(phrase)),
-  );
+  ).sort((left, right) => rank(right) - rank(left));
 }

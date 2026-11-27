@@ -35,12 +35,14 @@ describe('phase 5 reader and admin contracts',()=>{
           const controls = page.locator('.pdf-controls :is(button,input,select)');
           expect(await controls.count()).toBeGreaterThan(0);
           for (const control of await controls.all()) {
-            const result = await control.evaluate(element => {
+            const result = await control.evaluate(async element => {
               // Scroll the same owner as a user; scrollIntoView also moves clipped reader ancestors.
               const scroller = element.closest<HTMLElement>(matchMedia('(max-width:768px)').matches ? '.reader-tools-content' : '.pdf-controls')!;
               const before = element.getBoundingClientRect();
               const owner = scroller.getBoundingClientRect();
               scroller.scrollTo({ left: scroller.scrollLeft + before.left - owner.left - (scroller.clientWidth - before.width) / 2, top: scroller.scrollTop + before.top - owner.top - (scroller.clientHeight - before.height) / 2, behavior: 'instant' });
+              // Chờ trình duyệt vẽ sau cuộn rồi mới đo vùng nhận chạm thực tế.
+              await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
               const box = element.getBoundingClientRect();
               const points = [[0, 0], [-21.5, 0], [21.5, 0], [0, -21.5], [0, 21.5]];
               const misses = points.flatMap(([x, y]) => {

@@ -55,6 +55,33 @@ private struct TuTapQANavigationEvent: Encodable, Sendable {
     let errorCode: Int
 }
 
+fileprivate enum TuTapQAImageExportPhase: String, Encodable, Sendable {
+    case begin, presenterUnavailable, fileWritten, writeFailed, presentBefore, presentCompletion
+    case delegatePick, delegateCancel, delegateDismiss, finishSaved, finishCancelled, finishFailed
+}
+
+fileprivate struct TuTapQAImageExportEvent: Encodable, Sendable {
+    let type = "native-image-export"
+    let phase: TuTapQAImageExportPhase
+    let operationId: String
+    let pid: Int
+    let uptime: TimeInterval
+    let mainThread: Bool
+    let fileExists: Bool
+    let fileBytes: Int
+    let inputHasPNGSignature: Bool
+    let presenterClass: String
+    let presenterBeingPresented: Bool
+    let presenterBeingDismissed: Bool
+    let presenterHasPresentedController: Bool
+    let presenterHasWindow: Bool
+    let appState: Int
+    let sceneActivation: Int
+    let pickerHasPresenter: Bool
+    let domain: String
+    let errorCode: Int
+}
+
 private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
     private let eventsQueue = DispatchQueue(label: "vn.quangtu.tutam.qa-events", qos: .utility)
 
@@ -108,14 +135,19 @@ private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
         }
     }
 
-    private func queueNativeDiagnostic<Event: Encodable & Sendable>(_ event: Event) {
+    private func queueNativeDiagnostic<Event: Encodable & Sendable>(_ event: Event, logToConsole: Bool = false) {
         eventsQueue.async {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             guard let data = try? encoder.encode(event),
                   let serialized = String(data: data, encoding: .utf8) else { return }
+            if logToConsole { NSLog("[TutamQA] %@", serialized) }
             self.appendEvent(serialized)
         }
+    }
+
+    func recordImageExport(_ event: TuTapQAImageExportEvent) {
+        queueNativeDiagnostic(event, logToConsole: true)
     }
 
     func recordNativeStartup(_ event: TuTapQANativeStartupEvent) {
@@ -147,6 +179,8 @@ private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
             let pan = scroll.panGestureRecognizer
             let translation = pan.translation(in: webView)
             let velocity = pan.velocity(in: webView)
+            let inset = scroll.contentInset
+            let adjustedInset = scroll.adjustedContentInset
             footerEvent = eventType
             footerState = [
                 "sourceTime": (event["time"] as? NSNumber)?.doubleValue ?? -1,
@@ -154,6 +188,11 @@ private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
                 "translationX": Double(translation.x), "translationY": Double(translation.y),
                 "velocityX": Double(velocity.x), "velocityY": Double(velocity.y),
                 "offsetX": Double(scroll.contentOffset.x), "offsetY": Double(scroll.contentOffset.y),
+                "isTracking": scroll.isTracking ? 1 : 0,
+                "insetTop": Double(inset.top), "insetBottom": Double(inset.bottom),
+                "insetLeft": Double(inset.left), "insetRight": Double(inset.right),
+                "adjustedInsetTop": Double(adjustedInset.top), "adjustedInsetBottom": Double(adjustedInset.bottom),
+                "adjustedInsetLeft": Double(adjustedInset.left), "adjustedInsetRight": Double(adjustedInset.right),
                 "isDragging": scroll.isDragging ? 1 : 0,
                 "isDecelerating": scroll.isDecelerating ? 1 : 0
             ]
@@ -168,6 +207,7 @@ private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
                 let record: [String: Any] = ["type": "native-footer-state", "sourceType": sourceType, "state": state]
                 if let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
                    let serialized = String(data: data, encoding: .utf8) {
+                    NSLog("[TutamQA] %@", serialized)
                     self.appendEvent(serialized)
                 }
             }
@@ -304,6 +344,10 @@ class TuTapBridgeViewController: CAPBridgeViewController {
         handler.recordNativeStartup(event)
     }
 
+    fileprivate func recordImageExportDiagnostic(_ event: TuTapQAImageExportEvent) {
+        qaEventsHandlerIfRequested()?.recordImageExport(event)
+    }
+
     private func installQAEventsIfRequested() {
         guard !qaEventsInstalled, let handler = qaEventsHandlerIfRequested(),
               let webView = webView else { return }
@@ -424,6 +468,43 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
     private var shareCall: CAPPluginCall?
     private var shareController: UIActivityViewController?
     private var shareDirectory: URL?
+#if DEBUG
+    private var qaExportOperationId = "none"
+    private var qaExportFile: URL?
+
+    private func recordQAExport(_ phase: TuTapQAImageExportPhase, presenter: UIViewController? = nil,
+                                file: URL? = nil, error: Error? = nil) {
+        guard ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") else { return }
+        if phase == .begin {
+            qaExportOperationId = UUID().uuidString
+            qaExportFile = nil
+        }
+        if let file = file { qaExportFile = file }
+        let onMain = Thread.isMainThread
+        let attributes = qaExportFile.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path) }
+        let nativeError = error as NSError?
+        let allowedDomains = ["NSCocoaErrorDomain", "NSPOSIXErrorDomain", "NSURLErrorDomain"]
+        let domain = nativeError.map { allowedDomains.contains($0.domain) ? $0.domain : "other" } ?? "none"
+        let code = nativeError?.code ?? 0
+        let window = onMain ? (presenter?.viewIfLoaded?.window ?? bridge?.viewController.viewIfLoaded?.window) : nil
+        let event = TuTapQAImageExportEvent(
+            phase: phase, operationId: qaExportOperationId, pid: Int(ProcessInfo.processInfo.processIdentifier),
+            uptime: ProcessInfo.processInfo.systemUptime, mainThread: onMain,
+            fileExists: qaExportFile.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
+            fileBytes: (attributes?[.size] as? NSNumber)?.intValue ?? -1,
+            inputHasPNGSignature: true,
+            presenterClass: presenter.map { NSStringFromClass(type(of: $0)) } ?? "none",
+            presenterBeingPresented: onMain ? (presenter?.isBeingPresented ?? false) : false,
+            presenterBeingDismissed: onMain ? (presenter?.isBeingDismissed ?? false) : false,
+            presenterHasPresentedController: onMain ? (presenter?.presentedViewController != nil) : false,
+            presenterHasWindow: onMain ? (presenter?.viewIfLoaded?.window != nil) : false,
+            appState: onMain ? UIApplication.shared.applicationState.rawValue : -2,
+            sceneActivation: window?.windowScene?.activationState.rawValue ?? -2,
+            pickerHasPresenter: onMain ? (picker?.presentingViewController != nil) : false,
+            domain: domain, errorCode: (-999999...999999).contains(code) ? code : 0)
+        (bridge?.viewController as? TuTapBridgeViewController)?.recordImageExportDiagnostic(event)
+    }
+#endif
 
     private func findTopViewController(from root: UIViewController?) -> UIViewController? {
         guard let root = root else { return nil }
@@ -455,6 +536,9 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                 return
             }
             self.pendingCall = call
+#if DEBUG
+            self.recordQAExport(.begin, presenter: presenter)
+#endif
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tu-tap-export-" + UUID().uuidString, isDirectory: true)
             self.exportDirectory = directory
             let file = directory.appendingPathComponent(name)
@@ -467,6 +551,9 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                     try? FileManager.default.removeItem(at: directory)
                     DispatchQueue.main.async { [weak self] in
                         guard let self = self, self.pendingCall === call else { return }
+#if DEBUG
+                        self.recordQAExport(.writeFailed, file: file, error: error)
+#endif
                         self.finishExport(saved: nil, error: error)
                     }
                     return
@@ -476,10 +563,16 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                         try? FileManager.default.removeItem(at: directory)
                         return
                     }
+#if DEBUG
+                    self.recordQAExport(.fileWritten, file: file)
+#endif
                     guard let presenter = self.findTopViewController(from: self.bridge?.viewController),
                           presenter.viewIfLoaded?.window != nil,
                           !presenter.isBeingDismissed,
                           UIApplication.shared.applicationState != .background else {
+#if DEBUG
+                        self.recordQAExport(.presenterUnavailable, file: file)
+#endif
                         self.finishExport(saved: nil)
                         return
                     }
@@ -487,8 +580,14 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                     picker.delegate = self
                     picker.presentationController?.delegate = self
                     self.picker = picker
+#if DEBUG
+                    self.recordQAExport(.presentBefore, presenter: presenter, file: file)
+#endif
                     presenter.present(picker, animated: true) { [weak self, weak picker] in
                         guard let self = self, let picker = picker, self.picker === picker else { return }
+#if DEBUG
+                        self.recordQAExport(.presentCompletion, presenter: picker.presentingViewController, file: file)
+#endif
                         // UIKit chỉ hoàn tất quan hệ trình bày tại completion; không dọn file trong lúc mở picker.
                         guard picker.presentingViewController != nil else {
                             self.finishExport(saved: nil)
@@ -503,20 +602,34 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
 
     public func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard controller === picker else { return }
+#if DEBUG
+        recordQAExport(.delegatePick, presenter: controller.presentingViewController)
+#endif
         finishExport(saved: urls.isEmpty ? nil : true)
     }
 
     public func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
         guard controller === picker else { return }
+#if DEBUG
+        recordQAExport(.delegateCancel, presenter: controller.presentingViewController)
+#endif
         finishExport(saved: false)
     }
 
     public func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
         guard presentationController.presentedViewController === picker else { return }
+#if DEBUG
+        recordQAExport(.delegateDismiss, presenter: presentationController.presentingViewController)
+#endif
         finishExport(saved: false)
     }
 
     private func finishExport(saved: Bool?, error: Error? = nil) {
+#if DEBUG
+        recordQAExport(saved == true ? .finishSaved : saved == false ? .finishCancelled : .finishFailed,
+                       presenter: picker?.presentingViewController, error: error)
+        qaExportFile = nil
+#endif
         let call = pendingCall
         pendingCall = nil
         picker?.delegate = nil
