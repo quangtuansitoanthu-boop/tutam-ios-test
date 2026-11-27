@@ -2322,3 +2322,211 @@ final class NativeTalkPlayerTests: NativeGuestUITestCase {
         evidence("talk-mini-player-restored-and-paused", app: app)
     }
 }
+
+
+// Separate V3 content/reading QA; the existing 18-test native audit stays unchanged.
+final class NativeDreamV3Tests: NativeGuestUITestCase {
+    @MainActor
+    private func dreamSearch(_ app: XCUIApplication) -> XCUIElement {
+        let search = app.searchFields["Tìm kiếm giấc mơ"].firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 20), "The real dream search must be available")
+        reveal(search, app: app)
+        return search
+    }
+
+    @MainActor
+    private func searchDream(_ query: String, app: XCUIApplication) {
+        let clear = app.buttons["Xóa từ khóa"].firstMatch
+        if clear.exists { tap(clear, app: app) }
+        let search = dreamSearch(app)
+        search.tap()
+        search.typeText(query)
+        XCTAssertEqual(search.value as? String, query, "Native typing must update the actual dream search")
+        let doneLabels = NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray)
+        let done = app.toolbars.buttons.matching(doneLabels).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5) && done.isHittable,
+                      "The search keyboard must expose its native Done action")
+        done.tap()
+        waitUntil("Native Done must dismiss the search keyboard") { !app.keyboards.firstMatch.exists }
+    }
+
+    @MainActor
+    private func openDream(_ title: String, shortContains: String, app: XCUIApplication) {
+        let rowLabel = NSPredicate(format: "label BEGINSWITH[cd] %@ AND label CONTAINS[cd] %@", "Tham khảo " + title, shortContains)
+        let row = app.descendants(matching: .any).matching(rowLabel).firstMatch
+        tap(row, app: app)
+        let larger = app.buttons["Tăng cỡ chữ bài giải mộng"].firstMatch
+        XCTAssertTrue(larger.waitForExistence(timeout: 15), "Opening a dream must reveal its reading controls")
+        XCTAssertFalse(app.searchFields["Tìm kiếm giấc mơ"].firstMatch.exists,
+                       "Portrait detail must replace the list, not merely select a hidden article")
+        evidence("dream-v3-opened-article-" + title, app: app)
+    }
+
+    @MainActor
+    private func percentValue(_ element: XCUIElement) -> Int? {
+        guard let snapshot = try? element.snapshot() else { return nil }
+        let value = snapshot.value as? String
+        if let value = value, value.hasSuffix("%"), let percent = Int(value.dropLast()) { return percent }
+        let label = snapshot.label
+        return label.hasSuffix("%") ? Int(label.dropLast()) : nil
+    }
+
+    @MainActor
+    private func dreamPercentElement(_ app: XCUIApplication) -> XCUIElement? {
+        // WKWebView may expose output as a named value or its visible percentage.
+        // Keep both queries scoped; retain only the candidate that exposes a numeric value.
+        let namedLabel = NSPredicate(format: "label == %@", "Cỡ chữ bài giải mộng hiện tại")
+        let named = app.descendants(matching: .any).matching(namedLabel).firstMatch
+        let controls = app.otherElements["Cỡ chữ"].firstMatch
+        let visibleLabel = NSPredicate(format: "label MATCHES %@", "^(100|110|120|130|140|150|160)%$")
+        let visible = controls.staticTexts.matching(visibleLabel).firstMatch
+        var candidate: XCUIElement?
+        waitUntil("Dream output must expose its real 100% reading size") {
+            if self.percentValue(named) == 100 { candidate = named; return true }
+            if self.percentValue(visible) == 100 { candidate = visible; return true }
+            return false
+        }
+        if candidate == nil { evidence("dream-v3-percent-not-exposed", app: app) }
+        return candidate
+    }
+
+    @MainActor
+    private func changeDreamSize(to target: Int, percent: XCUIElement, app: XCUIApplication) {
+        guard let current = percentValue(percent) else {
+            evidence("dream-v3-percent-unreadable", app: app)
+            XCTFail("The existing native percentage candidate must remain readable")
+            return
+        }
+        guard target != current else { return }
+        let step = target > current ? 10 : -10
+        let label = step > 0 ? "Tăng cỡ chữ bài giải mộng" : "Giảm cỡ chữ bài giải mộng"
+        let button = app.buttons[label].firstMatch
+        for expected in stride(from: current + step, through: target, by: step) {
+            reveal(button, app: app)
+            XCTAssertTrue(button.isEnabled, "The next 10% reading step must be enabled")
+            button.tap()
+            waitUntil("One native font tap must reach \(expected)%") { self.percentValue(percent) == expected }
+        }
+    }
+
+    @MainActor
+    private func assertDreamFontGeometry(_ app: XCUIApplication) {
+        let larger = app.buttons["Tăng cỡ chữ bài giải mộng"].firstMatch
+        reveal(larger, app: app)
+        let viewport = app.frame
+        for label in ["Giảm cỡ chữ bài giải mộng", "Tăng cỡ chữ bài giải mộng"] {
+            let button = app.buttons[label].firstMatch
+            XCTAssertTrue(button.exists)
+            let frame = button.frame
+            XCTAssertGreaterThanOrEqual(frame.width, 44, "Dream font controls need a 44pt-wide target")
+            XCTAssertGreaterThanOrEqual(frame.height, 44, "Dream font controls need a 44pt-high target")
+            XCTAssertTrue(viewport.contains(frame), "Both font controls must remain inside the native viewport")
+            if button.isEnabled { XCTAssertTrue(button.isHittable) }
+        }
+    }
+
+    @MainActor
+    private func dreamParagraphFrame(_ prefix: String, app: XCUIApplication) -> CGRect {
+        // WebKit may expose adjacent paragraphs in one static-text label.
+        let label = NSPredicate(format: "label CONTAINS %@", prefix)
+        let paragraph = app.staticTexts.matching(label).firstMatch
+        reveal(paragraph, app: app)
+        let viewport = app.frame
+        var previous: CGRect?
+        var visibleFrame = CGRect.zero
+        waitUntil("The actual V3 paragraph must have stable visible native text geometry") {
+            guard let snapshot = try? paragraph.snapshot() else { return false }
+            let frame = snapshot.frame
+            guard frame.height > 0 && viewport.contains(frame) else { return false }
+            let stable = previous == frame
+            previous = frame
+            visibleFrame = frame
+            return stable
+        }
+        return visibleFrame
+    }
+
+    @MainActor
+    private func backToDreamSearch(_ query: String, app: XCUIApplication) {
+        tap(app.buttons["Quay lại Tu Tập"].firstMatch, app: app)
+        let search = app.searchFields["Tìm kiếm giấc mơ"].firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 15), "Back from portrait detail must restore dream search")
+        XCTAssertEqual(search.value as? String, query, "Back must preserve the user's actual search query")
+    }
+
+    @MainActor
+    func testDreamV3SearchReadingSizeRotationAndBack() {
+        let app = launchGuest()
+        openNativeLink(URL(string: "vn.quangtu.tutam:///tu-tap/giai-mong")!, app: app)
+        searchDream("cho can", app: app)
+        openDream("Mơ thấy chó", shortContains: "vết cắn nhắc mâu thuẫn", app: app)
+        guard let percent = dreamPercentElement(app) else { return }
+        let smaller = app.buttons["Giảm cỡ chữ bài giải mộng"].firstMatch
+        let larger = app.buttons["Tăng cỡ chữ bài giải mộng"].firstMatch
+        XCTAssertFalse(smaller.isEnabled, "Dream reading starts at its 100% lower bound")
+        assertDreamFontGeometry(app)
+        let dogOverview = "Theo dân gian, chó quen vẫy đuôi báo tình thân thuận; cắn tay cảnh báo trở ngại hợp tác."
+        let portraitWidth = app.frame.width
+        let baseline = dreamParagraphFrame(dogOverview, app: app)
+        evidence("dream-v3-dog-100-portrait", app: app)
+
+        changeDreamSize(to: 160, percent: percent, app: app)
+        XCTAssertFalse(larger.isEnabled, "A+ must stop at 160%")
+        assertDreamFontGeometry(app)
+        let enlarged = dreamParagraphFrame(dogOverview, app: app)
+        XCTAssertEqual(app.frame.width, portraitWidth, accuracy: 1)
+        XCTAssertGreaterThan(enlarged.height, baseline.height + 1,
+                             "The paragraph must actually grow; the percentage alone is insufficient")
+        evidence("dream-v3-dog-160-portrait", app: app)
+
+        rotate(.landscapeLeft, app: app)
+        waitUntil("Rotation must retain the selected dream's 160% reading size") { self.percentValue(percent) == 160 }
+        assertDreamFontGeometry(app)
+        _ = dreamParagraphFrame(dogOverview, app: app)
+        evidence("dream-v3-dog-160-landscape", app: app)
+        rotate(.portrait, app: app)
+        waitUntil("Returning to portrait must retain the 160% article") { self.percentValue(percent) == 160 }
+        changeDreamSize(to: 100, percent: percent, app: app)
+        XCTAssertFalse(smaller.isEnabled, "A− must stop at 100%")
+        assertDreamFontGeometry(app)
+        let restored = dreamParagraphFrame(dogOverview, app: app)
+        XCTAssertEqual(app.frame.width, portraitWidth, accuracy: 1)
+        XCTAssertEqual(restored.height, baseline.height, accuracy: 2,
+                       "Returning to 100% must restore the same paragraph's rendered size")
+        let geometry = XCTAttachment(string: "100%: \(baseline); 160%: \(enlarged); restored100%: \(restored); portraitWidth: \(portraitWidth)")
+        geometry.name = "dream-v3-native-font-geometry"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        _ = dreamParagraphFrame("Theo lối giải dân gian, vết cắn ở tay cảnh báo công việc bị ngăn trở", app: app)
+        _ = dreamParagraphFrame("Lời khuyên: Nếu thường nhận làm thay vì ngại mất lòng", app: app)
+        backToDreamSearch("cho can", app: app)
+
+        searchDream("ran can", app: app)
+        openDream("Mơ bị rắn cắn", shortContains: "được cứu báo có người trợ giúp", app: app)
+        _ = dreamParagraphFrame("Theo lối giải dân gian, cảnh này nhắc trở ngại ở việc làm và tiền bạc.", app: app)
+        _ = dreamParagraphFrame("Lời khuyên: Nếu đang góp vốn hoặc nhận việc chung", app: app)
+        evidence("dream-v3-snake-specific-advice", app: app)
+        backToDreamSearch("ran can", app: app)
+
+        searchDream("nguoi mat", app: app)
+        openDream("Mơ thấy người thân đã mất", shortContains: "Người thân về thăm khỏe vui", app: app)
+        _ = dreamParagraphFrame("Điềm báo theo dân gian: người thân trở về khỏe mạnh", app: app)
+        _ = dreamParagraphFrame("Lời khuyên: nếu cảnh mơ là một bữa cơm hay việc nhà quen thuộc", app: app)
+        let chapterSixLabel = NSPredicate(format: "label CONTAINS[cd] %@ AND label CONTAINS[cd] %@", "Phẩm 6", "Như Lai Tán Thán")
+        let chapterSix = app.staticTexts.matching(chapterSixLabel).firstMatch
+        reveal(chapterSix, app: app)
+        XCTAssertTrue(chapterSix.exists)
+        _ = dreamParagraphFrame("Trong đoạn nói với Bồ Tát Phổ Quảng, kinh có nhắc đến chuyện nằm mộng", app: app)
+        let chapterSevenLabel = NSPredicate(format: "label CONTAINS[cd] %@ AND label CONTAINS[cd] %@", "Phẩm 7", "Lợi Ích Kẻ Còn Người Mất")
+        let chapterSeven = app.staticTexts.matching(chapterSevenLabel).firstMatch
+        reveal(chapterSeven, app: app)
+        XCTAssertTrue(chapterSeven.exists)
+        _ = dreamParagraphFrame("Phẩm kinh này khuyên thân quyến vì người mới mất mà siêng tạo phước lành", app: app)
+        evidence("dream-v3-deceased-scripture-six-seven", app: app)
+        backToDreamSearch("nguoi mat", app: app)
+        tap(app.buttons["Quay lại Tu Tập"].firstMatch, app: app)
+        let reflection = app.buttons["Quán chiếu việc thiện ác trong ngày"].firstMatch
+        reveal(reflection, app: app)
+        XCTAssertTrue(reflection.exists, "Back from dream search must return to the actual practice tools")
+    }
+}
