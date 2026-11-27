@@ -1,7 +1,8 @@
 import XCTest
 import UIKit
 
-// Mỗi phương thức chạy trên bản cài mới của Simulator CI; không chỉnh storage hoặc quyền bằng test hook.
+// Audit CI tách mỗi lớp trên runner mới; các phương thức cùng lớp vẫn dùng chung app/quyền.
+// Không chỉnh storage hoặc quyền bằng test hook.
 class NativeGuestUITestCase: XCTestCase {
     private var evidenceApplication: XCUIApplication?
 
@@ -1473,6 +1474,15 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
             XCTFail("A valid save must close the draft after one tap; diagnostic second tap cannot satisfy this requirement")
             return
         }
+        // The success dialog intentionally makes the saved list inert until it is acknowledged.
+        let savedAlert = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Đã thêm ngày lễ cá nhân")).firstMatch
+        XCTAssertTrue(savedAlert.waitForExistence(timeout: 15), "One Save tap must show the actual success dialog")
+        XCTAssertTrue(savedAlert.staticTexts["Ngày lễ đã được lưu trên thiết bị."].firstMatch.exists)
+        let acknowledge = savedAlert.buttons["Đóng"].firstMatch
+        XCTAssertTrue(acknowledge.isHittable)
+        acknowledge.tap()
+        waitPersonalUntil("Acknowledging Save must restore the saved list") { !savedAlert.exists }
+        XCTAssertFalse(app.textFields["Tên ngày lễ *"].firstMatch.exists, "The saved draft must remain closed after acknowledgement")
         XCTAssertTrue(existsOrWait(app.staticTexts[title].firstMatch, timeout: 15))
     }
 

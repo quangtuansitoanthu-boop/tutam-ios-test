@@ -8,6 +8,58 @@ import { readFileSync } from 'node:fs';
 import { chromium, webkit } from '@playwright/test';
 import ts from 'typescript';
 
+it('keeps the writing header above a locked, previously scrolled background and keyboard pan on each platform', async () => {
+  const route = readFileSync('src/routes/tu-tap/chep-kinh/+page.svelte', 'utf8');
+  const css = route.split('<style>')[1].split('</style>')[0].replace(/:global\(([^)]+)\)/g, '$1');
+  const lock = ts.transpile(readFileSync('src/lib/browser/scroll-lock.ts', 'utf8')
+    .replace(/^import .*;\r?\n/gm, '').replace(/export /g, ''), { target: ts.ScriptTarget.ES2022 });
+  // Exercise the route's actual viewport owner, not a second implementation of its offsets.
+  const viewportOwner = ts.transpile(route.slice(route.indexOf('    const viewport = window.visualViewport;'),
+    route.indexOf('    untrack(update);') + '    untrack(update);'.length), { target: ts.ScriptTarget.ES2022 });
+  for (const engine of process.env.COPYING_GEOMETRY_WEBKIT === '1' ? [chromium, webkit] : [chromium]) {
+    const browser = await engine.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 402, height: 874 } });
+      for (const platform of ['ios', 'android', 'web']) for (const scroll of [0, 64, 180]) {
+        await page.setContent(`<style>:root{--app-safe-top:32px}html,body{margin:0}body{min-height:2000px}${css}</style>
+          <div class="copy-page copy-writing ${platform === 'ios' ? 'copy-ios' : ''}"><header class="writing-bar"><button aria-label="Đổi kinh hoặc phẩm">Quay lại</button></header>
+          <div id="copy-text" contenteditable="true">TỊNH KHẨU NGHIỆP</div></div>`);
+        const result = await page.evaluate(({ platform, scroll, lock, viewportOwner }) => {
+          document.documentElement.dataset.nativeApp = String(platform !== 'web');
+          window.scrollTo(0, scroll);
+          const savedScroll = window.scrollY;
+          const native = "const isNativeApp=()=>platform!=='web', nativePlatform=()=>platform;";
+          const release = new Function('platform', `${native}${lock}; return acquireScrollLock();`)(platform) as () => void;
+          const lockedTop = document.body.getBoundingClientRect().top;
+          const viewport = new EventTarget() as EventTarget & { height: number; offsetTop: number; pageTop: number };
+          Object.assign(viewport, { height: innerHeight, offsetTop: 0, pageTop: window.scrollY });
+          Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true });
+          const update = new Function('platform', `${native}let keyboardOpen=false,lastFollowTop=0,sourceLayoutVersion=0;
+            const untrack=fn=>fn(),tick=()=>Promise.resolve(),followEditorCaret=()=>{},scheduleEditorReflow=()=>{};
+            ${viewportOwner}; return update;`)(platform) as () => void;
+          const back = document.querySelector('button')!;
+          const before = back.getBoundingClientRect().top;
+          document.getElementById('copy-text')!.focus({ preventScroll: true });
+          Object.assign(viewport, { height: 480, offsetTop: 24, pageTop: window.scrollY + 24 });
+          update();
+          const keyboard = { top: back.getBoundingClientRect().top, bottom: back.getBoundingClientRect().bottom,
+            workspaceHeight: document.querySelector('.copy-writing')!.getBoundingClientRect().height };
+          release();
+          return { savedScroll, lockedTop, before, keyboard, restoredScroll: window.scrollY };
+        }, { platform, scroll, lock, viewportOwner });
+        expect(result.savedScroll).toBe(scroll);
+        expect(result.lockedTop).toBeCloseTo(-scroll);
+        const safeTop = platform === 'web' ? 0 : 32;
+        expect(result.before).toBeGreaterThanOrEqual(safeTop);
+        expect(result.keyboard.top).toBeGreaterThanOrEqual(safeTop + 24);
+        expect(result.keyboard.bottom).toBeLessThan(24 + 480);
+        expect(result.keyboard.workspaceHeight).toBe(480);
+        expect(result.restoredScroll).toBe(scroll);
+      }
+    } finally { await browser.close(); }
+  }
+});
+
 let instance: ReturnType<typeof Harness> | undefined;
 afterEach(async () => { if (instance) await unmount(instance); instance = undefined; document.body.replaceChildren(); });
 function setup(props = {}) {

@@ -1272,8 +1272,9 @@
       if (!editing) fullHeight = Math.max(fullHeight, window.innerHeight, height);
       const touchKeyboard = coarsePointer.matches || (document.documentElement.dataset.nativeApp === 'true' && navigator.maxTouchPoints > 0);
       const nextKeyboardOpen = touchKeyboard && editing && fullHeight - height > 120;
-      // WKWebView can pan the document as well as the visual viewport on editor focus.
-      const top = ios ? (viewport?.pageTop ?? window.scrollY) : (viewport?.offsetTop ?? 0);
+      // iOS locks the body at -savedScrollY. Its absolute workspace needs the
+      // visual viewport translated into that body's coordinates, including keyboard panning.
+      const top = (viewport?.offsetTop ?? 0) - (ios ? document.body.getBoundingClientRect().top : 0);
       const signature = `${height}:${top}:${window.innerWidth}:${nextKeyboardOpen}`;
       if (signature === lastViewport) return;
       lastViewport = signature;

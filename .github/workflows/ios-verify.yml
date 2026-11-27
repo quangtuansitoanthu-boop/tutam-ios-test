@@ -28,12 +28,19 @@ concurrency:
 
 jobs:
   ios:
+    name: ios (${{ matrix.suite }})
     runs-on: macos-15
     timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        suite: ${{ fromJSON(inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     env:
       TUTAM_BUNDLE_SYNCED: '1'
       VITE_GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
-      IOS_TEST_SUITE: ${{ inputs.test_suite || 'smoke' }}
+      # Each audit class gets a fresh runner/install; permission grants must not leak into Typing.
+      IOS_TEST_SUITE: ${{ matrix.suite }}
     steps:
       - uses: actions/checkout@v4
       - name: Apply QA audit source overlay if present
@@ -177,6 +184,12 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
           elif [ "$IOS_TEST_SUITE" = "home" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testHomePersonalAnniversariesLunarSolarCancelSaveDeleteAndPersistence)
+          elif [ "$IOS_TEST_SUITE" = "extended" ]; then
+            testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
+          elif [ "$IOS_TEST_SUITE" = "personal" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests)
+          elif [ "$IOS_TEST_SUITE" = "snapshot" ]; then
+            testing_args=(-only-testing:AppUITests/NativeSimulatorSnapshotTests)
           elif [ "$IOS_TEST_SUITE" = "full" ] || [ "$IOS_TEST_SUITE" = "audit" ]; then
             testing_args=(
               -only-testing:AppUITests/NativeGuestSmokeTests
@@ -252,6 +265,12 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
           elif [ "$IOS_TEST_SUITE" = "home" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testHomePersonalAnniversariesLunarSolarCancelSaveDeleteAndPersistence)
+          elif [ "$IOS_TEST_SUITE" = "extended" ]; then
+            testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
+          elif [ "$IOS_TEST_SUITE" = "personal" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests)
+          elif [ "$IOS_TEST_SUITE" = "snapshot" ]; then
+            testing_args=(-only-testing:AppUITests/NativeSimulatorSnapshotTests)
           elif [ "$IOS_TEST_SUITE" = "full" ] || [ "$IOS_TEST_SUITE" = "audit" ]; then
             testing_args=(
               -only-testing:AppUITests/NativeGuestSmokeTests
@@ -288,7 +307,7 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'full': 13, 'smoke': 3, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1}[suite]
+          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1}[suite]
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
           assert data['failedTests'] == 0, 'Native UI test failures'
           assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'
@@ -326,6 +345,49 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-native-guest-smoke-${{ github.run_number }}
+          name: ios-native-guest-smoke-${{ github.run_number }}-${{ matrix.suite }}
           path: build/release-evidence/
           if-no-files-found: error
+      - name: Upload native UI count evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-native-count-${{ github.run_number }}-${{ matrix.suite }}
+          path: build/release-evidence/native-ui-summary.json
+          if-no-files-found: error
+
+  audit-result:
+    name: Require all 18 isolated native audit tests
+    if: always() && inputs.test_suite == 'audit'
+    needs: ios
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ios-native-count-${{ github.run_number }}-*
+          path: qa-counts
+      - name: Require every class with no native failures or skips
+        env:
+          MATRIX_RESULT: ${{ needs.ios.result }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          expected={'smoke':4,'extended':6,'personal':4,'snapshot':2,'audio':1,'typing':1}
+          prefix=f'ios-native-count-{os.environ["GITHUB_RUN_NUMBER"]}-'
+          seen={}
+          for path in Path('qa-counts').glob('*/native-ui-summary.json'):
+              suite=path.parent.name.removeprefix(prefix)
+              assert suite in expected and suite not in seen, f'Unexpected/duplicate suite: {suite}'
+              data=json.loads(path.read_text())
+              assert data['failedTests']==0 and data['skippedTests']==0, f'Failures/skips in {suite}'
+              assert data['passedTests']>=expected[suite], f'Incomplete native execution in {suite}'
+              seen[suite]=data['passedTests']
+          assert set(seen)==set(expected), f'Missing native classes: {set(expected)-set(seen)}'
+          assert os.environ['MATRIX_RESULT']=='success', 'At least one native runner failed'
+          assert sum(seen.values())>=18, 'Incomplete audit execution'
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
+              summary.write(f'Native iOS audit: {sum(seen.values())} passed, 0 failed, 0 skipped.\n\n')
+              summary.write('\n'.join(f'- {suite}: {count} passed' for suite,count in seen.items()))
+          PY
