@@ -27,6 +27,14 @@
     catalogAlbums = [album, nextAlbum];
     selectedAlbumId = id;
   }
+  export function showVideoAlbum() {
+    const videoAlbum = { ...album, id: 'video-album', tieu_de: 'Video album', tracks: [
+      { title: 'Video track', url: '/video.mp4', media_type: 'video' as const },
+    ] };
+    catalogAlbums = [album, videoAlbum];
+    selectedAlbumId = videoAlbum.id;
+    return videoAlbum;
+  }
   export function changeSession(mode: 'logout' | 'account' | 'role' | 'token' | 'remembered') {
     if (mode === 'logout') session.clear();
     else if (mode === 'account') session.set({ ...session.value, user: { ...session.value.user!, id: 'download-owner-b' } });

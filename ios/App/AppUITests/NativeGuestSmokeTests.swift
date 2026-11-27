@@ -101,13 +101,43 @@ class NativeGuestUITestCase: XCTestCase {
         XCTAssertTrue(later.waitForExistence(timeout: 5) && later.isHittable,
                       "The app's startup notification dialog must allow users to continue")
         var previousFrame: CGRect?
-        waitUntil("The Later button must settle inside the foreground notification dialog") {
-            let frame = later.frame
-            let ready = app.state == .runningForeground && self.insideViewport(later, app: app)
-                && prompt.frame.contains(frame) && previousFrame == frame
+        let readinessStarted = Date()
+        var readinessTrace: [String] = []
+        let readiness = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let pollStartedSeconds = Date().timeIntervalSince(readinessStarted)
+            let snapshot = try? later.snapshot()
+            let frame: CGRect = snapshot?.frame ?? .zero
+            let foreground = app.state == .runningForeground
+            let viewport = app.frame
+            let promptFrame = prompt.frame
+            let hittable = later.isHittable
+            let exists = snapshot != nil
+            let positiveWidth = frame.width > 0
+            let positiveHeight = frame.height > 0
+            let viewportContains = viewport.contains(frame)
+            let promptContains = promptFrame.contains(frame)
+            let stableFrame = previousFrame == frame
+            let ready = foreground && exists && positiveWidth && positiveHeight
+                && viewportContains && promptContains && hittable && stableFrame
+            var trace = "pollStartedSeconds=\(pollStartedSeconds) elapsedSeconds=\(Date().timeIntervalSince(readinessStarted))"
+            trace += " frame=\(frame.origin.x),\(frame.origin.y),\(frame.width),\(frame.height)"
+            trace += " viewport=\(viewport.origin.x),\(viewport.origin.y),\(viewport.width),\(viewport.height)"
+            trace += " promptFrame=\(promptFrame.origin.x),\(promptFrame.origin.y),\(promptFrame.width),\(promptFrame.height)"
+            trace += " foreground=\(foreground) snapshotExists=\(exists) positiveWidth=\(positiveWidth) positiveHeight=\(positiveHeight)"
+            trace += " viewportContains=\(viewportContains) promptContains=\(promptContains) hittable=\(hittable) stableFrame=\(stableFrame) ready=\(ready)"
+            readinessTrace.append(trace)
             previousFrame = frame
             return ready
-        }
+        }, object: NSObject())
+        let readinessResult = XCTWaiter.wait(for: [readiness], timeout: 15)
+        readinessTrace.append("elapsedSeconds=\(Date().timeIntervalSince(readinessStarted)) waitCompleted=\(readinessResult == .completed)")
+        let readinessEvidence = XCTAttachment(string: readinessTrace.joined(separator: "\n"))
+        readinessEvidence.name = "startup-notification-readiness"
+        readinessEvidence.lifetime = .keepAlways
+        add(readinessEvidence)
+        XCTAssertEqual(readinessResult, .completed,
+                       "The Later button must settle inside the foreground notification dialog")
+        guard readinessResult == .completed else { return }
         later.tap()
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !prompt.exists }, object: NSObject())
         if XCTWaiter.wait(for: [dismissed], timeout: 3) == .timedOut && prompt.exists && later.isHittable {
@@ -956,16 +986,21 @@ final class NativeNotificationTypingTests: NativeGuestUITestCase {
         let app = launchGuest()
         navigate("Kinh sách", app: app)
         let search = librarySearch(app)
-        search.tap()
-        search.typeText("kinh")
+        // Chạm giữa ô nhập; điểm AX mặc định có thể nằm sát mép và bị hủy.
+        search.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let keyboard = app.keyboards.firstMatch
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
+        let keyboardReady = keyboard.waitForExistence(timeout: 10)
+        if !keyboardReady { evidence("notification-typing-initial-focus-not-ready", app: app) }
+        XCTAssertTrue(keyboardReady, "The initial user tap must focus the search field and open its real keyboard")
+        search.typeText("kinh")
+        waitUntil("The initial native search must expose the complete typed text") { search.value as? String == "kinh" }
 
         XCUIDevice.shared.press(.home)
         app.activate()
         let prompt = startupNotificationPrompt(app)
         XCTAssertFalse(prompt.waitForExistence(timeout: 3), "An automatic reminder must leave ongoing typing uninterrupted")
         search.typeText(" sach")
+        waitUntil("Resumed typing must preserve and complete the same search query") { search.value as? String == "kinh sach" }
         XCTAssertEqual(search.value as? String, "kinh sach")
         evidence("notification-resume-with-real-keyboard", app: app)
 
@@ -2341,6 +2376,8 @@ final class NativeDreamV3Tests: NativeGuestUITestCase {
         let search = dreamSearch(app)
         search.tap()
         search.typeText(query)
+        // Giá trị AX có thể cập nhật sau khi bàn phím đã nhập xong vào WebKit.
+        waitUntil("Native dream search must expose the complete typed query") { search.value as? String == query }
         XCTAssertEqual(search.value as? String, query, "Native typing must update the actual dream search")
         let doneLabels = NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray)
         let done = app.toolbars.buttons.matching(doneLabels).firstMatch
@@ -2654,6 +2691,7 @@ final class NativeBiorhythmTests: NativeGuestUITestCase {
         birth.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         birth.typeText("15081992")
+        waitUntil("The native birth field must expose the complete formatted date") { birth.value as? String == "15/08/1992" }
         XCTAssertEqual(birth.value as? String, "15/08/1992", "Numeric native typing must use the production dd/mm/yyyy formatter")
         let doneLabels = NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray)
         let done = app.toolbars.buttons.matching(doneLabels).firstMatch

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
+import type { Writable } from 'svelte/store';
 import { dismissTopModal } from '$lib/browser/modal-dialog';
+import type { AudioPlayerSnapshot } from '$lib/browser/audio-player-controller';
+import { audioPlayer } from '$lib/stores/audio-player.svelte';
 import Harness from './audio-download-session-harness.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -10,7 +13,15 @@ const mocks = vi.hoisted(() => ({
   native: true,
   singleTrack: undefined as undefined | Parameters<typeof import('$lib/browser/audio-downloads').downloadSingleTrackFile>[1],
   singleTrackGate: undefined as Promise<void> | undefined,
+  backHandler: undefined as ((event: { canGoBack: boolean }) => void) | undefined,
 }));
+vi.mock('$app/environment', () => ({ browser: true, dev: true }));
+vi.mock('@capacitor/app', () => ({ App: {
+  addListener: async (_event: string, handler: typeof mocks.backHandler) => { mocks.backHandler = handler; return { remove: async () => {} }; },
+  exitApp: vi.fn(),
+} }));
+vi.mock('$lib/browser/talk-video-mirror', () => ({ attachTalkVideoMirror: () => () => {} }));
+vi.mock('$lib/browser/native-fullscreen', () => ({ setImmersiveFullscreen: async () => {} }));
 vi.mock('$lib/browser/audio-downloads', async importOriginal => {
   const actual = await importOriginal<typeof import('$lib/browser/audio-downloads')>();
   return { ...actual, downloadSingleTrackFile: (...args: Parameters<typeof actual.downloadSingleTrackFile>) => {
@@ -42,20 +53,31 @@ vi.mock('$lib/browser/offline-audio-database', async importOriginal => ({
   },
 }));
 vi.mock('$lib/stores/audio-player.svelte', async () => {
-  const { readable } = await import('svelte/store');
+  const { writable } = await import('svelte/store');
   const snapshot = { album: null, trackIndex: 0, playing: false, currentTime: 0, duration: 0, speed: 1, repeat: 0,
     volume: 1, muted: false, retry: 0, error: null, recentAlbumIds: [], sleepTimerRemainingMs: 0, sleepTimerEndOfTrack: false };
-  return { audioPlayer: readable(snapshot), getAudioPlayer: async () => ({ ready: Promise.resolve(), snapshot, playTrack() {}, playAll() {}, seek() {} }) };
+  return { audioPlayer: writable(snapshot), getAudioPlayer: async () => ({ ready: Promise.resolve(), snapshot, playTrack() {}, playAll() {}, seek() {} }) };
 });
 
 let component: ReturnType<typeof Harness> | undefined;
+const playerState = audioPlayer as Writable<AudioPlayerSnapshot>;
+const inertDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'inert');
 beforeEach(() => {
+  // jsdom chưa phản chiếu inert; giữ cùng hợp đồng property/attribute như trình duyệt.
+  if (!inertDescriptor) Object.defineProperty(HTMLElement.prototype, 'inert', {
+    configurable: true,
+    get(this: HTMLElement) { return this.hasAttribute('inert'); },
+    set(this: HTMLElement, value: boolean) { this.toggleAttribute('inert', value); },
+  });
   localStorage.clear();
   mocks.tracks.clear(); mocks.albums.clear(); mocks.remove.mockReset(); mocks.pendingSignal = undefined;
   mocks.snapshotGate = undefined;
   mocks.native = true;
   mocks.singleTrack = undefined;
   mocks.singleTrackGate = undefined;
+  mocks.backHandler = undefined;
+  playerState.update(state => ({ ...state, album: null, trackIndex: 0, playing: false, currentTime: 0, duration: 0 }));
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input) === '/audio/first-private.mp3') return new Response(new Blob(['saved partial bytes']));
     if (String(input) !== '/audio/pending-private.mp3') throw new Error(`Unexpected request: ${String(input)}`);
@@ -82,6 +104,8 @@ afterEach(async () => {
   if (component) await unmount(component);
   component = undefined;
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  if (!inertDescriptor) delete (HTMLElement.prototype as Partial<HTMLElement>).inert;
   vi.unstubAllGlobals();
   document.body.replaceChildren(); localStorage.clear();
 });
@@ -331,5 +355,111 @@ it('does not request login when a remembered member cannot currently verify down
     expect(fetch).toHaveBeenCalledTimes(1);
   } finally {
     window.removeEventListener('quangtu:login-required', loginRequired);
+  }
+});
+
+async function openFocusAlbum(video = false): Promise<HTMLElement> {
+  component = mount(Harness, { target: document.body });
+  flushSync(); await tick();
+  await vi.waitFor(() => expect(document.querySelector('.album-dialog')).not.toBeNull());
+  if (video) {
+    const album = component.showVideoAlbum();
+    playerState.update(state => ({ ...state, album: { id: album.id, title: album.tieu_de, tracks: album.tracks } }));
+    flushSync(); await tick();
+    await vi.waitFor(() => expect(document.querySelector('.album-overlay.video-full')).not.toBeNull());
+  }
+  return document.querySelector<HTMLElement>('.album-dialog')!;
+}
+
+function albumFocusButtons(dialog: HTMLElement): HTMLButtonElement[] {
+  return [...dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+    .filter(button => !button.closest('[inert], [hidden], [aria-hidden="true"]'));
+}
+
+function pressTab(target: HTMLElement, shiftKey = false): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true, shiftKey });
+  target.dispatchEvent(event);
+  return event;
+}
+
+it.each([false, true])('album focus scope: keeps a normal album nonmodal and lets Tab reach external player/navigation controls (native=%s)', async native => {
+  mocks.native = native;
+  const dialog = await openFocusAlbum();
+  expect(dialog.getAttribute('aria-modal')).toBe('false');
+  const external = document.createElement('section');
+  external.innerHTML = '<button aria-label="Tạm dừng">Pause</button><nav><button>Trang Chủ</button></nav>';
+  document.body.append(external);
+  const [pause, navigation] = [...external.querySelectorAll('button')];
+  const pauseAction = vi.fn(); pause.addEventListener('click', pauseAction);
+  const buttons = albumFocusButtons(dialog);
+  buttons.at(-1)!.focus();
+  expect(pressTab(buttons.at(-1)!).defaultPrevented).toBe(false);
+  pause.focus(); await tick();
+  expect(document.activeElement).toBe(pause);
+  expect(pause.closest('[inert]')).toBeNull();
+  pause.click(); expect(pauseAction).toHaveBeenCalledOnce();
+  navigation.focus(); expect(document.activeElement).toBe(navigation);
+  buttons[0].focus();
+  expect(pressTab(buttons[0], true).defaultPrevented).toBe(false);
+});
+
+it('album focus scope: traps fullscreen video focus and restores nonmodal semantics on Escape before closing the album', async () => {
+  const dialog = await openFocusAlbum(true);
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
+  const buttons = albumFocusButtons(dialog);
+  expect(buttons.length).toBeGreaterThan(1);
+  buttons.at(-1)!.focus();
+  expect(pressTab(buttons.at(-1)!).defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(buttons[0]);
+  dialog.focus();
+  expect(pressTab(dialog, true).defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(buttons.at(-1));
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  flushSync(); await tick();
+  expect(document.querySelector('.album-dialog')).toBe(dialog);
+  expect(document.querySelector('.album-overlay.video-full')).toBeNull();
+  expect(dialog.getAttribute('aria-modal')).toBe('false');
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  flushSync();
+  expect(document.querySelector('.album-dialog')).toBeNull();
+});
+
+it.each([false, true])('album focus scope: yields to nested login and restores the appropriate album scope (fullscreen=%s)', async fullscreen => {
+  const dialog = await openFocusAlbum(fullscreen);
+  const overlay = document.querySelector<HTMLElement>('.album-overlay')!;
+  window.dispatchEvent(new CustomEvent('quangtu:login-modal-closed', { detail: { open: true } }));
+  flushSync();
+  expect(overlay.hasAttribute('inert')).toBe(true);
+  expect(overlay.getAttribute('aria-hidden')).toBe('true');
+  expect(dialog.getAttribute('aria-modal')).toBe('false');
+  expect(pressTab(dialog, true).defaultPrevented).toBe(false);
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  flushSync(); expect(document.querySelector('.album-dialog')).toBe(dialog);
+  window.dispatchEvent(new CustomEvent('quangtu:login-modal-closed', { detail: { open: false } }));
+  flushSync();
+  expect(overlay.hasAttribute('inert')).toBe(false);
+  expect(overlay.hasAttribute('aria-hidden')).toBe(false);
+  expect(dialog.getAttribute('aria-modal')).toBe(String(fullscreen));
+});
+
+it('album focus scope: native Back still closes the album before history and returns focus to its opener', async () => {
+  await openFocusAlbum();
+  document.querySelector<HTMLButtonElement>('.pt-as-back')!.click(); flushSync();
+  const opener = document.querySelector<HTMLButtonElement>('.pt-card-thumb')!;
+  opener.click(); flushSync(); await tick();
+  const back = document.querySelector<HTMLButtonElement>('.pt-as-back')!;
+  Object.defineProperty(back, 'offsetParent', { value: document.body });
+  const originalPush = window.history.pushState, originalReplace = window.history.replaceState;
+  const historyBack = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+  try {
+    const { initializeNativeBackButton } = await import('$lib/browser/native-back-button');
+    await initializeNativeBackButton();
+    expect(mocks.backHandler).toBeTypeOf('function');
+    mocks.backHandler!({ canGoBack: true }); flushSync();
+    expect(document.querySelector('.album-dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    expect(historyBack).not.toHaveBeenCalled();
+  } finally {
+    window.history.pushState = originalPush; window.history.replaceState = originalReplace;
   }
 });

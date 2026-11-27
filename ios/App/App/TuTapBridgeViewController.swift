@@ -34,6 +34,20 @@ private struct TuTapQANativeStartupEvent: Encodable, Sendable {
     let hasURL: Bool
 }
 
+private enum TuTapQANativeLifecyclePhase: String, Encodable, Sendable {
+    case didBecomeActive, willResignActive
+}
+
+private struct TuTapQANativeLifecycleEvent: Encodable, Sendable {
+    let type = "native-lifecycle"
+    let phase: TuTapQANativeLifecyclePhase
+    let pid: Int
+    let uptime: TimeInterval
+    let epochMilliseconds: TimeInterval
+    let mainThread: Bool
+    let appState: Int
+}
+
 private struct TuTapQANotificationSDKEvent: Encodable, Sendable {
     let type = "native-notification-sdk"
     let phase: String
@@ -168,6 +182,18 @@ private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
         }
     }
 
+    func recordNativeLifecycle(_ event: TuTapQANativeLifecycleEvent) {
+        guard ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") else { return }
+        eventsQueue.async {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            guard let data = try? encoder.encode(event),
+                  let serialized = String(data: data, encoding: .utf8) else { return }
+            NSLog("[TutamQA] %@", serialized)
+            self.appendEvent(serialized)
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "tutamQAEvents", message.frameInfo.isMainFrame,
               let body = message.body as? String, body.utf8.count <= 4096 else { return }
@@ -255,6 +281,7 @@ class TuTapBridgeViewController: CAPBridgeViewController {
     private var qaEventsInstalled = false
     private var qaEventsHandler: TuTapQAEventsHandler?
     private var qaNativeDiagnosticObserver: NSObjectProtocol?
+    private var qaLifecycleObservers: [NSObjectProtocol] = []
 #endif
 
     override func capacitorDidLoad() {
@@ -334,11 +361,22 @@ class TuTapBridgeViewController: CAPBridgeViewController {
         ) { [weak self] notification in
             self?.qaEventsHandler?.recordNativeDiagnostic(notification.userInfo)
         }
+        qaLifecycleObservers.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.recordNativeLifecycle(.didBecomeActive)
+        })
+        qaLifecycleObservers.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.recordNativeLifecycle(.willResignActive)
+        })
         return handler
     }
 
     deinit {
         if let observer = qaNativeDiagnosticObserver { NotificationCenter.default.removeObserver(observer) }
+        for observer in qaLifecycleObservers { NotificationCenter.default.removeObserver(observer) }
     }
 
     private func recordNativeStartup(_ phase: TuTapQANativeStartupPhase) {
@@ -355,6 +393,17 @@ class TuTapBridgeViewController: CAPBridgeViewController {
         qaEventsHandlerIfRequested()?.recordImageExport(event)
     }
 
+    private func recordNativeLifecycle(_ phase: TuTapQANativeLifecyclePhase) {
+        guard let handler = qaEventsHandler else { return }
+        let process = ProcessInfo.processInfo
+        let event = TuTapQANativeLifecycleEvent(
+            phase: phase, pid: Int(process.processIdentifier), uptime: process.systemUptime,
+            epochMilliseconds: Date().timeIntervalSince1970 * 1000,
+            mainThread: Thread.isMainThread, appState: UIApplication.shared.applicationState.rawValue
+        )
+        handler.recordNativeLifecycle(event)
+    }
+
     private func installQAEventsIfRequested() {
         guard !qaEventsInstalled, let handler = qaEventsHandlerIfRequested(),
               let webView = webView else { return }
@@ -368,6 +417,10 @@ class TuTapBridgeViewController: CAPBridgeViewController {
             if (handler) handler.postMessage(body);
             else console.info('[TutamQA]', body);
           };
+          const logLifecycle = (phase) => log({ type: 'web-lifecycle', phase, time: performance.now(), epochMilliseconds: Date.now(), hidden: document.hidden, focused: document.hasFocus() });
+          document.addEventListener('visibilitychange', () => logLifecycle('visibilitychange'), { passive: true });
+          window.addEventListener('focus', (event) => { if (event.target === window) logLifecycle('focus'); }, { passive: true });
+          window.addEventListener('blur', (event) => { if (event.target === window) logLifecycle('blur'); }, { passive: true });
           const context = () => ({ path: location.pathname, readyState: document.readyState, time: performance.now(), activeTag: document.activeElement?.tagName || null, activeSelect: document.activeElement instanceof HTMLSelectElement });
           const describe = (event) => {
             const origin = event.target instanceof Element ? event.target : event.target?.parentElement;

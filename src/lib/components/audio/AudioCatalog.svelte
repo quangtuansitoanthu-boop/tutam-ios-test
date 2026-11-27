@@ -430,7 +430,7 @@
   }
 
   function trapAlbumFocus(event: KeyboardEvent): boolean {
-    if (event.key !== 'Tab' || !selected || !albumDialog || pendingResume) return false;
+    if (event.key !== 'Tab' || !videoIsFull || !selected || !albumDialog || pendingResume) return false;
     const items = focusableItems(albumDialog);
     if (!items.length) return false;
     const first = items[0];
@@ -945,7 +945,7 @@
     selectedTransfer,
   )}
   <div class="album-overlay" class:video-full={videoIsFull} class:compact-video-active={selectedLandscapeVideo && Boolean(selectedVideoTrack)} role="presentation" inert={loginModalOpen} aria-hidden={loginModalOpen ? 'true' : undefined}>
-    <div class="album-dialog" class:has-video={Boolean(selectedVideoTrack)} class:landscape-album={selectedLandscapeVideo} role="dialog" aria-modal={loginModalOpen ? 'false' : 'true'} aria-labelledby="album-title" tabindex="-1" bind:this={albumDialog}>
+    <div class="album-dialog" class:has-video={Boolean(selectedVideoTrack)} class:landscape-album={selectedLandscapeVideo} role="dialog" aria-modal={videoIsFull && !loginModalOpen ? 'true' : 'false'} aria-labelledby="album-title" tabindex="-1" bind:this={albumDialog}>
       <header class="pt-as-header" inert={videoIsFull}>
         <div class="pt-as-header-row1">
           <button class="pt-as-back" type="button" onclick={closeAlbum} aria-label={localeStore.current === 'en' ? 'Back' : 'Quay lại'}>

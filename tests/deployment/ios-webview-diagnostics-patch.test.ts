@@ -212,5 +212,9 @@ it('keeps the App receiver gated, exact-schema, finite/ranged and on the existin
   expect(bridge).toContain('let limit: UInt64 = 256 * 1024');
   expect(bridge).toContain(') { [weak self] notification in');
   expect(bridge).toContain('NotificationCenter.default.removeObserver(observer)');
-  expect(bridge.match(/addObserver\(/gu)).toHaveLength(1);
+  expect(bridge.match(/addObserver\(/gu)).toHaveLength(3);
+  expect(bridge).toContain('forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main');
+  expect(bridge).toContain('forName: UIApplication.willResignActiveNotification, object: nil, queue: .main');
+  expect(bridge).toContain('private var qaLifecycleObservers: [NSObjectProtocol] = []');
+  expect(bridge).toContain('for observer in qaLifecycleObservers { NotificationCenter.default.removeObserver(observer) }');
 });
