@@ -2924,6 +2924,8 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     private let emptyLabels = ["No Photos or Videos", "No Photos", "Không có ảnh hoặc video", "Không có ảnh hay video", "Không có ảnh"]
     private var continuedPhotosWelcome = false
     private var declinedPhotosNotifications = false
+    private var previousPhotosDenyState: String?
+    private var photosDenyReadinessTrace: [[String: Any]] = []
     private var capturedPhotosReadinessDiagnostic = false
     private var lastImageOCR = "Chưa đến bước OCR ảnh mới trong Photos"
 
@@ -3010,33 +3012,131 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
             photos.alerts.allElementsBoundByIndex.map { (owner: "photos", alert: $0) }
         let expected = "photos would like to send you notifications"
         let matches = candidates.filter { candidate in
-            // Chỉ title đã thấy ở Photos72; không khớp Tu tập hoặc quyền thêm ảnh.
             normalized(candidate.alert.label) == expected ||
                 candidate.alert.staticTexts.allElementsBoundByIndex.contains { normalized($0.label) == expected }
         }
-        guard !matches.isEmpty else { return false }
+        guard !matches.isEmpty else {
+            previousPhotosDenyState = nil
+            if !declinedPhotosNotifications {
+                photosDenyReadinessTrace.append(["uptime": ProcessInfo.processInfo.systemUptime, "matchedAlerts": 0])
+            }
+            return false
+        }
         guard !declinedPhotosNotifications else { return true }
         let systemMatches = matches.filter { $0.owner == "springboard" }
         let photosMatches = matches.filter { $0.owner == "photos" }
         let frames = Set(matches.map { String(describing: $0.alert.frame) })
-        evidence(phase + "-photos-notifications-before-deny", app: system)
-        note(phase + "-photos-notification-owners",
-             "owners=\(matches.map { $0.owner })\nverifiedTitle=\(expected)\nframes=\(frames)")
         XCTAssertTrue(systemMatches.count <= 1 && photosMatches.count <= 1 && frames.count == 1,
                       "Photos notification phải là một alert duy nhất; hai owner chỉ được phản chiếu cùng khung")
         guard systemMatches.count <= 1, photosMatches.count <= 1, frames.count == 1 else { return true }
-        // Ưu tiên owner hệ thống khi cả Photos và SpringBoard expose cùng một alert.
+        let owner = systemMatches.count == 1 ? "springboard" : "photos"
         let alert = systemMatches.count == 1 ? systemMatches[0].alert : photosMatches[0].alert
         let alertFrame = alert.frame
         let viewport = system.frame
-        let deny = alert.buttons.matching(NSPredicate(format: "label == %@", "Don’t Allow"))
-            .allElementsBoundByIndex.filter {
-                $0.isEnabled && self.insideViewport($0, viewport: viewport) && alertFrame.contains($0.frame)
+        let raw = alert.buttons.matching(NSPredicate(format: "label == %@", "Don’t Allow")).allElementsBoundByIndex
+        var rows: [[String: Any]] = []
+        var deny: [XCUIElement] = []
+        var signatures: [String] = []
+        for button in raw {
+            let snapshot = try? button.snapshot()
+            let exists = button.exists
+            let frame = button.frame
+            let enabled = button.isEnabled
+            let hittable = button.isHittable
+            let contained = viewport.contains(frame)
+            let insideAlert = alertFrame.contains(frame)
+            let base = insideViewport(button, viewport: viewport)
+            rows.append(["label": button.label, "exists": exists, "frame": String(describing: frame),
+                         "snapshotAvailable": snapshot != nil,
+                         "snapshotFrame": snapshot.map { String(describing: $0.frame) } ?? "unavailable",
+                         "enabled": enabled, "hittable": hittable, "viewportContains": contained,
+                         "alertContains": insideAlert, "baseInsideViewport": base])
+            if exists && enabled && hittable && contained && base && insideAlert,
+               let snapshot = snapshot, snapshot.frame == frame {
+                deny.append(button)
+                signatures.append("\(owner)|\(snapshot.identifier)|\(snapshot.label)|\(snapshot.frame)|\(alertFrame)|\(viewport)")
             }
+        }
+        let unique = raw.count == 1 && deny.count == 1
+        let signature = unique ? signatures[0] : nil
+        let stable = signature != nil && signature == previousPhotosDenyState
+        photosDenyReadinessTrace.append([
+            "uptime": ProcessInfo.processInfo.systemUptime, "owner": owner, "verifiedTitle": expected,
+            "systemMatches": systemMatches.count, "photosMatches": photosMatches.count,
+            "alertFrame": String(describing: alertFrame), "viewport": String(describing: viewport),
+            "rawCandidateCount": raw.count, "eligibleCount": deny.count, "candidates": rows,
+            "stableWithPreviousSnapshot": stable
+        ])
+        previousPhotosDenyState = signature
+        guard unique && stable else { return true }
         XCTAssertEqual(deny.count, 1, "Chỉ chạm một Don’t Allow thật bên trong Photos notification đã xác minh")
-        guard deny.count == 1 else { return true }
+        evidence(phase + "-photos-notifications-before-deny", app: system)
+        note(phase + "-photos-notification-owners",
+             "owners=\(matches.map { $0.owner })\nverifiedTitle=\(expected)\nframes=\(frames)\nstableSnapshots=2")
+        let button = deny[0]
+        guard button.isEnabled, insideViewport(button, viewport: system.frame),
+              alert.frame.contains(button.frame) else {
+            previousPhotosDenyState = nil
+            return true
+        }
         declinedPhotosNotifications = true
-        deny[0].tap()
+        button.tap()
+        return true
+    }
+
+    @MainActor
+    private func preparePhotosFirstRun(_ photos: XCUIApplication, phase: String) -> Bool {
+        // Setup OS có hai ngân sách riêng; không lấy thời gian từ Library20 hay oracle Share/TCC.
+        if !continuedPhotosWelcome || !declinedPhotosNotifications {
+            note(phase + "-setup-budget", "Photos welcome:20s; Photos notification:20s; Library readiness:20s. Test total remains600s.")
+        }
+        let welcome = photos.staticTexts.matching(NSPredicate(format: "label == %@", "What’s New in Photos"))
+        if !continuedPhotosWelcome {
+            var closed = false
+            waitUntil("Photos first-run welcome phải đóng sau một lần Continue thực", timeout: 20) {
+                if self.continuedPhotosWelcome {
+                    closed = welcome.count == 0
+                    return closed
+                }
+                let titles = welcome.allElementsBoundByIndex
+                guard titles.count == 1, self.insideViewport(titles[0], app: photos) else { return false }
+                let controls = self.visibleButtons(photos, labels: ["Continue"])
+                guard controls.count == 1 else { return false }
+                self.evidence(phase + "-welcome-before-continue", app: photos)
+                self.continuedPhotosWelcome = true
+                self.note(phase + "-welcome-continue-count", "continueTapCount=1")
+                controls[0].tap()
+                return false
+            }
+            XCTAssertTrue(continuedPhotosWelcome && closed, "Photos welcome setup phải hoàn tất qua UI thật")
+            guard continuedPhotosWelcome && closed else {
+                observePhotosReadinessFailure(photos, phase: phase + "-welcome-setup")
+                return false
+            }
+        }
+        if !declinedPhotosNotifications {
+            previousPhotosDenyState = nil
+            photosDenyReadinessTrace = []
+            var closed = false
+            waitUntil("Photos notification phải có một Don’t Allow actionable ổn định rồi đóng", timeout: 20) {
+                let present = self.dismissPhotosNotificationsIfPresent(photos, phase: phase)
+                closed = self.declinedPhotosNotifications && !present
+                return closed
+            }
+            let trace: [String: Any] = ["closed": closed, "declined": declinedPhotosNotifications,
+                                        "samples": photosDenyReadinessTrace]
+            if let data = try? JSONSerialization.data(withJSONObject: trace, options: [.prettyPrinted, .sortedKeys]) {
+                note(phase + "-photos-deny-readiness", String(decoding: data, as: UTF8.self))
+            } else {
+                note(phase + "-photos-deny-readiness", "Unable to encode native readiness observations")
+            }
+            XCTAssertTrue(declinedPhotosNotifications && closed, "Photos notification setup phải có đúng một lần từ chối và đóng")
+            guard declinedPhotosNotifications && closed else {
+                evidence(phase + "-photos-notification-failed-system", app: XCUIApplication(bundleIdentifier: "com.apple.springboard"))
+                observePhotosReadinessFailure(photos, phase: phase + "-notification-setup")
+                return false
+            }
+        }
         return true
     }
 
@@ -3048,10 +3148,11 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         XCTAssertLessThanOrEqual(tabs.count, 1, "Photos Library tab phải có đúng một nhãn candidate hoặc đã ở Library")
         guard tabs.count <= 1 else { return false }
         if let tab = tabs.first { tab.tap() }
+        guard preparePhotosFirstRun(photos, phase: phase) else { return false }
         let heading = photos.navigationBars.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
         let title = photos.staticTexts.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
         let welcome = photos.staticTexts.matching(NSPredicate(format: "label == %@", "What’s New in Photos"))
-        // Welcome, Photos notification và Library dùng chung ngân sách 20 giây.
+        // Library giữ ngân sách 20 giây sau khi hai bước setup Photos đã hoàn tất.
         waitUntil("Photos phải đóng welcome đã xác minh và hiển thị Library thực", timeout: 20) {
             if self.dismissPhotosNotificationsIfPresent(photos, phase: phase) { return false }
             if welcome.count > 0 {
