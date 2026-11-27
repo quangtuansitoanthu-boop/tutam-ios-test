@@ -21,6 +21,8 @@ on:
           - quote
           - dream
           - biorhythm
+          - share
+          - followup
           - tools
   push:
     branches:
@@ -42,7 +44,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        suite: ${{ fromJSON(inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || inputs.test_suite == 'diagnostic' && '["smoke","personal"]' || inputs.test_suite == 'trace' && '["quote","navigation"]' || inputs.test_suite == 'tools' && '["quote","dream","biorhythm","typing","audio"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
+        suite: ${{ fromJSON(inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || inputs.test_suite == 'diagnostic' && '["smoke","personal"]' || inputs.test_suite == 'trace' && '["quote","navigation"]' || inputs.test_suite == 'tools' && '["quote","dream","biorhythm","typing","audio"]' || inputs.test_suite == 'followup' && '["dream","biorhythm","share"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
       TUTAM_BUNDLE_SYNCED: '1'
@@ -163,7 +165,7 @@ jobs:
               output.write('TUTAM_QA_HOSTS_ISOLATED=1\n')
           PY
       - name: Prepare installed simulator dyld shared caches for tools QA
-        if: inputs.test_suite == 'tools'
+        if: inputs.test_suite == 'tools' || inputs.test_suite == 'audit' || inputs.test_suite == 'followup' || env.IOS_TEST_SUITE == 'share'
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -199,6 +201,27 @@ jobs:
           PY
           )
           echo "TUTAM_QA_SIMULATOR=$simulator_id" >> "$GITHUB_ENV"
+          # Keep software-keyboard prerequisites deterministic on this disposable CI runner.
+          # Existing Simulator preference used by ProtonVPN/ios-app CI and Appium's simulator driver.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          TUTAM_KEYBOARD_SIMULATOR="$simulator_id" python3 - <<'PY'
+          import json, os, plistlib, subprocess
+          domain='com.apple.iphonesimulator'
+          prefs=plistlib.loads(subprocess.check_output(['defaults','export',domain,'-']))
+          devices=prefs.setdefault('DevicePreferences',{})
+          assert isinstance(devices,dict), 'Unexpected Simulator device preferences'
+          selected=devices.setdefault(os.environ['TUTAM_KEYBOARD_SIMULATOR'],{})
+          assert isinstance(selected,dict), 'Unexpected selected-device preferences'
+          previous=selected.get('ConnectHardwareKeyboard')
+          prefs['ConnectHardwareKeyboard']=False
+          selected['ConnectHardwareKeyboard']=False
+          subprocess.run(['defaults','import',domain,'-'],input=plistlib.dumps(prefs),check=True)
+          check=plistlib.loads(subprocess.check_output(['defaults','export',domain,'-']))
+          assert check['ConnectHardwareKeyboard'] is False
+          assert check['DevicePreferences'][os.environ['TUTAM_KEYBOARD_SIMULATOR']]['ConnectHardwareKeyboard'] is False
+          with open('build/release-evidence/simulator-keyboard-preferences.json','w') as evidence:
+              json.dump({'selectedDevicePrevious':previous,'globalHardwareKeyboard':False,'selectedDeviceHardwareKeyboard':False},evidence)
+          PY
           if ! xcrun simctl list devices booted | grep -Fq "$simulator_id"; then
             xcrun simctl boot "$simulator_id"
           fi
@@ -220,6 +243,8 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeDreamV3Tests/testDreamV3SearchReadingSizeRotationAndBack)
           elif [ "$IOS_TEST_SUITE" = "biorhythm" ]; then
             testing_args=(-only-testing:AppUITests/NativeBiorhythmTests/testBiorhythmBirthEntryResultsGuideRotationAndSingleBack)
+          elif [ "$IOS_TEST_SUITE" = "share" ]; then
+            testing_args=(-only-testing:AppUITests/NativeQuoteShareTests/testQuoteShareDoubleTapCancelThenSaveImageToPhotosWithPermissionAndContent)
           elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalNearFutureReminderDeliversToSystemAndCanBeDeleted)
           elif [ "$IOS_TEST_SUITE" = "extended" ]; then
@@ -309,6 +334,8 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeDreamV3Tests/testDreamV3SearchReadingSizeRotationAndBack)
           elif [ "$IOS_TEST_SUITE" = "biorhythm" ]; then
             testing_args=(-only-testing:AppUITests/NativeBiorhythmTests/testBiorhythmBirthEntryResultsGuideRotationAndSingleBack)
+          elif [ "$IOS_TEST_SUITE" = "share" ]; then
+            testing_args=(-only-testing:AppUITests/NativeQuoteShareTests/testQuoteShareDoubleTapCancelThenSaveImageToPhotosWithPermissionAndContent)
           elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalNearFutureReminderDeliversToSystemAndCanBeDeleted)
           elif [ "$IOS_TEST_SUITE" = "extended" ]; then
@@ -372,7 +399,7 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1, 'quote': 1, 'navigation': 1, 'dream': 1, 'biorhythm': 1}[suite]
+          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1, 'quote': 1, 'navigation': 1, 'dream': 1, 'biorhythm': 1, 'share': 1}[suite]
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
           assert data['failedTests'] == 0, 'Native UI test failures'
           assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'

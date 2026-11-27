@@ -2453,7 +2453,11 @@ final class NativeDreamV3Tests: NativeGuestUITestCase {
         let clear = app.buttons["Xóa từ khóa"].firstMatch
         if clear.exists { tap(clear, app: app) }
         let search = dreamSearch(app)
-        search.tap()
+        search.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let keyboardReady = app.keyboards.firstMatch.waitForExistence(timeout: 10)
+        if !keyboardReady { evidence("dream-v3-keyboard-not-ready", app: app) }
+        XCTAssertTrue(keyboardReady, "The actual native keyboard must be ready before entering the dream query")
+        guard keyboardReady else { return }
         search.typeText(query)
         // Giá trị AX có thể cập nhật sau khi bàn phím đã nhập xong vào WebKit.
         waitUntil("Native dream search must expose the complete typed query") { search.value as? String == query }
@@ -2706,11 +2710,35 @@ final class NativeBiorhythmTests: NativeGuestUITestCase {
         // và phần biểu đồ còn chạm được phía trên thanh điều hướng;
         // nội dung dài vẫn được phép cuộn dọc.
         var visible = CGRect.zero
-        for _ in 0..<6 {
+        var scrollFrames: [String] = []
+        defer {
+            if !scrollFrames.isEmpty {
+                let trace = XCTAttachment(string: scrollFrames.joined(separator: "\n"))
+                trace.name = "biorhythm-chart-scroll-" + orientation
+                trace.lifetime = .keepAlways
+                add(trace)
+            }
+        }
+        for attempt in 0..<6 {
             let frame = chart.frame
             visible = frame.intersection(contentViewport)
             if !visible.isNull && visible.height >= 44 && chart.isHittable { break }
-            app.swipeUp()
+            let appFrame = app.frame
+            let content = contentViewport.intersection(appFrame).intersection(app.webViews.firstMatch.frame)
+            guard !content.isNull && content.width > 0 && content.height > 0 else {
+                XCTFail("The chart scroll needs a visible WebView intersection")
+                break
+            }
+            let safe = content.insetBy(dx: min(44, content.width / 4), dy: min(44, content.height / 4))
+            let upper = CGPoint(x: safe.midX, y: safe.minY + safe.height * 0.2)
+            let lower = CGPoint(x: safe.midX, y: safe.minY + safe.height * 0.8)
+            let up = frame.width <= 0 || frame.midY >= contentViewport.midY
+            let from = up ? lower : upper
+            let to = up ? upper : lower
+            scrollFrames.append("attempt=\(attempt); chart=\(frame); viewport=\(contentViewport); safe=\(safe); up=\(up); from=\(from); to=\(to)")
+            let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            origin.withOffset(CGVector(dx: from.x - appFrame.minX, dy: from.y - appFrame.minY))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: to.x - appFrame.minX, dy: to.y - appFrame.minY)))
         }
         let frame = chart.frame
         XCTAssertGreaterThan(frame.width, 44)
@@ -2824,3 +2852,312 @@ final class NativeBiorhythmTests: NativeGuestUITestCase {
         evidence("biorhythm-profile-restored-portrait", app: app)
     }
 }
+
+
+// Separate Photos/share QA; the original 18-test audit and existing helpers remain unchanged.
+// Cần runner Simulator mới với quyền thêm ảnh của Tu tập chưa được trả lời, Photos mở được
+// không cần đăng nhập, và Vision có sẵn. Không pregrant/reset TCC, không giả định thư viện rỗng.
+// Nhãn hệ thống dưới đây là candidate VI/EN, chưa phải selector đã xác minh trên Simulator.
+// Mọi nhãn mơ hồ/không hỗ trợ đều phải FAIL kèm AX/PNG; không dùng phần tử đầu tiên để đoán.
+final class NativeQuoteShareTests: NativeGuestUITestCase {
+    private let saveLabels = ["Save Image", "Lưu hình ảnh", "Lưu ảnh"]
+    private let cancelLabels = ["Cancel", "Hủy", "Close", "Đóng"]
+    private let libraryLabels = ["Library", "Thư viện", "Photos", "Ảnh"]
+    private let emptyLabels = ["No Photos or Videos", "No Photos", "Không có ảnh hoặc video", "Không có ảnh hay video", "Không có ảnh"]
+    private var lastImageOCR = "Chưa đến bước OCR ảnh mới trong Photos"
+
+    override func tearDown() async throws {
+        await MainActor.run {
+            note("share-photos-last-ocr", lastImageOCR)
+            evidence("share-photos-final", app: XCUIApplication(bundleIdentifier: "com.apple.mobileslideshow"))
+        }
+        try await super.tearDown()
+    }
+
+    private struct PhotosBaseline {
+        let keys: Set<String>
+        let emptyState: String?
+    }
+
+    private func normalized(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .replacingOccurrences(of: "đ", with: "d")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    @MainActor
+    private func note(_ name: String, _ text: String) {
+        let attachment = XCTAttachment(string: text)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    private func visibleButtons(_ owner: XCUIApplication, labels: [String]) -> [XCUIElement] {
+        owner.buttons.matching(NSPredicate(format: "label IN %@", labels as NSArray)).allElementsBoundByIndex.filter {
+            $0.exists && $0.isEnabled && self.insideViewport($0, app: owner)
+        }
+    }
+
+    @MainActor
+    private func oneButton(_ owner: XCUIApplication, labels: [String], phase: String) -> XCUIElement? {
+        evidence(phase, app: owner)
+        let candidates = visibleButtons(owner, labels: labels)
+        note(phase + "-candidates", candidates.map { "label=\($0.label) frame=\($0.frame)" }.joined(separator: "\n"))
+        XCTAssertEqual(candidates.count, 1, "\(phase): cần đúng một nút native/app có nhãn candidate; xem AX trước thao tác")
+        return candidates.count == 1 ? candidates[0] : nil
+    }
+
+    @MainActor
+    private func shareControl(_ app: XCUIApplication) -> XCUIElement? {
+        // Nhãn app có thể ghép emoji span với chữ; không lẫn nút Lưu ảnh của Files.
+        let candidates = app.buttons.matching(NSPredicate(format: "label IN %@",
+            ["Chia sẻ", "📤 Chia sẻ", "Share", "📤 Share"] as NSArray)).allElementsBoundByIndex
+            .filter { $0.exists && $0.isEnabled }
+        XCTAssertEqual(candidates.count, 1, "Modal quote phải có đúng một nút Chia sẻ của app")
+        guard candidates.count == 1 else { evidence("share-app-control-ambiguous", app: app); return nil }
+        let control = candidates[0]
+        reveal(control, app: app)
+        evidence("share-app-control", app: app)
+        XCTAssertTrue(insideViewport(control, app: app), "Chỉ chạm Chia sẻ sau khi nút thật đã nằm trong viewport")
+        return insideViewport(control, app: app) ? control : nil
+    }
+
+    @MainActor
+    private func nativeAction(_ app: XCUIApplication, labels: [String], phase: String) -> XCUIElement? {
+        let webCandidates = app.webViews.buttons.matching(NSPredicate(format: "label IN %@", labels as NSArray))
+            .allElementsBoundByIndex.filter { $0.exists && $0.isHittable && $0.isEnabled }
+        XCTAssertTrue(webCandidates.isEmpty, "\(phase): candidate phải thuộc share sheet native, không phải nút web phía sau")
+        guard webCandidates.isEmpty else { evidence(phase + "-unexpected-web-action", app: app); return nil }
+        return oneButton(app, labels: labels, phase: phase)
+    }
+
+    @MainActor
+    private func shareSheetReady(_ app: XCUIApplication) -> Bool {
+        visibleButtons(app, labels: saveLabels).count == 1 &&
+            app.webViews.buttons.matching(NSPredicate(format: "label IN %@", saveLabels as NSArray))
+                .allElementsBoundByIndex.allSatisfy { !$0.isHittable || !$0.isEnabled }
+    }
+
+    @MainActor
+    private func openPhotosLibrary(_ photos: XCUIApplication, phase: String) -> Bool {
+        evidence(phase + "-before-navigation", app: photos)
+        let tabs = photos.tabBars.buttons.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
+            .allElementsBoundByIndex.filter { $0.exists && self.insideViewport($0, app: photos) }
+        XCTAssertLessThanOrEqual(tabs.count, 1, "Photos Library tab phải có đúng một nhãn candidate hoặc đã ở Library")
+        guard tabs.count <= 1 else { return false }
+        if let tab = tabs.first { tab.tap() }
+        let heading = photos.navigationBars.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
+        let title = photos.staticTexts.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
+        waitUntil("Photos phải hiển thị Library thực; onboarding/selector không hỗ trợ phải để lại bằng chứng", timeout: 20) {
+            let hasGridOrEmpty = !self.photosCells(photos).isEmpty ||
+                photos.staticTexts.matching(NSPredicate(format: "label IN %@", self.emptyLabels as NSArray))
+                    .allElementsBoundByIndex.contains { $0.exists && self.insideViewport($0, app: photos) }
+            let librarySelected = heading.count > 0 || title.count > 0 || (tabs.count == 1 && tabs[0].isSelected)
+            return photos.state == .runningForeground && librarySelected && hasGridOrEmpty
+        }
+        evidence(phase + "-library", app: photos)
+        let ready = photos.state == .runningForeground &&
+            (heading.count > 0 || title.count > 0 || (tabs.count == 1 && tabs[0].isSelected))
+        XCTAssertTrue(ready, "Photos must still expose its verified library before proceeding")
+        return ready
+    }
+
+    @MainActor
+    private func photosCells(_ photos: XCUIApplication) -> [XCUIElement] {
+        // Chỉ đếm các ô AX của Library đã tải, không gọi đây là tổng số ảnh trong Photo Library.
+        photos.collectionViews.cells.allElementsBoundByIndex.filter {
+            $0.exists && self.insideViewport($0, app: photos)
+        }
+    }
+
+    @MainActor
+    private func assetKey(_ cell: XCUIElement) -> String {
+        cell.identifier + "\u{001F}" + cell.label
+    }
+
+    @MainActor
+    private func photosSnapshot(_ photos: XCUIApplication, phase: String) -> PhotosBaseline? {
+        let empty = photos.staticTexts.matching(NSPredicate(format: "label IN %@", emptyLabels as NSArray))
+            .allElementsBoundByIndex.filter { $0.exists && self.insideViewport($0, app: photos) }
+        let cells = photosCells(photos)
+        let keys = cells.map { self.assetKey($0) }
+        evidence(phase, app: photos)
+        note(phase + "-asset-keys", "visibleAXCellCount=\(cells.count)\nemptyState=\(empty.map(\.label))\n" + keys.joined(separator: "\n"))
+        XCTAssertEqual(Set(keys).count, cells.count, "Mỗi ô ảnh phải có key AX riêng; không đoán ô đầu khi key trùng")
+        XCTAssertTrue(cells.allSatisfy { !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+                      "Ô Library không có tên AX thì chưa thể làm oracle ảnh mới an toàn")
+        XCTAssertTrue(!cells.isEmpty || empty.count == 1, "Baseline rỗng phải có thông báo rỗng thực, không suy ra từ query trả 0")
+        XCTAssertTrue(cells.isEmpty || empty.isEmpty, "Library phải hết trạng thái tải/rỗng trước khi lấy baseline")
+        guard Set(keys).count == cells.count,
+              cells.allSatisfy({ !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
+              (!cells.isEmpty && empty.isEmpty) || (cells.isEmpty && empty.count == 1) else { return nil }
+        return PhotosBaseline(keys: Set(keys), emptyState: empty.first?.label)
+    }
+
+    @MainActor
+    private func quoteParts(_ app: XCUIApplication) -> (quote: String, source: String)? {
+        // Canvas aria-label lấy nguyên quoteText + “ — ” + sourceTitle từ QuoteCardModal.svelte:267.
+        // Chỉ đọc AX của UI thật; không seed quote, không JS hoặc truy cập storage.
+        let labels = Set(app.webViews.firstMatch.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", " — ")).allElementsBoundByIndex
+            .map(\.label).filter { !$0.contains("Tạo ảnh trích dẫn") && !$0.contains("Chọn nền và chia sẻ") })
+        note("share-quote-canvas-label-candidates", labels.sorted().joined(separator: "\n"))
+        XCTAssertEqual(labels.count, 1, "Phải đọc được đúng một canvas label gồm quote và nguồn trước share")
+        guard labels.count == 1, let label = labels.first else { evidence("share-quote-label-unavailable", app: app); return nil }
+        let pieces = label.components(separatedBy: " — ")
+        XCTAssertEqual(pieces.count, 2, "Canvas quote/source phải phân biệt rõ trước khi đối chiếu ảnh Photos")
+        guard pieces.count == 2 else { return nil }
+        let meaningful = !normalized(pieces[0]).isEmpty && !normalized(pieces[1]).isEmpty
+        XCTAssertTrue(meaningful, "The actual quote and source must both be readable before sharing")
+        guard meaningful else { return nil }
+        return (pieces[0], pieces[1])
+    }
+
+    @MainActor
+    private func allowOwnAddPhotosPrompt(_ app: XCUIApplication) -> Bool {
+        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        waitUntil("Save Image trên runner mới phải thực sự yêu cầu quyền thêm ảnh; không pregrant hoặc bỏ qua TCC", timeout: 15) {
+            app.alerts.count > 0 || system.alerts.count > 0
+        }
+        evidence("share-photos-tcc-app-before-action", app: app)
+        evidence("share-photos-tcc-system-before-action", app: system)
+        // SpringBoard và app có thể cùng expose một alert; chỉ chọn một owner có đúng một alert.
+        let appAlerts = app.alerts.allElementsBoundByIndex.filter { $0.exists }
+        let systemAlerts = system.alerts.allElementsBoundByIndex.filter { $0.exists }
+        let alerts = systemAlerts.isEmpty ? appAlerts : systemAlerts
+        XCTAssertEqual(alerts.count, 1, "Chỉ được trả lời một alert TCC của chính Tu tập")
+        guard alerts.count == 1 else { return false }
+        let alert = alerts[0]
+        let text = normalized(([alert.label] + alert.staticTexts.allElementsBoundByIndex.map(\.label)).joined(separator: " "))
+        note("share-photos-tcc-verified-text", text)
+        let ownAddPhotos = text.contains("tu tap") &&
+            (text.contains("photos") || text.contains("thu vien anh")) &&
+            (text.contains("add") || text.contains("them") || text.contains("luu anh"))
+        XCTAssertTrue(ownAddPhotos, "Không được nhấn Allow trên alert không xác minh được app + Photos + mục đích thêm/lưu ảnh")
+        guard ownAddPhotos else { return false }
+        let allowed = alert.buttons.matching(NSPredicate(format: "label IN %@",
+            ["Allow Adding Photos", "Cho phép thêm ảnh", "Allow", "Cho phép", "OK"] as NSArray))
+            .allElementsBoundByIndex.filter { $0.exists && $0.isEnabled && $0.isHittable && alert.frame.contains($0.frame) }
+        XCTAssertEqual(allowed.count, 1, "TCC đã xác minh vẫn cần đúng một nút cho phép có nhãn candidate")
+        guard allowed.count == 1 else { return false }
+        allowed[0].tap()
+        waitUntil("Alert quyền thêm ảnh phải đóng sau một lần Allow") { !alert.exists }
+        return !alert.exists
+    }
+
+    @MainActor
+    private func recognizedText(_ screenshot: XCUIScreenshot) throws -> String {
+        guard let image = screenshot.image.cgImage else {
+            throw NSError(domain: "NativeQuoteShareTests", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Ảnh màn hình Photos không có pixel"])
+        }
+        let request = VNRecognizeTextRequest(completionHandler: nil)
+        request.recognitionLevel = .accurate
+        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+    }
+
+    @MainActor
+    func testQuoteShareDoubleTapCancelThenSaveImageToPhotosWithPermissionAndContent() {
+        // Lấy baseline từ Photos trước lần share đầu; không xóa/ghi ảnh hoặc thay quyền để dọn fixture.
+        let photos = XCUIApplication(bundleIdentifier: "com.apple.mobileslideshow")
+        photos.launch()
+        guard openPhotosLibrary(photos, phase: "share-photos-baseline"),
+              let baseline = photosSnapshot(photos, phase: "share-photos-baseline-assets") else { return }
+        let app = launchGuest()
+        let create = app.buttons.matching(NSPredicate(format: "label == %@", "Tạo ảnh"))
+            .allElementsBoundByIndex.filter { $0.exists && $0.isEnabled }
+        XCTAssertEqual(create.count, 1, "Home phải có đúng một nút Tạo ảnh của app")
+        guard create.count == 1 else { evidence("share-home-create-ambiguous", app: app); return }
+        tap(create[0], app: app)
+        let title = app.staticTexts["Tạo ảnh trích dẫn"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        let loading = app.staticTexts["Đang tạo ảnh…"].firstMatch
+        waitUntil("Quote thật phải render xong trước share", timeout: 30) {
+            title.exists && !loading.exists && app.buttons.matching(NSPredicate(format: "label IN %@",
+                ["Chia sẻ", "📤 Chia sẻ"] as NSArray)).allElementsBoundByIndex.filter { $0.exists && $0.isEnabled }.count == 1
+        }
+        XCTAssertFalse(app.staticTexts["Không thể tải ảnh. Vui lòng thử lại."].firstMatch.exists)
+        guard let expected = quoteParts(app), let share = shareControl(app) else { return }
+        XCTAssertTrue(insideViewport(share, app: app))
+        share.doubleTap()
+        waitUntil("Double tap Chia sẻ phải mở share sheet native có Save Image") { self.shareSheetReady(app) }
+        guard nativeAction(app, labels: saveLabels, phase: "share-native-first-save-image") != nil,
+              let cancel = nativeAction(app, labels: cancelLabels, phase: "share-native-first-cancel") else { return }
+        XCTAssertFalse(share.isEnabled, "Share promise phải còn pending khi sheet đang sở hữu file")
+        cancel.tap()
+        waitUntil("Một lần Cancel phải đóng sheet và trả lại đúng modal quote có thể tương tác") {
+            title.exists && share.exists && share.isEnabled && !self.shareSheetReady(app)
+        }
+        evidence("share-single-cancel-restores-quote", app: app)
+        // Mở sheet lần hai bằng nút thật là oracle tương tác sau Cancel, không chỉ một nhãn enabled.
+        guard let reopenedShare = shareControl(app) else { return }
+        tap(reopenedShare, app: app)
+        waitUntil("Sau Cancel phải mở được share sheet mới") { self.shareSheetReady(app) }
+        guard let save = nativeAction(app, labels: saveLabels, phase: "share-native-second-save-image") else { return }
+        save.tap()
+        guard allowOwnAddPhotosPrompt(app) else { return }
+        waitUntil("Save Image phải kết thúc share sheet và trả lại quote dùng được; không đợi toast của Files") {
+            title.exists && reopenedShare.exists && reopenedShare.isEnabled && !self.shareSheetReady(app)
+        }
+        evidence("share-save-image-returned-to-quote", app: app)
+        photos.activate()
+        guard openPhotosLibrary(photos, phase: "share-photos-after-save") else { return }
+        waitUntil("Photos phải xuất hiện đúng một ô mới và giữ mọi key baseline trong cùng Library", timeout: 20) {
+            let keys = Set(self.photosCells(photos).map { self.assetKey($0) })
+            return baseline.keys.isSubset(of: keys) && keys.subtracting(baseline.keys).count == 1 && keys.count == baseline.keys.count + 1
+        }
+        guard let after = photosSnapshot(photos, phase: "share-photos-after-save-assets") else { return }
+        let added = after.keys.subtracting(baseline.keys)
+        XCTAssertTrue(baseline.keys.isSubset(of: after.keys))
+        XCTAssertEqual(after.keys.count, baseline.keys.count + 1)
+        XCTAssertEqual(added.count, 1, "Nếu AX tái chế/ẩn ô hoặc key trùng thì cần oracle host; không đoán ảnh mới nhất")
+        let matches = photosCells(photos).filter { added.contains(assetKey($0)) }
+        XCTAssertEqual(matches.count, 1, "Chỉ mở ô ảnh mới đã phân biệt với baseline")
+        guard matches.count == 1 else { return }
+        evidence("share-photos-new-cell-before-open", app: photos)
+        matches[0].tap()
+        waitUntil("Ảnh mới phải mở trong trình xem Photos native") {
+            photos.state == .runningForeground && self.visibleButtons(photos, labels: ["Edit", "Sửa", "Chỉnh sửa"]).count == 1
+        }
+        evidence("share-photos-new-image-viewer", app: photos)
+        var actual = ""
+        var ocrError: String?
+        waitUntil("Pixel ảnh lưu trong Photos phải chứa đúng quote, nguồn và Tu Tập Phật Pháp", timeout: 15) {
+            do {
+                let shot = XCUIScreen.main.screenshot()
+                actual = try self.recognizedText(shot)
+                self.lastImageOCR = "uptime=\(ProcessInfo.processInfo.systemUptime)\nexpectedQuote=\(expected.quote)\n" +
+                    "expectedSource=\(expected.source)\nrecognizedText=\n\(actual)"
+                let text = self.normalized(actual)
+                return photos.state == .runningForeground && text.contains(self.normalized(expected.quote)) &&
+                    text.contains(self.normalized(expected.source)) && text.contains("tu tap phat phap")
+            } catch {
+                ocrError = String(describing: error)
+                self.lastImageOCR = "OCR error: \(error)"
+                return false
+            }
+        }
+        note("share-photos-new-image-ocr", "expectedQuote=\(expected.quote)\nexpectedSource=\(expected.source)\n" +
+             "baselineVisibleAXCount=\(baseline.keys.count)\nbaselineEmptyState=\(baseline.emptyState ?? "none")\n" +
+             "ocrError=\(ocrError ?? "none")\nrecognizedText=\n\(actual)")
+        evidence("share-photos-content-proof", app: photos)
+        let text = normalized(actual)
+        XCTAssertTrue(photos.state == .runningForeground && text.contains(normalized(expected.quote)) &&
+                      text.contains(normalized(expected.source)) && text.contains("tu tap phat phap"),
+                      "Share sheet đóng/ảnh có nhãn không thay thế được bằng chứng pixel ảnh mới trong Photos")
+    }
+}
+
+// Phần còn thiếu có chủ đích, không coi test trên là đã phủ IOS-01/10 toàn bộ:
+// - UI doubleTap chỉ kiểm tra contract pending/Cancel/reopen; không gọi trực tiếp nhánh EXPORT_BUSY.
+// - Cleanup normal cần host snapshot tmp/tu-tap-share-* trước/mở/cancel/mở/save với container
+//   lấy từ simctl get_app_container <UDID> vn.quangtu.tutam data; chụp lúc sheet đang mở để
+//   chứng minh file đã tồn tại, sau completion phải xóa đúng file đó. Chưa triển khai workflow.
+// - Nếu Photos AX không phân biệt được asset, host có thể diff media container trước/sau rồi
+//   OCR chính PNG mới bằng Vision; phải kiểm tra chữ ký PNG/nội dung, không chỉ đếm file/nhãn.
+// - Crash/force-kill cleanup cần fault injection riêng; deinit không được bảo đảm khi process chết.
+// - Chưa phủ deny TCC, AirDrop/extension, iCloud hay thiết bị thật; không đăng nhập dịch vụ để né.
