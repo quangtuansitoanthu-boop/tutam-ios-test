@@ -139,18 +139,29 @@ export function loadPersonalEventData(strict = false): PersonalLunarEvent[] {
   if (typeof localStorage === 'undefined') return [];
   try { return read(selectOwner()).events; } catch (error) { if (strict) throw error; return []; }
 }
+function validEventList(value: unknown): value is PersonalLunarEvent[] {
+  return Array.isArray(value) && value.every(event => event && typeof event === 'object'
+    && typeof event.id === 'string' && typeof event.title === 'string');
+}
+function validConflict(record: StoredEvents): boolean {
+  const remote = record.remote;
+  return Boolean(remote && Number.isSafeInteger(remote.revision) && remote.revision >= 0
+    && validEventList(record.events) && validEventList(remote.events));
+}
 export function getPersonalEventsSyncStatus(): PersonalEventsSyncStatus {
   if (typeof localStorage === 'undefined') return 'local';
   try {
     const owner = selectOwner();
     if (!owner) return 'local';
+    const record = read(owner);
+    if ((record.remote || record.status === 'conflict') && !validConflict(record)) return 'error';
     if (inFlight.get(owner)?.generation === generation) return 'syncing';
-    return read(owner).status || 'local';
+    return record.status || 'local';
   } catch { return 'error'; }
 }
 export function getPersonalEventsConflict(): { local: PersonalLunarEvent[]; remote: PersonalLunarEvent[] } | null {
   if (typeof localStorage === 'undefined') return null;
-  try { const record = read(selectOwner()); return record.remote ? { local: record.events, remote: record.remote.events } : null; } catch { return null; }
+  try { const record = read(selectOwner()); return validConflict(record) ? { local: record.events, remote: record.remote!.events } : null; } catch { return null; }
 }
 export function savePersonalEventData(events: PersonalLunarEvent[], sync = true): void {
   if (typeof localStorage === 'undefined') return;
@@ -291,6 +302,8 @@ export async function resolvePersonalEventsConflict(copy: 'local' | 'server'): P
   if (!owner) return;
   const record = read(owner);
   if (!record.remote) return;
+  // Keep malformed snapshots and recovery receipts intact; neither copy is safe to resolve yet.
+  if (!validConflict(record)) { announce(); return; }
   const remote = record.remote;
   // Retain the pre-resolution local copy for recovery; never discard it.
   write(owner, { ...record, recovery: record.events, remoteRecovery: remote, events: copy === 'server' ? remote.events : record.events, base: remote.events, revision: remote.revision, remote: undefined, pending: copy === 'local', status: copy === 'local' ? 'pending' : 'synced' });

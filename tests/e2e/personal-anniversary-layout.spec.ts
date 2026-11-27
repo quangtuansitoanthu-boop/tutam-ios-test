@@ -43,7 +43,7 @@ async function appearance(control: Locator) {
 }
 
 test.describe('native iOS home anniversary bounds', () => {
-  test.use({ browserName: 'webkit', isMobile: true, hasTouch: true });
+  test.use({ isMobile: true, hasTouch: true });
   for (const viewport of [{ width: 375, height: 844 }, { width: 844, height: 390 }]) {
     test(`home anniversary form stays inside safe bounds and accepts input at ${viewport.width}x${viewport.height}`, async ({ page }, info) => {
       await page.setViewportSize(viewport);
@@ -70,13 +70,25 @@ test.describe('native iOS home anniversary bounds', () => {
         const top = parseFloat(style.height), bottom = parseFloat(style.paddingBottom);
         probe.remove();
         const bounds = dialog.getBoundingClientRect();
+        const children = ['.pem-header', '.pem-form', '.pem-body', '.pem-footer'].map(selector => {
+          const rect = dialog.querySelector(selector)!.getBoundingClientRect();
+          return { selector, x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom };
+        });
         return { top, bottom, y: bounds.y, bottomEdge: bounds.bottom, viewportHeight: innerHeight,
+          x: bounds.x, right: bounds.right, children,
           overflow: dialog.scrollWidth > dialog.clientWidth,
           visualViewport: visualViewport ? { height: visualViewport.height, offsetTop: visualViewport.offsetTop, scale: visualViewport.scale } : null };
       });
       expect(geometry.y).toBeGreaterThanOrEqual(geometry.top);
       expect(geometry.bottomEdge).toBeLessThanOrEqual(geometry.viewportHeight - geometry.bottom);
       expect(geometry.overflow).toBe(false);
+      for (const child of geometry.children) {
+        expect(child.height, child.selector).toBeGreaterThan(0);
+        expect(child.y, child.selector).toBeGreaterThanOrEqual(geometry.y);
+        expect(child.bottom, child.selector).toBeLessThanOrEqual(geometry.bottomEdge);
+        expect(child.x, child.selector).toBeGreaterThanOrEqual(geometry.x);
+        expect(child.right, child.selector).toBeLessThanOrEqual(geometry.right);
+      }
       await info.attach('personal-event-safe-bounds', { body: JSON.stringify(geometry), contentType: 'application/json' });
       await page.screenshot({ path: info.outputPath('personal-event-open.png'), animations: 'disabled' });
       const title = modal.locator('#pem-input-title');
@@ -85,6 +97,9 @@ test.describe('native iOS home anniversary bounds', () => {
       const titleBox = await title.boundingBox(), bodyBox = await modal.locator('.pem-body').boundingBox();
       expect(titleBox!.y).toBeGreaterThanOrEqual(bodyBox!.y);
       expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(bodyBox!.y + bodyBox!.height);
+      const modalBox = (await modal.boundingBox())!;
+      expect(titleBox!.y).toBeGreaterThanOrEqual(modalBox.y);
+      expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(modalBox.y + modalBox.height);
       await modal.locator('#pem-select-type').tap();
       const picker = page.locator('.rosary-select__dialog');
       await expect(picker).toBeVisible();

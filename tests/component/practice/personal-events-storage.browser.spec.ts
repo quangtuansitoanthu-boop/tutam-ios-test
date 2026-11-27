@@ -122,6 +122,38 @@ function submitAnniversary(titleText = 'Ngày lễ mới') {
   title.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 }
 
+it.each([{ revision: 2 }, { events: [null], revision: 2 }])('keeps the home anniversary form usable with an invalid saved conflict snapshot %j', async remote => {
+  vi.spyOn(sessions, 'getBrowserSessionSnapshot').mockReturnValue({
+    authenticated: true, user: { id: 'invalid-conflict-owner', displayName: 'QA', role: 'user', email: '' },
+    csrfToken: null, expiresAt: null,
+  });
+  const key = 'tutam_personal_lunar_events:v2:user:invalid-conflict-owner';
+  const saved = { id: 'storage-failure-event', title: 'Ngày lễ đã lưu', type: 'gia-dinh', lunarDay: 15, lunarMonth: 7, createdAt: 'legacy-date' };
+  const raw = JSON.stringify({ version: 2, events: [saved], base: [saved], revision: 1, pending: true,
+    status: 'conflict', remote, recovery: [saved], guestTransferReceipts: ['previous-transfer'] });
+  localStorage.setItem(key, raw);
+  const view = mount(HomeDailyReminders, { target: document.body, props: { selectedDate: new Date(2026, 10, 7, 12) } });
+  try {
+    await settle();
+    document.querySelector<HTMLButtonElement>('.personal-add-more-btn')!.click(); await settle();
+    expect(unhandled).toEqual([]);
+    const title = document.querySelector<HTMLInputElement>('#pem-input-title')!;
+    expect(title).not.toBeNull();
+    title.value = 'Bản nháp vẫn nhập được'; title.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+    expect(document.querySelector('.pem-dialog .sync-note')?.textContent).toContain('Chưa đồng bộ được');
+    expect(document.querySelector('.pem-dialog')?.textContent).not.toContain('Dùng danh sách trên tài khoản');
+    document.querySelector<HTMLButtonElement>('.pem-close-btn')!.click(); await settle();
+    expect(document.querySelector('.pem-dialog')).toBeNull();
+    document.querySelector<HTMLButtonElement>('.personal-add-more-btn')!.click(); await settle();
+    expect(document.querySelector<HTMLInputElement>('#pem-input-title')!.value).toBe('Bản nháp vẫn nhập được');
+    expect(localStorage.getItem(key)).toBe(raw);
+    expect(mocks.add).not.toHaveBeenCalled();
+    expect(mocks.remove).not.toHaveBeenCalled();
+    expect(mocks.sync).not.toHaveBeenCalled();
+    expect(unhandled).toEqual([]);
+  } finally { await unmount(view); }
+});
+
 it('defaults both calendars to the device date and does not persist until saving', () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(2026, 10, 6, 10));

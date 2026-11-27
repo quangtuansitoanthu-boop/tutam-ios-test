@@ -4,7 +4,7 @@ vi.mock('$lib/stores/session.svelte', () => ({ getBrowserSessionSnapshot: mocks.
 vi.mock('$lib/browser/session-csrf', () => ({ fetchWithSessionRefresh: mocks.fetch, requireBrowserCsrf: mocks.csrf }));
 vi.mock('$lib/browser/native-api', () => ({ fetchNativeJsonMutation: mocks.native }));
 import { loadPersonalLunarEvents, savePersonalLunarEvents, syncPersonalLunarEventsWithServer, pullPersonalLunarEventsFromServer, resolvePersonalEventsConflict } from '../../src/lib/browser/personal-lunar-events';
-import { getPersonalEventsSyncStatus, startPersonalEventsSync } from '../../src/lib/browser/personal-events-sync';
+import { getPersonalEventsConflict, getPersonalEventsSyncStatus, startPersonalEventsSync } from '../../src/lib/browser/personal-events-sync';
 let storage: Map<string, string>;
 let session: any;
 const event = (id: string) => ({ id, title: id, lunarDay: 15, lunarMonth: 7, type: 'gia-dinh' as const, createdAt: '2026-10-22' });
@@ -22,6 +22,39 @@ beforeEach(() => {
 });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 describe('personal event principal and outbox protection', () => {
+  it.each([{ revision: 2 }, { events: [null], revision: 2 }])('keeps invalid conflict bytes intact and blocks either resolution without requests: %j', async remote => {
+    const key = 'tutam_personal_lunar_events:v2:user:A';
+    const raw = JSON.stringify({ version: 2, events: [event('local')], base: [event('base')], revision: 1, pending: true,
+      status: 'conflict', remote, recovery: [event('recovery')], guestTransferReceipts: ['prior-receipt'] });
+    storage.set(key, raw);
+    expect(getPersonalEventsSyncStatus()).toBe('error');
+    expect(getPersonalEventsConflict()).toBeNull();
+    expect(storage.get(key)).toBe(raw);
+    await resolvePersonalEventsConflict('server');
+    await resolvePersonalEventsConflict('local');
+    expect(storage.get(key)).toBe(raw);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.csrf).not.toHaveBeenCalled();
+    vi.stubGlobal('navigator', { onLine: false });
+    savePersonalLunarEvents([event('local'), event('new-local')]);
+    const afterMutation = storage.get(key)!;
+    expect(JSON.parse(afterMutation)).toMatchObject({ events: [event('local'), event('new-local')], base: [event('base')],
+      remote, recovery: [event('recovery')], guestTransferReceipts: ['prior-receipt'] });
+    expect(getPersonalEventsSyncStatus()).toBe('error');
+    await resolvePersonalEventsConflict('server');
+    await resolvePersonalEventsConflict('local');
+    expect(storage.get(key)).toBe(afterMutation);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps an empty remote conflict list valid and leaves optional legacy date fields untouched', () => {
+    const local = { ...event('legacy'), createdAt: 'invalid-old-date', lunarDay: 30 };
+    storage.set('tutam_personal_lunar_events:v2:user:A', JSON.stringify({ version: 2, events: [local], base: [local],
+      revision: 1, pending: true, status: 'conflict', remote: { events: [], revision: 0 } }));
+    expect(getPersonalEventsSyncStatus()).toBe('conflict');
+    expect(getPersonalEventsConflict()).toEqual({ local: [local], remote: [] });
+  });
+
   it('derives syncing only from the active principal request while persisting recoverable pending state', async () => {
     let release!: (response: Response) => void;
     mocks.fetch.mockImplementation(async (_url, init) => init?.method === 'POST'

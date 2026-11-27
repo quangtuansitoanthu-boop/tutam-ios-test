@@ -15,7 +15,7 @@
 
 {#if status === 'pending' || status === 'syncing'}
   <p class="sync-note" role="status">{isEn ? 'Saved on this device. Waiting to sync.' : 'Đã lưu trên thiết bị. Đang chờ đồng bộ.'}</p>
-{:else if status === 'error'}
+{:else if status === 'error' || (status === 'conflict' && !conflict)}
   <div class="sync-note" role="status">
     <p>{isEn ? 'Sync failed. Your changes are still saved on this device.' : 'Chưa đồng bộ được. Thay đổi vẫn được giữ trên thiết bị.'}</p>
     {#if syncError?.status === 401 || syncError?.code === 'invalid_csrf'}

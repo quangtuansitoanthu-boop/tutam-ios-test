@@ -4,6 +4,54 @@ import { deferStartupNotification } from './runtime-helpers';
 
 test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
+for (const [name, remote] of [['missing remote list', { revision: 2 }], ['null remote row', { events: [null], revision: 2 }]] as const) {
+  test(`home anniversary manager stays interactive and preserves a damaged account conflict (${name})`, async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 844 });
+    const owner = 'ui16-local-fixture';
+    const session = { authenticated: true, user: { id: owner, displayName: 'QA UI16', email: 'ui16@example.test', role: 'user' },
+      csrfToken: 'synthetic-local-csrf', expiresAt: '2099-01-01T00:00:00Z' };
+    const event = { id: 'ui16-local', title: 'Ngày lễ QA', type: 'gio-chap', lunarDay: 15, lunarMonth: 7, createdAt: 'legacy-date' };
+    const key = `tutam_personal_lunar_events:v2:user:${owner}`;
+    const raw = JSON.stringify({ version: 2, events: [event], base: [event], revision: 1, pending: true, status: 'conflict', remote,
+      recovery: [event], guestTransferReceipts: ['retained-receipt'] });
+    await page.addInitScript(({ session, key, raw }) => {
+      const host = window as unknown as Record<string, unknown>;
+      host.CapacitorCustomPlatform = { name: 'ios' };
+      host.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'ios', Plugins: {} };
+      localStorage.setItem('tutam_locale', 'vi');
+      localStorage.setItem('tutam_native_session', JSON.stringify(session));
+      localStorage.setItem(key, raw);
+      Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+    }, { session, key, raw });
+    let eventRequests = 0;
+    await page.route('**/api/**', route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === '/api/session') return route.fulfill({ json: session, headers: {
+        'access-control-allow-origin': new URL(page.url()).origin, 'access-control-allow-credentials': 'true',
+      } });
+      if (url.pathname === '/api/personal-events') eventRequests++;
+      return route.abort('failed');
+    });
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto('/');
+    const trigger = page.getByRole('button', { name: 'Thêm ngày lễ cá nhân', exact: true });
+    await trigger.tap();
+    const modal = page.locator('.pem-dialog');
+    await expect(modal).toBeVisible();
+    await expect(modal.locator('.pem-list')).toContainText(event.title);
+    await expect(modal.locator('.sync-note')).toContainText('Chưa đồng bộ được');
+    await expect(modal.getByRole('button', { name: 'Dùng danh sách trên tài khoản', exact: true })).toHaveCount(0);
+    await modal.locator('#pem-input-title').fill('Bản nháp vẫn sử dụng được');
+    await modal.locator('.pem-close-btn').tap(); await expect(modal).toHaveCount(0);
+    await trigger.tap(); await expect(modal).toBeVisible();
+    await expect(modal.locator('#pem-input-title')).toHaveValue('Bản nháp vẫn sử dụng được');
+    expect(await page.evaluate(key => localStorage.getItem(key), key)).toBe(raw);
+    expect(eventRequests).toBe(0);
+    expect(errors).toEqual([]);
+  });
+}
+
 test('personal event date-only draft survives reopen and calendar tabs preserve the chosen date', async ({ page }) => {
   await page.clock.setFixedTime(new Date(2026, 10, 6, 10));
   await page.route('**/api/**', route => route.abort('failed'));
