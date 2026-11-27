@@ -2188,6 +2188,7 @@
   let handledTargetId = $state<string | null>(null);
   let checkedInitialUrl = $state(false);
   let initialToolRestoring = $state(false);
+  let pendingWarmArticleUrl = $state<{ href: string; generation: number; sequence: number; principal: string | null } | null>(null);
   // Đợi phiên ban đầu như chuông thông báo để lần xác minh native không hủy lượt đọc riêng đang chạy.
   const communityTargetReady = $derived(checkedInitialUrl && !initialToolRestoring && sessionStore.initialResolutionComplete !== false);
   async function restoreInitialTool(initialUrl: URL, action: ToolAction): Promise<void> {
@@ -2231,13 +2232,19 @@
       || (normalizedTarget.includes('dia-tang') && (article.id.includes('dia-tang') || article.id.includes('dia_tang') || article.title.toLowerCase().includes('địa tạng'))));
   }
   function applyWarmArticleUrl(url: URL): void {
+    pendingWarmArticleUrl = null;
     if (!presenceMounted || !checkedInitialUrl
       || !['catalog', 'preview'].includes(screen) || meditationSession || meditationChooserOpen
       || preceptsOpen || confirmation !== null || toolFromUrl(url)) return;
     const targetId = url.searchParams.get('article') || url.searchParams.get('book')
       || url.searchParams.get('id') || url.searchParams.get('sach');
     const article = targetId ? findInitialArticle(targetId) : undefined;
-    if (!article) return;
+    if (!article) {
+      // Same-route goto can finish before the existing catalog query publishes its rows.
+      if (targetId && catalogLoading) pendingWarmArticleUrl = { href: url.href, generation: practiceSyncGeneration,
+        sequence: articleRequestSequence, principal: sessionPrincipalId(syncSession) };
+      return;
+    }
     // A newer article intent also supersedes a cold article/tool restoration still awaiting content.
     if (initialToolRestoring) {
       initialToolRestoring = false;
@@ -2270,6 +2277,19 @@
       if (presenceMounted && articleRequestSequence === expectedSequence) console.warn('Unable to open linked practice content.');
     });
   }
+
+  $effect(() => {
+    const pending = pendingWarmArticleUrl;
+    const catalogRows = articles;
+    if (!pending || catalogLoading) return;
+    untrack(() => {
+      pendingWarmArticleUrl = null;
+      if (!catalogRows.length || !presenceMounted || window.location.href !== pending.href
+        || practiceSyncGeneration !== pending.generation || articleRequestSequence !== pending.sequence
+        || sessionPrincipalId(syncSession) !== pending.principal) return;
+      applyWarmArticleUrl(new URL(pending.href));
+    });
+  });
 
   $effect(() => {
     if (checkedInitialUrl || !presenceMounted) return;

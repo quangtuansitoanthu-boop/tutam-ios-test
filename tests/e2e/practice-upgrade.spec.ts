@@ -69,8 +69,8 @@ test('guidance can be reopened and focuses private writing without content reque
 test('reflection guide font controls resize actual text and persist without changing the app font', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 844 });
   await page.addInitScript(() => {
-    localStorage.setItem('tutam_ui_font_scale', '1.2');
-    localStorage.setItem('tutam_guide_font_scale_v1', '1');
+    if (localStorage.getItem('tutam_ui_font_scale') === null) localStorage.setItem('tutam_ui_font_scale', '1.2');
+    if (localStorage.getItem('tutam_guide_font_scale_v1') === null) localStorage.setItem('tutam_guide_font_scale_v1', '1');
   });
   await page.goto('/tu-tap'); await settleClient(page);
   const requests = contentRequests(page);

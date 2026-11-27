@@ -4,11 +4,20 @@ import { beginScriptureCopying } from './runtime-helpers';
 test.use({ hasTouch: true });
 
 for (const theme of ['light', 'dark']) {
-  test(`copying toolbar keeps 44px touch targets with the keyboard open (${theme})`, async ({ page }) => {
+  test(`copying toolbar keeps 44px touch targets with the keyboard open (${theme})`, async ({ page, browserName, isMobile }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/tu-tap/chep-kinh', { waitUntil: 'domcontentloaded' });
     await beginScriptureCopying(page);
-    await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+    if (browserName === 'webkit' && isMobile) {
+      // Playwright tắt FullScreenEnabled cho WebKit mobile; workspace vẫn phủ viewport bằng CSS.
+      await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenEnabled))).toBe(false);
+      await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+      await expect(page.getByRole('dialog', { name: 'Không gian chép kinh', exact: true })).toBeVisible();
+      await expect(page.locator('.copy-writing')).toHaveCSS('position', 'fixed');
+      await expect(page.locator('body')).toHaveClass(/\bcopying-workspace-open\b/);
+    } else {
+      await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+    }
     await page.evaluate(async value => {
       if (document.fullscreenElement) await document.exitFullscreen();
       document.documentElement.setAttribute('data-theme', value);

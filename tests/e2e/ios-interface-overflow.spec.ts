@@ -41,6 +41,21 @@ test('vegan tabs stay below the practice header when scrolling', async ({ page }
   const headerBox = (await header.boundingBox())!;
   const headerBottom = headerBox.y + headerBox.height;
   expect((await title.boundingBox())!.y).toBeGreaterThanOrEqual(headerBottom - 1);
+  const scrollMetrics = () => page.evaluate(() => ({
+    height: innerHeight,
+    contentHeight: document.documentElement.scrollHeight,
+    extent: document.documentElement.scrollHeight - innerHeight,
+  }));
+  const collapsed = await scrollMetrics();
+  // The compact daily menu can fit this phone; open real ingredients to exercise sticky scrolling.
+  const ingredients = page.locator('.vegan details.meal-disclosure');
+  await ingredients.locator('summary').click();
+  await expect(ingredients).toHaveAttribute('open', '');
+  const expanded = await scrollMetrics();
+  await test.info().attach('vegan-scroll-layout', {
+    body: JSON.stringify({ collapsed, expanded }), contentType: 'application/json',
+  });
+  expect(expanded.extent).toBeGreaterThan(200);
   await page.evaluate(() => window.scrollBy(0, 480));
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
   await expect.poll(async () => (await tabs.boundingBox())!.y).toBeGreaterThanOrEqual(headerBottom - 1);

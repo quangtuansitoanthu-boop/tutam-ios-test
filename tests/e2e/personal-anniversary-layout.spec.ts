@@ -42,6 +42,63 @@ async function appearance(control: Locator) {
   });
 }
 
+test.describe('native iOS home anniversary bounds', () => {
+  test.use({ browserName: 'webkit', isMobile: true, hasTouch: true });
+  for (const viewport of [{ width: 375, height: 844 }, { width: 844, height: 390 }]) {
+    test(`home anniversary form stays inside safe bounds and accepts input at ${viewport.width}x${viewport.height}`, async ({ page }, info) => {
+      await page.setViewportSize(viewport);
+      await page.addInitScript(() => {
+        const host = window as unknown as Record<string, unknown>;
+        host.CapacitorCustomPlatform = { name: 'ios' };
+        host.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'ios', Plugins: {} };
+        localStorage.setItem('tutam_locale', 'vi');
+        localStorage.setItem('tutam_ui_font_scale', '1.2');
+      });
+      await page.route('**/api/**', route => route.abort('failed'));
+      const errors: string[] = [];
+      page.on('pageerror', error => errors.push(error.message));
+      await page.goto('/'); await settleClient(page);
+      const trigger = page.locator('.personal-add-first-btn,.personal-add-more-btn').first();
+      await trigger.click();
+      const modal = page.locator('.pem-dialog');
+      await expect(modal).toBeVisible();
+      const geometry = await modal.evaluate(dialog => {
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:fixed;visibility:hidden;height:var(--app-safe-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)';
+        document.body.append(probe);
+        const style = getComputedStyle(probe);
+        const top = parseFloat(style.height), bottom = parseFloat(style.paddingBottom);
+        probe.remove();
+        const bounds = dialog.getBoundingClientRect();
+        return { top, bottom, y: bounds.y, bottomEdge: bounds.bottom, viewportHeight: innerHeight,
+          overflow: dialog.scrollWidth > dialog.clientWidth,
+          visualViewport: visualViewport ? { height: visualViewport.height, offsetTop: visualViewport.offsetTop, scale: visualViewport.scale } : null };
+      });
+      expect(geometry.y).toBeGreaterThanOrEqual(geometry.top);
+      expect(geometry.bottomEdge).toBeLessThanOrEqual(geometry.viewportHeight - geometry.bottom);
+      expect(geometry.overflow).toBe(false);
+      await info.attach('personal-event-safe-bounds', { body: JSON.stringify(geometry), contentType: 'application/json' });
+      await page.screenshot({ path: info.outputPath('personal-event-open.png'), animations: 'disabled' });
+      const title = modal.locator('#pem-input-title');
+      await title.tap(); await page.keyboard.insertText('Kiểm tra bố cục ngày lễ');
+      await expect(title).toHaveValue('Kiểm tra bố cục ngày lễ');
+      const titleBox = await title.boundingBox(), bodyBox = await modal.locator('.pem-body').boundingBox();
+      expect(titleBox!.y).toBeGreaterThanOrEqual(bodyBox!.y);
+      expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(bodyBox!.y + bodyBox!.height);
+      await modal.locator('#pem-select-type').tap();
+      const picker = page.locator('.rosary-select__dialog');
+      await expect(picker).toBeVisible();
+      await picker.locator('[data-value="gia-dinh"]').tap();
+      await expect(picker).toBeHidden();
+      await expect(modal.locator('#pem-select-type')).toHaveValue('gia-dinh');
+      await modal.locator('.pem-close-btn').tap(); await expect(modal).toHaveCount(0);
+      await trigger.tap(); await expect(modal).toBeVisible();
+      await modal.locator('.pem-close-btn').tap(); await expect(modal).toHaveCount(0);
+      expect(errors).toEqual([]);
+    });
+  }
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test(`home anniversary form matches settings controls (${theme})`, async ({ page }, testInfo) => {
     await page.addInitScript(theme => {

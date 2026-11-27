@@ -14,6 +14,7 @@ on:
           - audio
           - typing
           - audit
+          - home
   push:
     branches:
       - 'codex/qa-*'
@@ -174,6 +175,8 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
           elif [ "$IOS_TEST_SUITE" = "typing" ]; then
             testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
+          elif [ "$IOS_TEST_SUITE" = "home" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testHomePersonalAnniversariesLunarSolarCancelSaveDeleteAndPersistence)
           elif [ "$IOS_TEST_SUITE" = "full" ] || [ "$IOS_TEST_SUITE" = "audit" ]; then
             testing_args=(
               -only-testing:AppUITests/NativeGuestSmokeTests
@@ -247,6 +250,8 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
           elif [ "$IOS_TEST_SUITE" = "typing" ]; then
             testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
+          elif [ "$IOS_TEST_SUITE" = "home" ]; then
+            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testHomePersonalAnniversariesLunarSolarCancelSaveDeleteAndPersistence)
           elif [ "$IOS_TEST_SUITE" = "full" ] || [ "$IOS_TEST_SUITE" = "audit" ]; then
             testing_args=(
               -only-testing:AppUITests/NativeGuestSmokeTests
@@ -283,7 +288,7 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'full': 13, 'smoke': 3, 'audio': 1, 'typing': 1, 'audit': 18}[suite]
+          min_passed={'full': 13, 'smoke': 3, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1}[suite]
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
           assert data['failedTests'] == 0, 'Native UI test failures'
           assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'

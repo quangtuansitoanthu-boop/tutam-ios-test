@@ -365,6 +365,31 @@ test('warm home reader close and shallow book Back Forward keep the guest banner
 });
 
 
+test('a warm article intent waits for the existing native catalog request to publish', async ({ page }) => {
+  await nativeFixture(page);
+  let releaseCatalog!: () => void;
+  let catalogStarted!: () => void;
+  const held = new Promise<void>(resolve => { releaseCatalog = resolve; });
+  const started = new Promise<void>(resolve => { catalogStarted = resolve; });
+  let catalogRequests = 0;
+  await page.route('**/offline-bundled-articles.json', async route => {
+    if (++catalogRequests === 1) { catalogStarted(); await held; }
+    await route.continue();
+  });
+  try {
+    await page.goto('/tu-tap');
+    await started;
+    await settleClient(page);
+    await expect.poll(() => page.evaluate(() => typeof (window as any).qaUrlOpen)).toBe('function');
+    await warm(page, '/tu-tap?article=tt_1780910773084&chap=3');
+    await expect(page).toHaveURL(/article=tt_1780910773084&chap=3/);
+    await expect(page.locator('.tt-preview')).toHaveCount(0);
+    releaseCatalog();
+    await expect(page.locator('.tt-preview .tt-reader-chapter-title')).toContainText('PHẨM 3:');
+    expect(catalogRequests).toBe(1);
+  } finally { releaseCatalog(); }
+});
+
 test('a rejected native tool intent preserves the active practice URL and opens after normal exit', async ({ page }) => {
   await nativeFixture(page);
   await page.goto('/tu-tap');
