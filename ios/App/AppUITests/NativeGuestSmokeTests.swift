@@ -684,7 +684,74 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
     }
 
     @MainActor
+    private func prepareNativeFilesLocalDestination() -> Bool {
+        continueAfterFailure = false
+        // Bundle ID do Apple công bố; chỉ mở Duyệt và vị trí cục bộ, không xử lý màn đăng nhập/onboarding.
+        let files = XCUIApplication(bundleIdentifier: "com.apple.DocumentsApp")
+        files.launchArguments = ["-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
+        let started = ProcessInfo.processInfo.systemUptime
+        let deadline = started + 60
+        files.launch()
+        evidence("quote-files-preflight-before", app: files)
+        let localLabels = ["Trên iPhone", "On My iPhone"] as NSArray
+        let localIDs = ["DOC.sidebar.item.Trên iPhone", "DOC.sidebar.item.On My iPhone"] as NSArray
+        let location = files.cells.matching(NSPredicate(format: "identifier IN %@ OR label IN %@", localIDs, localLabels)).firstMatch
+        let localTitle = files.navigationBars.staticTexts.matching(NSPredicate(format: "label IN %@", localLabels)).firstMatch
+        let browseTitle = files.navigationBars.staticTexts.matching(NSPredicate(format: "label IN %@", ["Duyệt", "Browse"] as NSArray)).firstMatch
+        var selectedBrowse = false
+        var selectedLocal = false
+        var ready = false
+        repeat {
+            if files.state == .runningForeground {
+                let screen = files.frame
+                if localTitle.exists {
+                    let frame = localTitle.frame
+                    if frame.width > 0 && frame.height > 0 && screen.contains(frame) {
+                        ready = true
+                        break
+                    }
+                }
+                if !selectedLocal && browseTitle.exists && location.exists {
+                    let frame = location.frame
+                    let header = browseTitle.frame
+                    if frame.width >= 44 && frame.height >= 44 && screen.contains(frame)
+                        && screen.contains(header) && frame.minY >= header.maxY && location.isHittable {
+                        selectedLocal = true
+                        location.tap()
+                        continue
+                    }
+                }
+                if !selectedBrowse && !selectedLocal && !browseTitle.exists {
+                    let buttons = files.buttons.matching(NSPredicate(format: "label IN %@", ["Duyệt", "Browse"] as NSArray)).allElementsBoundByIndex
+                    let visible = buttons.filter { button in
+                        let frame = button.frame
+                        return frame.width > 0 && frame.height > 0 && screen.contains(frame) && button.isHittable
+                    }
+                    if visible.count == 1, let button = visible.first {
+                        selectedBrowse = true
+                        button.tap()
+                        continue
+                    }
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        evidence("quote-files-preflight-after", app: files)
+        if ready { files.terminate() }
+        let elapsed = ProcessInfo.processInfo.systemUptime - started
+        let timing = XCTAttachment(string: "elapsedSeconds=\(elapsed)\nlocalDestinationReady=\(ready)\nselectedBrowse=\(selectedBrowse)\nselectedLocal=\(selectedLocal)")
+        timing.name = "quote-files-preflight-elapsed"
+        timing.lifetime = .keepAlways
+        add(timing)
+        let withinBudget = ready && elapsed <= 60
+        XCTAssertTrue(withinBudget, "The system Files local destination must become usable within the 60-second precondition before launching Tu tập")
+        guard withinBudget else { return false }
+        return true
+    }
+
+    @MainActor
     func testQuoteImageUsesNativeSavePickerAndCancelKeepsDialogUsable() {
+        guard prepareNativeFilesLocalDestination() else { return }
         let app = launchGuest()
         tap(app.buttons["Tạo ảnh"].firstMatch, app: app)
         let title = app.staticTexts["Tạo ảnh trích dẫn"].firstMatch

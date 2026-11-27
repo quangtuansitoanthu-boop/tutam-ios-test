@@ -18,6 +18,7 @@ on:
           - personal
           - diagnostic
           - trace
+          - quote
   push:
     branches:
       - 'codex/qa-*'
@@ -40,6 +41,7 @@ jobs:
       matrix:
         suite: ${{ fromJSON(inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || inputs.test_suite == 'diagnostic' && '["smoke","personal"]' || inputs.test_suite == 'trace' && '["quote","navigation"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
       TUTAM_BUNDLE_SYNCED: '1'
       VITE_GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
       # Each audit class gets a fresh runner/install; permission grants must not leak into Typing.
@@ -58,7 +60,14 @@ jobs:
           cache: npm
       - name: Verify Apple toolchain
         run: |
-          xcodebuild -version
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcode_version="$(xcodebuild -version)"
+          printf '%s\n' "$xcode_version"
+          test "$(printf '%s\n' "$xcode_version" | head -n 1)" = 'Xcode 26.2'
+          simulator_sdk="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          test "$simulator_sdk" = '26.2'
+          printf 'TUTAM_QA_SIMULATOR_SDK_VERSION=%s\n' "$simulator_sdk" >> "$GITHUB_ENV"
           pod --version
       - name: Install locked dependencies
         run: npm ci
@@ -156,19 +165,23 @@ jobs:
           test "$TUTAM_QA_HOSTS_ISOLATED" = 1
           xcrun simctl list devices available --json > build/release-evidence/simulator-devices.json
           simulator_id=$(python3 - <<'PY'
-          import json
+          import json, os
           data=json.load(open('build/release-evidence/simulator-devices.json'))
+          sdk=os.environ['TUTAM_QA_SIMULATOR_SDK_VERSION']
+          expected=tuple(int(part) for part in sdk.split('.'))
           for runtime, devices in sorted(data['devices'].items(), reverse=True):
               if '.iOS-' not in runtime:
                   continue
-              version=runtime.rsplit('.iOS-',1)[1].split('-')
-              if int(version[0]) < 17:
+              version=tuple(int(part) for part in runtime.rsplit('.iOS-',1)[1].split('-'))
+              if version != expected:
                   continue
               for device in devices:
                   if device.get('isAvailable') and device['name'].startswith('iPhone'):
+                      with open('build/release-evidence/simulator-selection.json','w') as evidence:
+                          json.dump({'sdkVersion':sdk,'runtime':runtime,'device':device['name'],'udid':device['udid']},evidence)
                       print(device['udid'])
                       raise SystemExit(0)
-          raise SystemExit('No available iPhone simulator with iOS 17 or newer')
+          raise SystemExit(f'No available iPhone simulator matching the selected SDK {sdk}')
           PY
           )
           echo "TUTAM_QA_SIMULATOR=$simulator_id" >> "$GITHUB_ENV"
