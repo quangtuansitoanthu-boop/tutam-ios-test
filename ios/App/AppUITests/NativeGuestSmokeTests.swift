@@ -2924,6 +2924,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     private let emptyLabels = ["No Photos or Videos", "No Photos", "Không có ảnh hoặc video", "Không có ảnh hay video", "Không có ảnh"]
     private var continuedPhotosWelcome = false
     private var declinedPhotosNotifications = false
+    private var capturedPhotosReadinessDiagnostic = false
     private var lastImageOCR = "Chưa đến bước OCR ảnh mới trong Photos"
 
     override func tearDown() async throws {
@@ -3078,8 +3079,100 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
                 .allElementsBoundByIndex.contains { $0.exists && self.insideViewport($0, app: photos) }
         let ready = photos.state == .runningForeground && welcome.count == 0 && hasGridOrEmpty &&
             (heading.count > 0 || title.count > 0 || (tabs.count == 1 && tabs[0].isSelected))
+        if !ready { observePhotosReadinessFailure(photos, phase: phase) }
         XCTAssertTrue(ready, "Photos must still expose its verified library before proceeding")
         return ready
+    }
+
+    @MainActor
+    private func observePhotosReadinessFailure(_ photos: XCUIApplication, phase: String) {
+        guard !capturedPhotosReadinessDiagnostic else { return }
+        capturedPhotosReadinessDiagnostic = true
+        // Chỉ đọc sau lượt chờ readiness; các phép đo tuần tự không phải snapshot nguyên tử.
+        let started = ProcessInfo.processInfo.systemUptime
+        let state = photos.state
+        let viewport = photos.frame
+        let frameValues: (CGRect) -> [String: Any] = { frame in
+            if frame.isNull || frame.isInfinite {
+                return ["isNull": frame.isNull, "isInfinite": frame.isInfinite]
+            }
+            return ["x": Double(frame.minX), "y": Double(frame.minY),
+                    "width": Double(frame.width), "height": Double(frame.height)]
+        }
+        var windows: [[String: Any]] = []
+        for (index, window) in photos.windows.allElementsBoundByIndex.enumerated() {
+            windows.append(["index": index, "frame": frameValues(window.frame)])
+        }
+        let libraries = photos.scrollViews.matching(identifier: "content_scroll_view").allElementsBoundByIndex
+        var scopes: [[String: Any]] = []
+        for (index, library) in libraries.enumerated() {
+            scopes.append(["index": index, "frame": frameValues(library.frame),
+                           "rawImageCount": library.images.matching(identifier: "PXGGridLayout-Info").count])
+        }
+        let rawImages = photos.images.matching(identifier: "PXGGridLayout-Info").allElementsBoundByIndex
+        var images: [[String: Any]] = []
+        for (index, image) in rawImages.enumerated() {
+            var row: [String: Any] = ["index": index]
+            do {
+                let snapshot = try image.snapshot()
+                let values: [String: Any] = [
+                    "type": String(describing: snapshot.elementType),
+                    "typeRawValue": Int(snapshot.elementType.rawValue),
+                    "label": snapshot.label, "identifier": snapshot.identifier,
+                    "frame": frameValues(snapshot.frame)
+                ]
+                row["snapshot"] = values
+            } catch {
+                row["snapshotError"] = String(describing: error)
+            }
+            let exists = image.exists
+            let frame = image.frame
+            let hittable = image.isHittable
+            let intersection = viewport.intersection(frame)
+            let contained = viewport.contains(frame)
+            row["liveExists"] = exists
+            row["liveFrame"] = frameValues(frame)
+            row["liveIsHittable"] = hittable
+            row["viewportContains"] = contained
+            row["intersection"] = frameValues(intersection)
+            row["frameAtLeast44"] = !frame.isNull && !frame.isInfinite && frame.width >= 44 && frame.height >= 44
+            row["intersectionAtLeast44"] = !intersection.isNull && !intersection.isInfinite && intersection.width >= 44 && intersection.height >= 44
+            row["computedInsideViewport"] = exists && frame.width > 0 && frame.height > 0 && contained && hittable
+            row["baseInsideViewport"] = insideViewport(image, viewport: viewport)
+            images.append(row)
+        }
+        let tabs = photos.tabBars.buttons.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
+            .allElementsBoundByIndex
+        var tabValues: [[String: Any]] = []
+        for tab in tabs {
+            tabValues.append(["label": tab.label, "identifier": tab.identifier, "frame": frameValues(tab.frame),
+                              "exists": tab.exists, "selected": tab.isSelected, "hittable": tab.isHittable])
+        }
+        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        var values: [String: Any] = [
+            "observationStartedUptime": started,
+            "photosState": String(describing: state), "photosStateRawValue": Int(state.rawValue),
+            "viewport": frameValues(viewport),
+            "windows": windows, "rawLibraryCount": libraries.count, "libraryScopes": scopes,
+            "rawExactImageCount": rawImages.count, "images": images,
+            "headingCount": photos.navigationBars.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray)).count,
+            "titleCount": photos.staticTexts.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray)).count,
+            "rawTabCount": tabs.count, "tabs": tabValues,
+            "welcomeTitleCount": photos.staticTexts.matching(NSPredicate(format: "label == %@", "What’s New in Photos")).count,
+            "photosAlertCount": photos.alerts.count, "springboardAlertCount": system.alerts.count,
+            "continuedPhotosWelcome": continuedPhotosWelcome,
+            "declinedPhotosNotifications": declinedPhotosNotifications
+        ]
+        values["observationEndedUptime"] = ProcessInfo.processInfo.systemUptime
+        let message: String
+        do {
+            let data = try JSONSerialization.data(withJSONObject: values, options: [.prettyPrinted, .sortedKeys])
+            message = String(decoding: data, as: UTF8.self)
+        } catch {
+            message = "Photos readiness diagnostic encoding error: \(error)"
+        }
+        note(phase + "-readiness-diagnostic", message)
+        evidence(phase + "-readiness-diagnostic", app: photos)
     }
 
     @MainActor
