@@ -2530,3 +2530,180 @@ final class NativeDreamV3Tests: NativeGuestUITestCase {
         XCTAssertTrue(reflection.exists, "Back from dream search must return to the actual practice tools")
     }
 }
+
+// Kiểm tra riêng UI-14, giữ nguyên từng byte của 18 ca audit hiện có.
+final class NativeBiorhythmTests: NativeGuestUITestCase {
+    @MainActor
+    private func biorhythmBack(_ app: XCUIApplication) -> XCUIElement {
+        let labels = NSPredicate(format: "label IN %@", ["Quay lại", "Quay lại Tu Tập", "Quay lại Trang chủ"] as NSArray)
+        let buttons = app.buttons.matching(labels)
+        waitUntil("Biorhythm must expose exactly one route Back button") { buttons.count == 1 }
+        return buttons.firstMatch
+    }
+
+    @MainActor
+    private func assertBiorhythmTarget(_ element: XCUIElement, app: XCUIApplication) {
+        reveal(element, app: app)
+        XCTAssertTrue(element.isHittable, "The actual native control must be reachable")
+        let frame = element.frame
+        XCTAssertGreaterThanOrEqual(frame.width, 44, "Biorhythm controls need a 44pt-wide target")
+        XCTAssertGreaterThanOrEqual(frame.height, 44, "Biorhythm controls need a 44pt-high target")
+        XCTAssertTrue(app.frame.contains(frame), "The control must stay inside the native viewport")
+    }
+
+    @MainActor
+    private func biorhythmTextFrame(_ prefix: String, app: XCUIApplication) -> CGRect {
+        let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", prefix)).firstMatch
+        reveal(text, app: app)
+        var previous: CGRect?
+        var result = CGRect.zero
+        waitUntil("Biorhythm text must have stable, visible native geometry") {
+            guard let snapshot = try? text.snapshot() else { return false }
+            let frame = snapshot.frame
+            guard frame.width > 0 && frame.height > 0 && app.frame.contains(frame) else { return false }
+            let stable = previous == frame
+            previous = frame
+            result = frame
+            return stable
+        }
+        return result
+    }
+
+    @MainActor
+    private func biorhythmChart(_ app: XCUIApplication) -> XCUIElement {
+        let label = NSPredicate(format: "label BEGINSWITH %@", "Biểu đồ sóng 31 ngày · ")
+        return app.descendants(matching: .any).matching(label).firstMatch
+    }
+
+    @MainActor
+    private func captureBiorhythmChart(_ orientation: String, app: XCUIApplication) {
+        let heading = app.staticTexts["Biểu đồ sóng 31 ngày"].firstMatch
+        reveal(heading, app: app)
+        let chart = biorhythmChart(app)
+        XCTAssertTrue(chart.waitForExistence(timeout: 15), "A selected birth date must produce the real labelled chart")
+        var contentViewport = app.frame
+        let navigation = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Điều hướng nhanh")).firstMatch
+        if navigation.exists && navigation.frame.minY > contentViewport.midY {
+            contentViewport.size.height = navigation.frame.minY - contentViewport.minY
+        }
+        // SVG có thể cao hơn vùng đọc khi xoay ngang. Kiểm tra không tràn ngang
+        // và phần biểu đồ còn chạm được phía trên thanh điều hướng;
+        // nội dung dài vẫn được phép cuộn dọc.
+        var visible = CGRect.zero
+        for _ in 0..<6 {
+            let frame = chart.frame
+            visible = frame.intersection(contentViewport)
+            if !visible.isNull && visible.height >= 44 && chart.isHittable { break }
+            app.swipeUp()
+        }
+        let frame = chart.frame
+        XCTAssertGreaterThan(frame.width, 44)
+        XCTAssertGreaterThan(frame.height, 44)
+        XCTAssertGreaterThanOrEqual(frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(frame.maxX, app.frame.maxX)
+        XCTAssertFalse(visible.isNull)
+        XCTAssertGreaterThanOrEqual(visible.height, 44, "The plot must remain reachable above the native footer")
+        XCTAssertTrue(chart.isHittable)
+        evidence("biorhythm-chart-" + orientation, app: app)
+        let hint = biorhythmTextFrame("Chạm vào biểu đồ để chọn ngày.", app: app)
+        let geometry = XCTAttachment(string: "orientation=\(orientation); chart=\(frame); visibleChart=\(visible); hintText=\(hint); viewport=\(app.frame). AX bounds verify layout only, not CSS font size or font family.")
+        geometry.name = "biorhythm-chart-native-geometry-" + orientation
+        geometry.lifetime = .keepAlways
+        add(geometry)
+    }
+
+    @MainActor
+    private func captureBiorhythmGuide(_ orientation: String, app: XCUIApplication) {
+        let guide = app.buttons["Hướng dẫn"].firstMatch
+        assertBiorhythmTarget(guide, app: app)
+        guide.tap()
+        let title = app.staticTexts["Hướng dẫn · NHỊP SINH HỌC"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        let dialogLabel = NSPredicate(format: "label BEGINSWITH %@ AND (label ENDSWITH %@ OR label ENDSWITH %@)", "Hướng dẫn · NHỊP SINH HỌC", "hộp thoại web", "web dialog")
+        let dialog = app.otherElements.matching(dialogLabel).firstMatch
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10), "The real guide must expose a native dialog boundary")
+        XCTAssertTrue(app.frame.contains(dialog.frame), "The guide must fit the native viewport after rotation")
+        let close = dialog.buttons["Đóng"].firstMatch
+        assertBiorhythmTarget(close, app: app)
+        let text = biorhythmTextFrame("Nhập họ tên nếu muốn và chọn ngày sinh Dương lịch.", app: app)
+        XCTAssertTrue(dialog.frame.contains(text), "The guide body text must remain within its actual dialog")
+        XCTAssertTrue(dialog.frame.contains(close.frame), "The guide close target must remain within its dialog")
+        evidence("biorhythm-guide-" + orientation, app: app)
+        let geometry = XCTAttachment(string: "orientation=\(orientation); dialog=\(dialog.frame); guideText=\(text); close=\(close.frame); viewport=\(app.frame). Text bounds are not a font-size measurement.")
+        geometry.name = "biorhythm-guide-native-geometry-" + orientation
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        assertBiorhythmTarget(close, app: app)
+        close.tap()
+        waitUntil("Closing the guide must restore the biorhythm screen") { !dialog.exists }
+        assertBiorhythmTarget(biorhythmBack(app), app: app)
+    }
+
+    @MainActor
+    func testBiorhythmBirthEntryResultsGuideRotationAndSingleBack() {
+        let app = launchGuest()
+        let route = URL(string: "vn.quangtu.tutam:///tu-tap/nhip-sinh-hoc")!
+        openNativeLink(route, app: app)
+        let birth = app.textFields["Ngày sinh (Dương lịch)"].firstMatch
+        XCTAssertTrue(birth.waitForExistence(timeout: 20), "The deep link must open the actual biorhythm birth-date field")
+        waitUntil("The local guest profile must finish loading") { birth.isEnabled }
+        let initialBirthValue = birth.value as? String ?? ""
+        XCTAssertTrue(initialBirthValue.isEmpty || initialBirthValue == "dd/mm/yyyy",
+                      "This dedicated fresh CI guest must start without a seeded profile")
+        assertBiorhythmTarget(birth, app: app)
+        birth.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        birth.typeText("15081992")
+        XCTAssertEqual(birth.value as? String, "15/08/1992", "Numeric native typing must use the production dd/mm/yyyy formatter")
+        let doneLabels = NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray)
+        let done = app.toolbars.buttons.matching(doneLabels).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5) && done.isHittable, "The real numeric keyboard must expose native Done")
+        done.tap()
+        waitUntil("Native Done must dismiss the keyboard") { !app.keyboards.firstMatch.exists }
+        XCTAssertTrue(app.staticTexts["Đã lưu hồ sơ"].firstMatch.waitForExistence(timeout: 15), "The UI must commit the profile through its existing local storage owner")
+        let average = app.staticTexts["Trung bình"].firstMatch
+        reveal(average, app: app)
+        let percentages = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "^[0-9]{1,3}%$"))
+        XCTAssertGreaterThanOrEqual(percentages.count, 4, "Birth entry must populate the average and three composite values")
+        for element in percentages.allElementsBoundByIndex {
+            guard let value = Int(element.label.dropLast()) else { XCTFail("A populated result must expose a numeric percentage"); return }
+            XCTAssertTrue((0...100).contains(value), "Only the model's displayed 0–100 range is asserted, not scientific validity")
+        }
+        for name in ["Thể chất", "Tình cảm", "Trí tuệ"] {
+            let metric = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+            reveal(metric, app: app)
+            XCTAssertTrue(metric.exists, "The three actual cycle labels must be populated")
+        }
+        let chart = biorhythmChart(app)
+        XCTAssertTrue(chart.waitForExistence(timeout: 15))
+        let todayLabel = chart.label
+        let next = app.buttons["Ngày sau"].firstMatch
+        let previous = app.buttons["Ngày trước"].firstMatch
+        let today = app.buttons["Về hôm nay"].firstMatch
+        for control in [previous, today, next] { assertBiorhythmTarget(control, app: app) }
+        next.tap()
+        waitUntil("A native next-day tap must update the chart's selected date") { chart.label != todayLabel }
+        previous.tap()
+        waitUntil("Previous day must restore the original selected date") { chart.label == todayLabel }
+        next.tap()
+        waitUntil("The next-day control must remain reusable") { chart.label != todayLabel }
+        today.tap()
+        waitUntil("Back to today must restore the chart's original date") { chart.label == todayLabel }
+        for (orientation, name) in [(UIDeviceOrientation.portrait, "portrait"), (.landscapeLeft, "landscape")] {
+            rotate(orientation, app: app)
+            assertBiorhythmTarget(biorhythmBack(app), app: app)
+            captureBiorhythmChart(name, app: app)
+            captureBiorhythmGuide(name, app: app)
+        }
+        rotate(.portrait, app: app)
+        tap(biorhythmBack(app), app: app)
+        let practice = app.buttons["Quán chiếu việc thiện ác trong ngày"].firstMatch
+        reveal(practice, app: app)
+        XCTAssertTrue(practice.exists, "The single Back must return to the real practice tools")
+        openNativeLink(route, app: app)
+        XCTAssertTrue(birth.waitForExistence(timeout: 15))
+        waitUntil("Reopening through the actual route must restore the locally saved birth date") { birth.value as? String == "15/08/1992" }
+        XCTAssertTrue(biorhythmChart(app).waitForExistence(timeout: 15), "The saved guest birth date must restore chart data")
+        evidence("biorhythm-profile-restored-portrait", app: app)
+    }
+}

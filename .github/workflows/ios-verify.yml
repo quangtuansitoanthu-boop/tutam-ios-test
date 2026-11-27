@@ -20,6 +20,7 @@ on:
           - trace
           - quote
           - dream
+          - biorhythm
   push:
     branches:
       - 'codex/qa-*'
@@ -205,6 +206,8 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests/testQuoteImageUsesNativeSavePickerAndCancelKeepsDialogUsable)
           elif [ "$IOS_TEST_SUITE" = "dream" ]; then
             testing_args=(-only-testing:AppUITests/NativeDreamV3Tests/testDreamV3SearchReadingSizeRotationAndBack)
+          elif [ "$IOS_TEST_SUITE" = "biorhythm" ]; then
+            testing_args=(-only-testing:AppUITests/NativeBiorhythmTests/testBiorhythmBirthEntryResultsGuideRotationAndSingleBack)
           elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalNearFutureReminderDeliversToSystemAndCanBeDeleted)
           elif [ "$IOS_TEST_SUITE" = "extended" ]; then
@@ -292,6 +295,8 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests/testQuoteImageUsesNativeSavePickerAndCancelKeepsDialogUsable)
           elif [ "$IOS_TEST_SUITE" = "dream" ]; then
             testing_args=(-only-testing:AppUITests/NativeDreamV3Tests/testDreamV3SearchReadingSizeRotationAndBack)
+          elif [ "$IOS_TEST_SUITE" = "biorhythm" ]; then
+            testing_args=(-only-testing:AppUITests/NativeBiorhythmTests/testBiorhythmBirthEntryResultsGuideRotationAndSingleBack)
           elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
             testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalNearFutureReminderDeliversToSystemAndCanBeDeleted)
           elif [ "$IOS_TEST_SUITE" = "extended" ]; then
@@ -336,7 +341,7 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1, 'quote': 1, 'navigation': 1, 'dream': 1}[suite]
+          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1, 'quote': 1, 'navigation': 1, 'dream': 1, 'biorhythm': 1}[suite]
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
           assert data['failedTests'] == 0, 'Native UI test failures'
           assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'
@@ -347,6 +352,9 @@ jobs:
           if suite == 'dream':
               with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
                   summary.write(f'Native iOS Dream V3 QA: {data["passedTests"]} passed, 0 failed, 0 skipped. This separate content/reading check does not replace the required 18-test audit.\n')
+          if suite == 'biorhythm':
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
+                  summary.write(f'Native iOS Biorhythm UI-14 QA: {data["passedTests"]} passed, 0 failed, 0 skipped. This separate layout/interaction check does not replace the required 18-test audit.\n')
           PY
       - name: Capture native simulator evidence
         if: always()
