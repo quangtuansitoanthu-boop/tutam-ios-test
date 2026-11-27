@@ -2864,6 +2864,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     private let cancelLabels = ["Cancel", "Hủy", "Close", "Đóng"]
     private let libraryLabels = ["Library", "Thư viện", "Photos", "Ảnh"]
     private let emptyLabels = ["No Photos or Videos", "No Photos", "Không có ảnh hoặc video", "Không có ảnh hay video", "Không có ảnh"]
+    private var continuedPhotosWelcome = false
     private var lastImageOCR = "Chưa đến bước OCR ảnh mới trong Photos"
 
     override func tearDown() async throws {
@@ -2951,24 +2952,48 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         if let tab = tabs.first { tab.tap() }
         let heading = photos.navigationBars.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
         let title = photos.staticTexts.matching(NSPredicate(format: "label IN %@", libraryLabels as NSArray))
-        waitUntil("Photos phải hiển thị Library thực; onboarding/selector không hỗ trợ phải để lại bằng chứng", timeout: 20) {
-            let hasGridOrEmpty = !self.photosCells(photos).isEmpty ||
+        let welcome = photos.staticTexts.matching(NSPredicate(format: "label == %@", "What’s New in Photos"))
+        var capturedWelcome = false
+        // Cả Continue và Library dùng chung ngân sách 20 giây, không mở lượt chờ thứ hai.
+        waitUntil("Photos phải đóng welcome đã xác minh và hiển thị Library thực", timeout: 20) {
+            if welcome.count > 0 {
+                let titles = welcome.allElementsBoundByIndex
+                if !capturedWelcome {
+                    self.evidence(phase + "-observed-welcome", app: photos)
+                    capturedWelcome = true
+                }
+                guard titles.count == 1, self.insideViewport(titles[0], app: photos),
+                      !self.continuedPhotosWelcome else { return false }
+                let controls = self.visibleButtons(photos, labels: ["Continue"])
+                guard controls.count == 1 else { return false }
+                self.evidence(phase + "-welcome-before-continue", app: photos)
+                self.continuedPhotosWelcome = true
+                controls[0].tap()
+                return false
+            }
+            let hasGridOrEmpty = !self.photosAssets(photos).isEmpty ||
                 photos.staticTexts.matching(NSPredicate(format: "label IN %@", self.emptyLabels as NSArray))
                     .allElementsBoundByIndex.contains { $0.exists && self.insideViewport($0, app: photos) }
             let librarySelected = heading.count > 0 || title.count > 0 || (tabs.count == 1 && tabs[0].isSelected)
             return photos.state == .runningForeground && librarySelected && hasGridOrEmpty
         }
         evidence(phase + "-library", app: photos)
-        let ready = photos.state == .runningForeground &&
+        XCTAssertEqual(welcome.count, 0, "Welcome Photos phải đóng sau tối đa một lần Continue thực")
+        let hasGridOrEmpty = !photosAssets(photos).isEmpty ||
+            photos.staticTexts.matching(NSPredicate(format: "label IN %@", emptyLabels as NSArray))
+                .allElementsBoundByIndex.contains { $0.exists && self.insideViewport($0, app: photos) }
+        let ready = photos.state == .runningForeground && welcome.count == 0 && hasGridOrEmpty &&
             (heading.count > 0 || title.count > 0 || (tabs.count == 1 && tabs[0].isSelected))
         XCTAssertTrue(ready, "Photos must still expose its verified library before proceeding")
         return ready
     }
 
     @MainActor
-    private func photosCells(_ photos: XCUIApplication) -> [XCUIElement] {
-        // Chỉ đếm các ô AX của Library đã tải, không gọi đây là tổng số ảnh trong Photo Library.
-        photos.collectionViews.cells.allElementsBoundByIndex.filter {
+    private func photosAssets(_ photos: XCUIApplication) -> [XCUIElement] {
+        // AX Photos 26.2: ảnh thật là Image trong scroll view Library, không phải collection cell.
+        let libraries = photos.scrollViews.matching(identifier: "content_scroll_view").allElementsBoundByIndex
+        guard libraries.count == 1 else { return [] }
+        return libraries[0].images.matching(identifier: "PXGGridLayout-Info").allElementsBoundByIndex.filter {
             $0.exists && self.insideViewport($0, app: photos)
         }
     }
@@ -2982,7 +3007,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     private func photosSnapshot(_ photos: XCUIApplication, phase: String) -> PhotosBaseline? {
         let empty = photos.staticTexts.matching(NSPredicate(format: "label IN %@", emptyLabels as NSArray))
             .allElementsBoundByIndex.filter { $0.exists && self.insideViewport($0, app: photos) }
-        let cells = photosCells(photos)
+        let cells = photosAssets(photos)
         let keys = cells.map { self.assetKey($0) }
         evidence(phase, app: photos)
         note(phase + "-asset-keys", "visibleAXCellCount=\(cells.count)\nemptyState=\(empty.map(\.label))\n" + keys.joined(separator: "\n"))
@@ -3107,7 +3132,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         photos.activate()
         guard openPhotosLibrary(photos, phase: "share-photos-after-save") else { return }
         waitUntil("Photos phải xuất hiện đúng một ô mới và giữ mọi key baseline trong cùng Library", timeout: 20) {
-            let keys = Set(self.photosCells(photos).map { self.assetKey($0) })
+            let keys = Set(self.photosAssets(photos).map { self.assetKey($0) })
             return baseline.keys.isSubset(of: keys) && keys.subtracting(baseline.keys).count == 1 && keys.count == baseline.keys.count + 1
         }
         guard let after = photosSnapshot(photos, phase: "share-photos-after-save-assets") else { return }
@@ -3115,7 +3140,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         XCTAssertTrue(baseline.keys.isSubset(of: after.keys))
         XCTAssertEqual(after.keys.count, baseline.keys.count + 1)
         XCTAssertEqual(added.count, 1, "Nếu AX tái chế/ẩn ô hoặc key trùng thì cần oracle host; không đoán ảnh mới nhất")
-        let matches = photosCells(photos).filter { added.contains(assetKey($0)) }
+        let matches = photosAssets(photos).filter { added.contains(assetKey($0)) }
         XCTAssertEqual(matches.count, 1, "Chỉ mở ô ảnh mới đã phân biệt với baseline")
         guard matches.count == 1 else { return }
         evidence("share-photos-new-cell-before-open", app: photos)
