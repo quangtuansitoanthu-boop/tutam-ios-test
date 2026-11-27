@@ -331,6 +331,25 @@ jobs:
               )
             fi
           fi
+          # Standalone recording preserves short-lived feedback even when an XCUI tap waits for idleness.
+          # Apple simctl command: https://developer.apple.com/videos/play/wwdc2020/10647/
+          quote_video_pid=''
+          stop_quote_video() {
+            if [ -n "$quote_video_pid" ]; then
+              kill -INT "$quote_video_pid" 2>/dev/null || true
+              wait "$quote_video_pid" || true
+              quote_video_pid=''
+            fi
+          }
+          if [ "$IOS_TEST_SUITE" = "quote" ]; then
+            xcrun simctl io "$TUTAM_QA_SIMULATOR" recordVideo --codec h264 \
+              build/release-evidence/quote-feedback-recording.mp4 \
+              > build/release-evidence/quote-feedback-recording.log 2>&1 &
+            quote_video_pid=$!
+            printf 'Recording requested at %s; pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$quote_video_pid" \
+              > build/release-evidence/quote-feedback-recording-clock.txt
+            trap stop_quote_video EXIT
+          fi
           xcodebuild \
             -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
             -sdk iphonesimulator -destination "platform=iOS Simulator,id=$TUTAM_QA_SIMULATOR" \

@@ -47,6 +47,38 @@
     }));
   }));
 
+  const TAP_SLOP = 5;
+  let tapStart: { id: number; x: number; y: number } | null = null;
+
+  function startTap(event: PointerEvent): void {
+    if (tapStart && tapStart.id !== event.pointerId) {
+      tapStart = null;
+      return;
+    }
+    if (!event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
+    tapStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  }
+
+  function moveTap(event: PointerEvent): void {
+    if (tapStart?.id === event.pointerId &&
+      Math.hypot(event.clientX - tapStart.x, event.clientY - tapStart.y) >= TAP_SLOP) {
+      tapStart = null;
+    }
+  }
+
+  function cancelTap(event: PointerEvent): void {
+    if (tapStart?.id === event.pointerId) tapStart = null;
+  }
+
+  function finishTap(event: PointerEvent): void {
+    const start = tapStart;
+    if (!start || start.id !== event.pointerId) return;
+    tapStart = null;
+    if (!event.isPrimary || event.button !== 0 || event.defaultPrevented ||
+      Math.hypot(event.clientX - start.x, event.clientY - start.y) >= TAP_SLOP) return;
+    select(event);
+  }
+
   function select(event: PointerEvent): void {
     const bounds = event.currentTarget instanceof SVGSVGElement ? event.currentTarget.getBoundingClientRect() : null;
     if (!bounds) return;
@@ -64,7 +96,12 @@
       viewBox={`0 0 ${chartWidth} 200`}
       role="img"
       aria-label={`${copy.chart} · ${formatVietnamDate(selected)}`}
-      onpointerdown={select}
+      onpointerdown={startTap}
+      onpointermove={moveTap}
+      onpointerup={finishTap}
+      onpointercancel={cancelTap}
+      onpointerleave={cancelTap}
+      onlostpointercapture={cancelTap}
     >
       <rect x={plotLeft} y="18" width={plotWidth} height="75" fill="var(--gold)" opacity="0.06" />
       <rect x={plotLeft} y="93" width={plotWidth} height="75" fill="var(--brown)" opacity="0.04" />

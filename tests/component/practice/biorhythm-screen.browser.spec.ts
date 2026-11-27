@@ -148,3 +148,110 @@ it('accepts manual Vietnamese DD/MM/YYYY birth dates and rejects invalid calenda
   expect(document.querySelector('.bio-error[role="alert"]')).not.toBeNull();
   expect(mocks.save).not.toHaveBeenCalled();
 });
+
+async function openChart() {
+  mocks.read.mockResolvedValue(profile('An'));
+  component = mount(Harness, { target: document.body });
+  await settle();
+  const chart = document.querySelector<SVGSVGElement>('.bio-chart svg')!;
+  vi.spyOn(chart, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 0, left: 0, top: 0, right: 600, bottom: 200, width: 600, height: 200,
+    toJSON: () => ({ x: 0, y: 0, width: 600, height: 200 }),
+  });
+  return chart;
+}
+
+function chartPointer(
+  chart: SVGSVGElement,
+  type: string,
+  options: { id?: number; x?: number; y?: number; primary?: boolean; button?: number; pointerType?: string } = {},
+) {
+  const event = new MouseEvent(type, {
+    bubbles: true, cancelable: true, button: options.button ?? 0,
+    clientX: options.x ?? 590, clientY: options.y ?? 80,
+  });
+  Object.defineProperties(event, {
+    pointerId: { value: options.id ?? 7 },
+    isPrimary: { value: options.primary ?? true },
+    pointerType: { value: options.pointerType ?? 'touch' },
+  });
+  chart.dispatchEvent(event);
+  flushSync();
+  expect(event.defaultPrevented).toBe(false);
+}
+
+const chartDay = () => document.querySelector('.bio-day-center strong')!.textContent;
+const finalChartDay = (chart: SVGSVGElement) => [...chart.querySelectorAll('text')].at(-1)!.textContent!.trim();
+
+it.each(['touch', 'mouse', 'pen'])('selects a biorhythm chart day only after a deliberate primary %s release', async pointerType => {
+  const chart = await openChart();
+  const before = chartDay();
+  chartPointer(chart, 'pointerdown', { pointerType });
+  expect(chartDay()).toBe(before);
+  chartPointer(chart, 'pointermove', { pointerType, x: 592, y: 81 });
+  chartPointer(chart, 'pointerup', { pointerType, x: 592, y: 81 });
+  expect(chartDay()).toBe(finalChartDay(chart));
+});
+
+it.each(['cancel-before-up', 'up-before-cancel'])('keeps the biorhythm chart day during a vertical pan (%s)', async order => {
+  const chart = await openChart();
+  const before = chartDay();
+  chartPointer(chart, 'pointerdown');
+  if (order === 'cancel-before-up') {
+    chartPointer(chart, 'pointermove', { y: 120 });
+    chartPointer(chart, 'pointercancel', { y: 120 });
+    chartPointer(chart, 'pointerup', { y: 120 });
+  } else {
+    // Native WebKit can deliver the moved release before its cancellation.
+    chartPointer(chart, 'pointerup', { y: 120 });
+    chartPointer(chart, 'pointercancel', { y: 120 });
+  }
+  expect(chartDay()).toBe(before);
+});
+
+it('does not select a biorhythm chart day when a moved pointer returns to its starting point', async () => {
+  const chart = await openChart();
+  const before = chartDay();
+  chartPointer(chart, 'pointerdown');
+  chartPointer(chart, 'pointermove', { y: 120 });
+  chartPointer(chart, 'pointermove');
+  chartPointer(chart, 'pointerup');
+  expect(chartDay()).toBe(before);
+});
+
+it.each(['pointerup', 'pointercancel'])('ignores a mismatched biorhythm chart %s without selecting for that pointer', async type => {
+  const chart = await openChart();
+  const before = chartDay();
+  chartPointer(chart, 'pointerdown');
+  chartPointer(chart, type, { id: 8 });
+  expect(chartDay()).toBe(before);
+  chartPointer(chart, 'pointerup');
+  expect(chartDay()).toBe(finalChartDay(chart));
+});
+
+it('does not select a biorhythm chart day after another pointer joins the gesture', async () => {
+  const chart = await openChart();
+  const before = chartDay();
+  chartPointer(chart, 'pointerdown');
+  chartPointer(chart, 'pointerdown', { id: 8, primary: false });
+  chartPointer(chart, 'pointerup', { id: 8, primary: false });
+  chartPointer(chart, 'pointerup');
+  expect(chartDay()).toBe(before);
+});
+
+it.each(['pointercancel', 'pointerleave', 'lostpointercapture'])('does not select a canceled biorhythm chart tap after %s', async type => {
+  const chart = await openChart();
+  const before = chartDay();
+  chartPointer(chart, 'pointerdown');
+  chartPointer(chart, type);
+  chartPointer(chart, 'pointerup');
+  expect(chartDay()).toBe(before);
+});
+
+it.each([{ primary: false }, { button: 2 }])('ignores a non-primary biorhythm chart action %j', async options => {
+  const chart = await openChart();
+  const before = chartDay();
+  chartPointer(chart, 'pointerdown', options);
+  chartPointer(chart, 'pointerup', options);
+  expect(chartDay()).toBe(before);
+});

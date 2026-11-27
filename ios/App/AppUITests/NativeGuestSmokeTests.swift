@@ -252,21 +252,63 @@ class NativeGuestUITestCase: XCTestCase {
                 }
             }
         }
+        var gestureTrace: [String] = []
+        defer {
+            if !gestureTrace.isEmpty {
+                let trace = XCTAttachment(string: gestureTrace.joined(separator: "\n"))
+                trace.name = "bounded-reveal-gesture-frames"
+                trace.lifetime = .keepAlways
+                add(trace)
+            }
+        }
+        func dragContent(up: Bool, attempt: Int) -> Bool {
+            let appFrame = app.frame
+            let webFrame = app.webViews.firstMatch.frame
+            var content = viewport.intersection(appFrame).intersection(webFrame)
+            var headerFrame = CGRect.zero
+            if dialog.exists {
+                content = content.intersection(dialog.frame)
+            } else {
+                // Tên app giữ nguyên ở VI/EN; hậu tố role do WebKit dịch.
+                let header = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Tu Tập Phật Pháp,")).firstMatch
+                if header.exists {
+                    headerFrame = header.frame
+                    if headerFrame.width > 0 && headerFrame.minY <= content.minY &&
+                        headerFrame.maxY > content.minY && headerFrame.maxY < content.maxY {
+                        let bottom = content.maxY
+                        content.origin.y = headerFrame.maxY
+                        content.size.height = bottom - content.minY
+                    }
+                }
+            }
+            guard !content.isNull && content.width > 0 && content.height > 0 else {
+                gestureTrace.append("attempt=\(attempt); direction=\(up ? "up" : "down"); app=\(appFrame); web=\(webFrame); viewport=\(viewport); content=\(content); no safe intersection")
+                XCTFail("The scroll gesture needs a visible WebView intersection")
+                return false
+            }
+            let safe = content.insetBy(dx: min(44, content.width / 4), dy: min(44, content.height / 4))
+            let upper = CGPoint(x: safe.midX, y: safe.minY + safe.height * 0.2)
+            let lower = CGPoint(x: safe.midX, y: safe.minY + safe.height * 0.8)
+            let from = up ? lower : upper
+            let to = up ? upper : lower
+            gestureTrace.append("attempt=\(attempt); direction=\(up ? "up" : "down"); app=\(appFrame); web=\(webFrame); viewport=\(viewport); header=\(headerFrame); content=\(content); safe=\(safe); from=\(from); to=\(to)")
+            XCTAssertTrue(content.contains(from) && content.contains(to), "Both drag endpoints must stay inside visible content")
+            let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            let start = origin.withOffset(CGVector(dx: from.x - appFrame.minX, dy: from.y - appFrame.minY))
+            let end = origin.withOffset(CGVector(dx: to.x - appFrame.minX, dy: to.y - appFrame.minY))
+            start.press(forDuration: 0.1, thenDragTo: end)
+            return true
+        }
         for attempt in 0..<14 {
             if element.exists {
                 let frame = element.frame
                 if frame.width > 0 && frame.height > 0 {
                     if viewport.contains(frame) && element.isHittable { return }
-                    if frame.midY < viewport.midY { app.swipeDown() }
-                    else { app.swipeUp() }
+                    if !dragContent(up: frame.midY >= viewport.midY, attempt: attempt) { break }
                     continue
                 }
             }
-            if attempt < 7 {
-                app.swipeUp()
-            } else {
-                app.swipeDown()
-            }
+            if !dragContent(up: attempt < 7, attempt: attempt) { break }
         }
         evidence("unreachable-control", app: app)
         XCTAssertTrue(element.exists, "Expected actual native accessibility control after bounded scroll search")
@@ -535,11 +577,18 @@ class NativeGuestUITestCase: XCTestCase {
     @MainActor
     func rotate(_ orientation: UIDeviceOrientation, app: XCUIApplication) {
         XCUIDevice.shared.orientation = orientation
+        var previousAppFrame: CGRect?
+        var previousScreenSize: CGSize?
         waitUntil("Native viewport must complete rotation") {
-            // UIKit can rotate while WebKit's remote accessibility snapshot is
-            // being replaced. Wait on the physical screen before querying it.
+            // Chờ cả màn hình vật lý và khung app đúng hướng, ổn định trong cùng ngân sách15giây.
             let size = XCUIScreen.main.screenshot().image.size
-            return orientation == .portrait ? size.height > size.width : size.width > size.height
+            let frame = app.frame
+            let physicalMatches = orientation == .portrait ? size.height > size.width : size.width > size.height
+            let appMatches = orientation == .portrait ? frame.height > frame.width : frame.width > frame.height
+            let stable = previousAppFrame == frame && previousScreenSize == size
+            previousAppFrame = frame
+            previousScreenSize = size
+            return physicalMatches && appMatches && frame.width > 0 && frame.height > 0 && stable
         }
     }
 }
@@ -685,23 +734,53 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
 
     @MainActor
     private func waitForVisibleQuoteSaveFeedback() {
-        // Tiến trình Files có thể chặn AX lâu hơn thời gian toast hiện 2,8 giây.
-        // Giữ ngân sách15giây cũ và kiểm tra đúng thông báo VI/EN đang hiển thị.
-        let deadline = ProcessInfo.processInfo.systemUptime + 15
+        // Giữ khung chụp đầu tiên và deadline15giây; không chụp rồi bỏ trước vòng OCR.
+        let started = ProcessInfo.processInfo.systemUptime
+        let deadline = started + 15
+        var captureStarted = ProcessInfo.processInfo.systemUptime
+        var captureWallStarted = Date().timeIntervalSince1970
         var screenshot = XCUIScreen.main.screenshot()
+        var captureFinished = ProcessInfo.processInfo.systemUptime
         var recognizedText = ""
         var found = false
+        var frames: [(screenshot: XCUIScreenshot, text: String, timing: String)] = []
         repeat {
-            screenshot = XCUIScreen.main.screenshot()
+            if !frames.isEmpty {
+                captureStarted = ProcessInfo.processInfo.systemUptime
+                if captureStarted >= deadline { break }
+                captureWallStarted = Date().timeIntervalSince1970
+                screenshot = XCUIScreen.main.screenshot()
+                captureFinished = ProcessInfo.processInfo.systemUptime
+            }
+            let ocrStarted = ProcessInfo.processInfo.systemUptime
             do {
                 recognizedText = try recognizeScreenText(screenshot)
                 found = containsQuoteSaveFeedback(recognizedText)
             } catch {
                 recognizedText = "Vision text recognition failed: \(error)"
             }
-            if found { break }
+            let ocrFinished = ProcessInfo.processInfo.systemUptime
+            let timing = "frame=\(frames.count + 1); helperStartedUptime=\(started); deadlineUptime=\(deadline); captureStartedUptime=\(captureStarted); captureFinishedUptime=\(captureFinished); captureWallStarted=\(captureWallStarted); ocrStartedUptime=\(ocrStarted); ocrFinishedUptime=\(ocrFinished); exactSuccess=\(found)"
+            frames.append((screenshot: screenshot, text: recognizedText, timing: timing))
+            if found || ProcessInfo.processInfo.systemUptime >= deadline { break }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            if ProcessInfo.processInfo.systemUptime >= deadline { break }
         } while ProcessInfo.processInfo.systemUptime < deadline
+        // Chỉ mã hóa attachment sau vòng chụp/OCR để việc lưu PNG không làm lỡ toast2,8giây.
+        for (index, frame) in frames.enumerated() {
+            let image = XCTAttachment(screenshot: frame.screenshot)
+            image.name = "quote-native-save-feedback-frame-\(index + 1)-screen"
+            image.lifetime = .keepAlways
+            add(image)
+            let text = XCTAttachment(string: frame.timing + "\n" + frame.text)
+            text.name = "quote-native-save-feedback-frame-\(index + 1)-ocr"
+            text.lifetime = .keepAlways
+            add(text)
+        }
+        let timeline = XCTAttachment(string: frames.map { $0.timing }.joined(separator: "\n"))
+        timeline.name = "quote-native-save-feedback-timeline"
+        timeline.lifetime = .keepAlways
+        add(timeline)
         let image = XCTAttachment(screenshot: screenshot)
         image.name = "quote-native-save-feedback-screen"
         image.lifetime = .keepAlways

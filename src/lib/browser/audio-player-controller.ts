@@ -421,6 +421,8 @@ export class AudioPlayerController {
     const access: OfflineAudioAccess = { session: this.session, album, isCurrent: () => generation === this.loadGeneration };
     if (this.audio instanceof NativeTalkAudio && !await canAccessAudioAlbum(album, access).catch(() => false)) return false;
     if (generation !== this.loadGeneration) return false;
+    // A paused seek may not reach the throttled save before this source is replaced.
+    this.savePosition(false);
     this.forgetVideoHolds();
     this.clearPublicSourceTimeout();
     this.setPlaybackIntent(false);

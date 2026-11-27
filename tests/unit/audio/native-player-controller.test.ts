@@ -15,11 +15,13 @@ vi.mock('$lib/browser/native-api', () => ({ resolveApiUrl: (url: string) => url,
 vi.mock('$lib/browser/offline-audio-database', async importOriginal => {
   const actual = await importOriginal<typeof import('$lib/browser/offline-audio-database')>();
   const authorize: typeof actual.canAccessAudioAlbum = (album, access) => album.id === 'native-three' ? Promise.resolve(true) : actual.canAccessAudioAlbum(album, access);
-  return { ...actual, canAccessAudioAlbum: authorize, getOfflineTrack: vi.fn(async () => null), getOfflineTracksForAlbum: vi.fn(async () => []) };
+  return { ...actual, canAccessAudioAlbum: vi.fn(authorize), getOfflineTrack: vi.fn(async () => null), getOfflineTracksForAlbum: vi.fn(async () => []) };
 });
 vi.mock('$lib/browser/media-session', () => ({ configureMediaSession: () => () => {}, updateMediaSessionMetadata() {}, updateMediaSessionPositionState() {}, updateMediaSessionPlaybackState() {} }));
 import { AudioPlayerController } from '../../../src/lib/browser/audio-player-controller';
-import { getOfflineTrack, getOfflineTracksForAlbum } from '../../../src/lib/browser/offline-audio-database';
+import { canAccessAudioAlbum, getOfflineTrack, getOfflineTracksForAlbum } from '../../../src/lib/browser/offline-audio-database';
+import { ALBUM_POSITION_PREFIX, PLAYER_STATE_KEY, readStoredAlbumPosition, readStoredPlayerState } from '../../../src/lib/browser/audio-sync';
+import { principalStorageKey } from '../../../src/lib/browser/principal-storage';
 import { fetchTalkAlbums, restoreLocalTalkAlbum } from '../../../src/lib/browser/content-catalogs';
 import publicTalkStreams from '$lib/data/public-talk-streams.json';
 import { markVerifiedTalkCatalog } from '$lib/browser/talk-catalog-proof';
@@ -308,6 +310,87 @@ it('reflects widget repeat changes and protects newer app or widget input from s
   finishSecond({ ...state, repeat: 2, observedAtMs: 14 });
   await vi.waitFor(() => expect(controller.snapshot.repeat).toBe(0));
   expect(bridge.plugin.options.mock.calls).toEqual([[{ repeat: 1 }], [{ repeat: 2 }]]);
+});
+
+it.each(['album', 'track'])('persists a paused seek before immediately switching the native %s', async target => {
+  await controller.ready;
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+  try {
+    publish(state = { ...state, position: 2, duration: 962, playing: false, playWhenReady: false });
+    controller.pause();
+    expect(readStoredAlbumPosition(album.id)?.pos).toBe(2);
+    controller.seek(260);
+    const nextAlbum = target === 'album'
+      ? markVerifiedTalkCatalog({ ...album, id: 'next-native-album', visibility: 'public' }, { authenticated: false, user: null })
+      : album;
+    const nextIndex = target === 'track' ? 1 : 0;
+    const setQueue = bridge.plugin.setQueue.getMockImplementation();
+    if (!setQueue) throw new Error('Expected the existing native queue implementation');
+    let savedAtQueue: ReturnType<typeof readStoredAlbumPosition> = null;
+    let playerAtQueue: ReturnType<typeof readStoredPlayerState> = null;
+    bridge.plugin.setQueue.mockImplementationOnce(async options => {
+      savedAtQueue = readStoredAlbumPosition(album.id);
+      playerAtQueue = readStoredPlayerState();
+      return setQueue(options);
+    });
+
+    expect(await controller.load(nextAlbum, nextIndex)).toBe(true);
+    expect(savedAtQueue).toMatchObject({ albumId: album.id, trackIndex: 0, pos: 260 });
+    expect(playerAtQueue).toMatchObject({ albumId: album.id, trackIndex: 0, pos: 260 });
+    expect(controller.snapshot).toMatchObject({ album: nextAlbum, trackIndex: nextIndex, currentTime: 0, playing: false });
+    expect(readStoredAlbumPosition(album.id)).toMatchObject({ trackIndex: 0, pos: 260 });
+  } finally { clock.mockRestore(); }
+});
+
+it.each(['private', 'unverified'])('keeps the paused owner and storage untouched when the %s native album is denied', async denial => {
+  await controller.ready;
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+  try {
+    publish(state = { ...state, position: 2, duration: 962, playing: false, playWhenReady: false });
+    controller.pause();
+    controller.seek(260);
+    const stored = readStoredPlayerState();
+    const write = vi.spyOn(localStorage, 'setItem');
+    bridge.plugin.setQueue.mockClear();
+    if (denial === 'unverified') vi.mocked(canAccessAudioAlbum).mockResolvedValueOnce(false);
+
+    expect(await controller.load({ ...album, id: 'denied-album', visibility: denial === 'private' ? 'private' : 'public' })).toBe(false);
+    expect(write).not.toHaveBeenCalled();
+    expect(readStoredPlayerState()).toEqual(stored);
+    expect(controller.snapshot).toMatchObject({ album, trackIndex: 0, currentTime: 260, playing: false });
+    expect(controller.audio.currentTime).toBe(260);
+    expect(bridge.plugin.setQueue).not.toHaveBeenCalled();
+  } finally { clock.mockRestore(); }
+});
+
+it('does not persist or replace an old private owner after its pending authorization crosses a principal change', async () => {
+  await controller.ready;
+  const firstSession = { authenticated: true, csrfToken: null, user: { id: 'seek-owner-a', role: 'admin' } };
+  controller.setSession(firstSession);
+  const privateAlbum = { ...album, visibility: 'private' as const };
+  expect(await controller.load(privateAlbum)).toBe(true);
+  publish(state = { ...state, position: 2, duration: 962, playing: false, playWhenReady: false });
+  controller.pause();
+  controller.seek(260);
+  let authorize!: (allowed: boolean) => void;
+  vi.mocked(canAccessAudioAlbum).mockImplementationOnce(() => new Promise(resolve => { authorize = resolve; }));
+  const write = vi.spyOn(localStorage, 'setItem');
+  bridge.plugin.setQueue.mockClear();
+  const pendingLoad = controller.load({ ...album, id: 'pending-native-album' });
+  expect(write).not.toHaveBeenCalled();
+
+  controller.setSession({ authenticated: true, csrfToken: null, user: { id: 'seek-owner-b', role: 'user' } });
+  const oldKey = principalStorageKey('seek-owner-a', ALBUM_POSITION_PREFIX + album.id);
+  const savedForFirstPrincipal = localStorage.getItem(oldKey);
+  expect(JSON.parse(savedForFirstPrincipal!)).toMatchObject({ albumId: album.id, pos: 260 });
+  authorize(true);
+
+  expect(await pendingLoad).toBe(false);
+  expect(bridge.plugin.setQueue).not.toHaveBeenCalled();
+  expect(controller.snapshot.album).toBeNull();
+  expect(localStorage.getItem(oldKey)).toBe(savedForFirstPrincipal);
+  expect(localStorage.getItem(principalStorageKey('seek-owner-b', ALBUM_POSITION_PREFIX + album.id))).toBeNull();
+  expect(localStorage.getItem(principalStorageKey('seek-owner-b', PLAYER_STATE_KEY))).toBeNull();
 });
 
 it('does not migrate a private album into the guest native queue', async () => {
