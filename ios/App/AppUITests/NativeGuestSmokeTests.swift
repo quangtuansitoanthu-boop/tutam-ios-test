@@ -1736,10 +1736,55 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
                 }
                 // AX làm phẳng div overflow: chỉ kéo trong các hàng thực đang thấy và hittable,
                 // không dùng toàn bộ backdrop làm khung cuộn. Bước nhỏ dần để không vượt hàng đích.
-                let visibleRows = dialog.switches.allElementsBoundByIndex.compactMap { row -> CGRect? in
-                    let rect = row.frame
-                    return rect.width > 0 && rect.height > 0 && rect.minY >= contentTop &&
-                        bounds.contains(rect) && row.isHittable ? rect : nil
+                var snapshotVisibleRows: [CGRect]?
+                if let snapshot = try? dialog.snapshot() {
+                    var pending = snapshot.children
+                    pending.reverse()
+                    var rowSnapshots: [(label: String, frame: CGRect)] = []
+                    var labels = Set<String>()
+                    var complete = true
+                    while let node = pending.popLast() {
+                        if node.elementType == .switch {
+                            let label = node.label
+                            if label.isEmpty || !labels.insert(label).inserted {
+                                complete = false
+                                break
+                            }
+                            rowSnapshots.append((label: label, frame: node.frame))
+                        }
+                        pending.append(contentsOf: node.children.reversed())
+                    }
+                    let liveRows = dialog.switches
+                    if complete && !rowSnapshots.isEmpty && liveRows.count == rowSnapshots.count {
+                        var frames: [CGRect] = []
+                        for row in rowSnapshots {
+                            let rect = row.frame
+                            guard rect.width > 0 && rect.height > 0 && rect.minY >= contentTop &&
+                                bounds.contains(rect) else { continue }
+                            let matches = liveRows.matching(NSPredicate(format: "label == %@", row.label))
+                            guard matches.count == 1 else {
+                                complete = false
+                                break
+                            }
+                            let liveRow = matches.firstMatch
+                            guard liveRow.frame == rect else {
+                                complete = false
+                                break
+                            }
+                            if liveRow.isHittable { frames.append(rect) }
+                        }
+                        if complete { snapshotVisibleRows = frames }
+                    }
+                }
+                let visibleRows: [CGRect]
+                if let frames = snapshotVisibleRows {
+                    visibleRows = frames
+                } else {
+                    visibleRows = dialog.switches.allElementsBoundByIndex.compactMap { row -> CGRect? in
+                        let rect = row.frame
+                        return rect.width > 0 && rect.height > 0 && rect.minY >= contentTop &&
+                            bounds.contains(rect) && row.isHittable ? rect : nil
+                    }
                 }
                 let scrollArea = visibleRows.reduce(CGRect.null) { $0.union($1) }
                 guard !scrollArea.isNull && scrollArea.height > 0 else {
@@ -1946,9 +1991,22 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
             return
         }
         revealContentControl(edit, app: app)
-        let revealedTitleFrame = summary.frame
-        let revealedEditFrame = edit.frame
-        guard summary.exists && edit.exists && revealedTitleFrame.width > 0 && revealedTitleFrame.height > 0
+        let revealedTitleFrame: CGRect
+        let revealedEditFrame: CGRect
+        let summaryExists: Bool
+        let editExists: Bool
+        if let titleSnapshot = try? summary.snapshot(), let editSnapshot = try? edit.snapshot() {
+            revealedTitleFrame = titleSnapshot.frame
+            revealedEditFrame = editSnapshot.frame
+            summaryExists = true
+            editExists = true
+        } else {
+            revealedTitleFrame = summary.frame
+            revealedEditFrame = edit.frame
+            summaryExists = summary.exists
+            editExists = edit.exists
+        }
+        guard summaryExists && editExists && revealedTitleFrame.width > 0 && revealedTitleFrame.height > 0
             && revealedEditFrame.minY < revealedTitleFrame.maxY && revealedEditFrame.maxY > revealedTitleFrame.minY
             && revealedEditFrame.midX > revealedTitleFrame.midX && edit.isHittable else {
             evidence("lost-personal-edit-row-association", app: app)
