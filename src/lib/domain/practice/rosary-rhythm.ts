@@ -1,4 +1,4 @@
-export const ROSARY_INTERVALS = [2000, 1500, 1000, 750] as const;
+export const ROSARY_INTERVALS = [3000, 2000, 1500, 1000, 750] as const;
 export type RosaryInterval = (typeof ROSARY_INTERVALS)[number];
 export const ROSARY_SAMPLE_RATE = 8000;
 export const ROSARY_MAX_AUDIO_BYTES = 32 * 1024 * 1024;

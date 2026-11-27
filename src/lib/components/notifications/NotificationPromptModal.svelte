@@ -13,11 +13,12 @@
 
   interface Props {
     session?: PageSessionDTO | { authenticated: boolean };
+    startupReady?: boolean;
     blocked?: boolean;
     onActiveChange?: (active: boolean) => void;
   }
 
-  let { session, blocked = false, onActiveChange }: Props = $props();
+  let { session, startupReady = true, blocked = false, onActiveChange }: Props = $props();
 
   const localeStore = getLocaleContext();
   const t = $derived(localeStore.t.notifications);
@@ -29,16 +30,39 @@
   let missingPermission = $state<NotificationPermissionMissing>('none');
   let wasBlocked = false;
   let readyToPrompt = false;
+  let waitingForEditor = false;
+  let editorPointer: number | null = null;
+  let mounted = false;
+  let checkGeneration = 0;
+  let checkingGeneration: number | undefined;
 
   const isAuthenticated = $derived(Boolean(session?.authenticated));
+  const promptBlocked = $derived(blocked || !startupReady);
 
   function setVisible(next: boolean): void {
     visible = next;
     onActiveChange?.(next);
   }
 
+  function isEditingText(): boolean {
+    const active = document.activeElement;
+    return active instanceof HTMLElement &&
+      (active.isContentEditable || active.matches('input:read-write, textarea:read-write'));
+  }
+
   async function checkAndPrompt(): Promise<void> {
-    if (!browser || blocked || dismissedInSession || visible) return;
+    if (!browser || !mounted || promptBlocked || dismissedInSession || visible || checkingGeneration === checkGeneration || (isNativeApp() && document.visibilityState === 'hidden')) return;
+    const generation = checkGeneration;
+    checkingGeneration = generation;
+    try {
+      // visibilitychange and the native bridge can describe the same resume.
+      await readAndPresentPrompt(generation);
+    } finally {
+      if (checkingGeneration === generation) checkingGeneration = undefined;
+    }
+  }
+
+  async function readAndPresentPrompt(generation: number): Promise<void> {
     if (window.location.pathname.startsWith('/admin')) {
       onActiveChange?.(false);
       return;
@@ -48,16 +72,18 @@
     );
     const permission = await getUnifiedNotificationPermission();
     const exactPermission = permission === 'granted' ? await getExactReminderPermission() : 'unsupported';
-    if (visible) return;
+    if (!mounted || generation !== checkGeneration || visible || (isNativeApp() && document.visibilityState === 'hidden')) return;
     const evaluation = evaluateNotificationPromptRequirement(permission, exactPermission);
     missingPermission = evaluation.missing;
 
-    const hasBlockingOverlay = Boolean(document.querySelector(
-      'dialog[open], .reader-modal, .tt-preview, .tt-practice, .pdf-shell, .notification-popover',
-    ));
+    const overlaySelector = 'dialog[open], [role="dialog"][aria-modal="true"], .reader-modal, .tt-preview, .tt-practice, .pdf-shell, .notification-popover';
+    const hasBlockingOverlay = Array.from(document.querySelectorAll<HTMLElement>(overlaySelector)).some(overlay =>
+      !overlay.closest('[hidden], [inert], [aria-hidden="true"]')
+      && overlay.getClientRects().length > 0 && getComputedStyle(overlay).visibility === 'visible',
+    );
     if (
       !shouldPresentNotificationPromptDialog({
-        blocked,
+        blocked: promptBlocked,
         dismissedInSession,
         isAdminRoute: window.location.pathname.startsWith('/admin'),
         hasBlockingOverlay,
@@ -67,15 +93,20 @@
       onActiveChange?.(false);
       return;
     }
+    if (editorPointer !== null || isEditingText()) {
+      waitingForEditor = true;
+      return;
+    }
+    waitingForEditor = false;
     status = 'prompt';
     setVisible(true);
   }
 
   $effect(() => {
-    if (wasBlocked && !blocked && browser && readyToPrompt) {
+    if (wasBlocked && !promptBlocked && browser && readyToPrompt) {
       void checkAndPrompt();
     }
-    wasBlocked = blocked;
+    wasBlocked = promptBlocked;
   });
 
   async function requestPermission(): Promise<void> {
@@ -138,8 +169,8 @@
   onMount(() => {
     if (!browser) return;
 
+    mounted = true;
     let disposed = false;
-    let appListenerHandle: { remove: () => Promise<void> } | null = null;
 
     // Gentle delay after page mount (1.8s) so user sees the page first
     const timer = setTimeout(() => {
@@ -154,37 +185,64 @@
       void checkAndPrompt();
     };
 
+    let focusFrame = 0;
+    const retryAfterEditing = () => {
+      if (!waitingForEditor || editorPointer !== null || focusFrame) return;
+      focusFrame = requestAnimationFrame(() => {
+        focusFrame = 0;
+        if (document.visibilityState === 'hidden' || editorPointer !== null || isEditingText()) return;
+        waitingForEditor = false;
+        void checkAndPrompt();
+      });
+    };
+    // Buttons take focus on pointerdown, before their click has had a chance to run.
+    const startEditorPointer = (event: PointerEvent) => {
+      if (event.isPrimary && isEditingText()) editorPointer = event.pointerId;
+    };
+    const endEditorPointer = (event: PointerEvent) => {
+      if (event.pointerId !== editorPointer) return;
+      editorPointer = null;
+      retryAfterEditing();
+    };
+    const forgetEditorPointer = () => { editorPointer = null; };
+    window.addEventListener('pointerdown', startEditorPointer, true);
+    window.addEventListener('pointerup', endEditorPointer, true);
+    window.addEventListener('pointercancel', endEditorPointer, true);
+    window.addEventListener('blur', forgetEditorPointer);
+    document.addEventListener('focusout', retryAfterEditing);
+
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         handleResumeCheck();
+      } else if (isNativeApp()) {
+        checkGeneration += 1;
+        if (!loading) setVisible(false);
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
 
+    let removeAppActiveListener: (() => void) | null = null;
     if (isNativeApp()) {
-      void import('@capacitor/app')
-        .then(async ({ App }) => {
-          const listener = await App.addListener('appStateChange', ({ isActive }) => {
-            if (isActive) handleResumeCheck();
-          });
-          if (disposed) {
-            await listener.remove();
-          } else {
-            appListenerHandle = listener;
-          }
-        })
-        .catch(() => {
-          // Fallback vẫn có visibilitychange ở trên
-        });
+      void import('$lib/browser/native-app-lifecycle').then(({ addAppActiveListener }) => {
+        if (!disposed) {
+          removeAppActiveListener = addAppActiveListener(handleResumeCheck);
+        }
+      });
     }
 
     return () => {
       disposed = true;
+      mounted = false;
+      checkGeneration += 1;
+      window.removeEventListener('pointerdown', startEditorPointer, true);
+      window.removeEventListener('pointerup', endEditorPointer, true);
+      window.removeEventListener('pointercancel', endEditorPointer, true);
+      window.removeEventListener('blur', forgetEditorPointer);
+      document.removeEventListener('focusout', retryAfterEditing);
+      cancelAnimationFrame(focusFrame);
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      if (appListenerHandle) {
-        void appListenerHandle.remove().catch(() => {});
-      }
+      removeAppActiveListener?.();
     };
   });
 </script>

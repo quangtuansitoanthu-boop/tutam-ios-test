@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { solarToLunar } from '$lib/components/lunar/lunar-calendar';
+import { lunarMonthLength, solarToLunar } from '$lib/components/lunar/lunar-calendar';
 import { loadPersonalEventData, savePersonalEventData, syncPersonalEventData, pullPersonalEventData } from './personal-events-sync';
 export { getPersonalEventsSyncStatus, getPersonalEventsSyncError, getPersonalEventsConflict, resolvePersonalEventsConflict, startPersonalEventsSync } from './personal-events-sync';
 
@@ -137,13 +137,15 @@ export function deletePersonalLunarEvent(id: string): void {
 export function getPersonalEventsForLunarDate(
   lunarDay: number,
   lunarMonth: number,
-  events: PersonalLunarEvent[] = loadPersonalLunarEvents()
+  events: PersonalLunarEvent[] = loadPersonalLunarEvents(),
+  lunarContext?: { leap: boolean; monthLength: 29 | 30 },
 ): PersonalLunarEvent[] {
   return events.filter((e) => {
     if (e.calendarMode === 'solar') return false;
-    if (Number(e.lunarDay) !== Number(lunarDay)) return false;
+    if (Number(e.lunarDay) !== Number(lunarDay)
+      && !(Number(e.lunarDay) === 30 && lunarDay === 29 && lunarContext?.monthLength === 29)) return false;
     if (e.frequency === 'monthly' || Number(e.lunarMonth) === 0) return true;
-    return Number(e.lunarMonth) === Number(lunarMonth);
+    return !lunarContext?.leap && Number(e.lunarMonth) === Number(lunarMonth);
   });
 }
 
@@ -157,9 +159,11 @@ export function hasPersonalEventOnLunarDate(
 
 export function getPersonalEventsForDate(date: Date, events: PersonalLunarEvent[] = loadPersonalLunarEvents()): PersonalLunarEvent[] {
   const lunar = solarToLunar(date.getDate(), date.getMonth() + 1, date.getFullYear());
+  const lunarMatches = new Set(getPersonalEventsForLunarDate(lunar.day, lunar.month, events,
+    { leap: lunar.leap, monthLength: lunarMonthLength(date, lunar) }));
   return events.filter((event) => event.calendarMode === 'solar'
     ? Number(event.solarDay) === date.getDate() && (event.frequency === 'monthly' || Number(event.solarMonth) === date.getMonth() + 1)
-    : Number(event.lunarDay) === lunar.day && (event.frequency === 'monthly' || Number(event.lunarMonth) === 0 || Number(event.lunarMonth) === lunar.month));
+    : lunarMatches.has(event));
 }
 
 export function findNextPersonalEvent(date: Date, events: PersonalLunarEvent[]): { event: PersonalLunarEvent; daysLeft: number } | null {

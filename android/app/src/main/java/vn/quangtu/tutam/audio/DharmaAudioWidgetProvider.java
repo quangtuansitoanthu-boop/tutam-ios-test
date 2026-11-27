@@ -200,9 +200,10 @@ public class DharmaAudioWidgetProvider extends AppWidgetProvider {
     @Override public void onUpdate(Context context, AppWidgetManager manager, int[] ids) { updateAll(context); }
     @Override public void onAppWidgetOptionsChanged(Context context, AppWidgetManager manager, int id, Bundle options) { updateAll(context); }
     @Override public void onReceive(Context context, Intent intent) {
+        if (intent == null) return;
         super.onReceive(context, intent);
         if (ACTION.equals(intent.getAction())) {
-            // Kết nối MediaSession trước; không startForegroundService cho thao tác pause/timer.
+            // Giữ bind tới khi Media3 đã lên foreground; pause/timer chỉ cần kết nối tạm.
             PendingResult pending = goAsync();
             // Context của receiver không được bindService; dùng owner ứng dụng cho kết nối bất đồng bộ.
             Context applicationContext = context.getApplicationContext();
@@ -218,17 +219,36 @@ public class DharmaAudioWidgetProvider extends AppWidgetProvider {
             }
             android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
             java.util.concurrent.atomic.AtomicBoolean finished = new java.util.concurrent.atomic.AtomicBoolean();
-            Runnable finish = () -> { if (finished.compareAndSet(false, true)) { try { androidx.media3.session.MediaController.releaseFuture(connection); } finally { pending.finish(); } } };
+            Runnable finish = () -> {
+                if (finished.compareAndSet(false, true)) {
+                    handler.removeCallbacksAndMessages(null);
+                    try { androidx.media3.session.MediaController.releaseFuture(connection); }
+                    finally { pending.finish(); }
+                }
+            };
             handler.postDelayed(finish, 8000);
             connection.addListener(() -> {
                 try {
-                    if (!finished.get() && connection.get() != null && DharmaPlaybackService.active != null)
-                        DharmaPlaybackService.active.handleWidgetCommand(intent);
-                } catch (Exception ignored) { updateAll(applicationContext); }
-                finally { handler.removeCallbacks(finish); finish.run(); }
+                    if (finished.get()) return;
+                    DharmaPlaybackService service = DharmaPlaybackService.active;
+                    if (connection.get() == null || service == null) { finish.run(); return; }
+                    service.handleWidgetCommand(intent);
+                    new Runnable() {
+                        @Override public void run() {
+                            if (finished.get()) return;
+                            if (DharmaPlaybackService.active != service || service.isPlaybackOngoing() || !service.hasPendingWidgetPlayback()) finish.run();
+                            else handler.postDelayed(this, 50);
+                        }
+                    }.run();
+                } catch (Exception error) {
+                    finish.run();
+                    android.util.Log.w("TuTapDharmaWidget", "Không thể điều khiển trình phát từ widget (" + error.getClass().getSimpleName() + ").");
+                    updateAll(applicationContext);
+                }
             }, androidx.core.content.ContextCompat.getMainExecutor(applicationContext));
             return;
         }
-        if (Intent.ACTION_CONFIGURATION_CHANGED.equals(intent.getAction()) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) updateAll(context);
+        if (Intent.ACTION_CONFIGURATION_CHANGED.equals(intent.getAction()) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())
+            || Intent.ACTION_LOCALE_CHANGED.equals(intent.getAction())) updateAll(context);
     }
 }

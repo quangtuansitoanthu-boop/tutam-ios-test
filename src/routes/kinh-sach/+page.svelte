@@ -251,6 +251,7 @@
   $effect(() => {
     if (checkedInitialUrl || (loading && !articles.length)) return;
     if (typeof window === 'undefined') return;
+    checkedInitialUrl = true;
     const params = new URLSearchParams(window.location.search);
     const searchQuery = params.get('q') || params.get('search');
     if (searchQuery && !query) {
@@ -266,7 +267,6 @@
     }
     const targetId = params.get('article') || params.get('book') || params.get('id') || params.get('bai-viet') || params.get('bai_viet') || params.get('sach') || params.get('doc') || params.get('slug');
     if (targetId) {
-      checkedInitialUrl = true;
       const normalizedTarget = targetId.toLowerCase().trim();
       const found = localizedArticles.find((a) =>
         a.id === targetId ||
@@ -387,10 +387,15 @@
   });
 
   const pageTitle = $derived(
-    selectedArticle ? `${selectedArticle.title} — ${DEFAULT_SITE_NAME}` : `Kho Kinh Sách — ${DEFAULT_SITE_NAME}`
+    selectedArticle
+      ? `${(getLocalizedArticle(selectedArticle, localeStore.current) ?? selectedArticle).title} — ${DEFAULT_SITE_NAME}`
+      : (isEnglish ? `Sutra & Book Library — ${DEFAULT_SITE_NAME}` : `Kho Kinh Sách — ${DEFAULT_SITE_NAME}`)
   );
   const metaDescription = $derived(
-    cleanMetaDescription(selectedArticle?.summary, 'Kho kinh sách Phật giáo, truyện nhân quả và sách khuyến thiện.')
+    cleanMetaDescription(
+      selectedArticle ? (getLocalizedArticle(selectedArticle, localeStore.current) ?? selectedArticle).summary : undefined,
+      isEnglish ? 'Buddhist scripture, karma stories, and moral books library.' : 'Kho kinh sách Phật giáo, truyện nhân quả và sách khuyến thiện.'
+    )
   );
   const absoluteImageUrl = $derived(
     ensureAbsoluteUrl(selectedArticle?.imageUrl, typeof window !== 'undefined' ? window.location.origin : 'https://quangtu.vn')

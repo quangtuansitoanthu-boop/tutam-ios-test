@@ -6,7 +6,7 @@ describe('short refuge and life release reading', () => {
   it('preserves the complete supplied ritual, its order and repetitions', () => {
     const text = refugeReleaseBlocks.map(block => block.text).join(' ').normalize('NFC').replace(/\s+/gu, ' ').trim();
     // Dấu vân tay toàn văn đã duyệt, chỉ bỏ khác biệt xuống dòng/khoảng trắng.
-    expect(createHash('sha256').update(text).digest('hex')).toBe('7467ca96c332d27079075d802947633fa4f6df98d78fe48ccf1f94d32207edc5');
+    expect(createHash('sha256').update(text).digest('hex')).toBe('5b5fb2578d4ce93736e69d74ec578cdd50fab941eebd08117fef27167303de85');
     expect(refugeReleaseBlocks.filter(block => block.kind === 'heading').map(block => block.text)).toEqual([
       'CÁCH GIÚP CHÚNG SINH QUY Y TAM BẢO DỄ NHẤT',
       'NGHI THỨC PHÓNG SINH NGẮN GỌN',

@@ -24,6 +24,7 @@
   const localizeUi = createInterfaceTranslator();
 
   import { onMount, tick, untrack } from 'svelte';
+  import type { OnProgressParameters, PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
   import { loadPdfjs, getPdfjsWorker } from '$lib/browser/pdfjs-loader';
   import { detectPdfCropBox, normalizePdfCanvasPaper, type PdfCropBox, type PdfPageForCrop } from '$lib/browser/pdf-crop';
   import { installPdfGestures } from '$lib/browser/pdf-gesture-controller';
@@ -386,7 +387,7 @@
   const cropBoxes = new Map<number, PdfCropBox | null>();
   let observer: IntersectionObserver | null = null;
   let pdfDocument = $state<PdfDocumentLike | null>(null);
-  let loadingTask: { promise: Promise<any>; destroy: () => Promise<void>; onProgress?: (progress: { loaded: number; total: number }) => void } | null = null;
+  let loadingTask: PDFDocumentLoadingTask | null = null;
   let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let startupFrame: number | null = null;
   let renderGeneration = 0;
@@ -549,7 +550,7 @@
       if (!requestIsCurrent()) return null;
       offlineRecord = null;
       offlineState = 'error';
-      offlineError = 'Không thể đọc bộ nhớ ngoại tuyến trên thiết bị này.';
+      offlineError = localizeUi('Không thể đọc bộ nhớ ngoại tuyến trên thiết bị này.');
       return null;
     }
   }
@@ -608,12 +609,12 @@
       const message = cause instanceof Error ? cause.message : '';
       offlineState = previous ? 'update' : 'error';
       offlineError = message === 'offline_pdf_too_large'
-        ? 'PDF vượt giới hạn an toàn 80 MiB hoặc dung lượng còn trống.'
+        ? localizeUi('PDF vượt giới hạn an toàn 80 MiB hoặc dung lượng còn trống.')
         : message === 'offline_pdf_quota_exceeded'
-          ? 'Thiết bị không còn đủ dung lượng an toàn để lưu PDF.'
+          ? localizeUi('Thiết bị không còn đủ dung lượng an toàn để lưu PDF.')
           : message === 'offline_pdf_invalid_content'
-            ? 'Tệp tải về không phải PDF hợp lệ.'
-            : 'Không thể lưu PDF ngoại tuyến. Bản cũ (nếu có) vẫn được giữ.';
+            ? localizeUi('Tệp tải về không phải PDF hợp lệ.')
+            : localizeUi('Không thể lưu PDF ngoại tuyến. Bản cũ (nếu có) vẫn được giữ.');
     } finally {
       if (offlineDownload === controller) offlineDownload = null;
     }
@@ -642,7 +643,7 @@
     } catch {
       if (!requestIsCurrent()) return;
       offlineState = 'error';
-      offlineError = 'Không thể xóa bản ngoại tuyến lúc này.';
+      offlineError = localizeUi('Không thể xóa bản ngoại tuyến lúc này.');
     }
   }
 
@@ -983,7 +984,7 @@
       container.style.width = `${Math.max(availableWidth, cssWidth)}px`;
       if (spreadActive) container.style.width = `${Math.max(availableWidth, cssWidth * 2 + 8)}px`;
       const context = canvas.getContext('2d', { alpha: false });
-      if (!context) throw new Error('Canvas không khả dụng.');
+      if (!context) throw new Error(localizeUi('Canvas không khả dụng.'));
       // Solid white background fill immediately upon allocating canvas dimensions prevents
       // GPU black/transparent texture flashes and keeps inverted dark mode / sepia tint rock-solid.
       context.fillStyle = '#ffffff';
@@ -1024,11 +1025,12 @@
         }
       }
     } catch (cause) {
+      if (generation !== renderGeneration) return;
       retryCancelled = cause instanceof Error && cause.name === 'RenderingCancelledException';
       if (!retryCancelled) {
         renderFailed = true;
         if (!error) {
-          error = 'Không thể hiển thị một trang PDF. Bạn có thể thử tải lại.';
+          error = localizeUi('Không thể hiển thị một trang PDF. Bạn có thể thử tải lại.');
           onNotify(`⚠️ ${error}`);
         }
       }
@@ -1260,9 +1262,17 @@
     });
   }
 
+  function pdfViewerGestures(node: HTMLElement) {
+    return { destroy: installPdfGestures(node, {
+      getTransformTarget: () => pagesContainer,
+      getZoom: () => zoom,
+      onPreviewZoom: (nextZoom) => { displayZoom = nextZoom; },
+      setZoomAt,
+    }) };
+  }
+
   onMount(() => {
     let disposed = false;
-    const generation = ++documentGeneration;
     copyLegacyKeysToAnonymousNamespace(localStorage, [PDF_BOOKMARK_KEY]);
     readingClient = createReadingActivityClient(fetch, localStorage);
     readingClient.setSession(session);
@@ -1298,26 +1308,41 @@
     };
     document.addEventListener('selectionchange', onPdfSelectionChange);
     window.addEventListener('mouseup', checkPdfSelection);
-    const removeGestures = viewer
-      ? installPdfGestures(viewer, {
-          getTransformTarget: () => pagesContainer,
-          getZoom: () => zoom,
-          onPreviewZoom: (nextZoom) => { displayZoom = nextZoom; },
-          setZoomAt,
-        })
-      : () => {};
     latestScrollY = Number(readState().lastScrollY || 0);
     const start = async () => {
+      const generation = ++documentGeneration;
+      const isCurrent = () => !disposed && generation === documentGeneration;
+      const previousTask = loadingTask;
+      loadingTask = null;
+      pdfDocument = null;
+      renderGeneration += 1;
+      for (const task of renderTasks.values()) task.cancel();
+      for (const task of textRenderTasks.values()) task.cancel();
+      textRenderTasks.clear();
+      pdfFallbackAbort?.abort();
+      pdfFallbackAbort = null;
+      error = '';
+      isOfflineError = false;
+      loadingProgress = 0;
+      loadingBytes = 0;
+      if (userChoiceResolver) {
+        userChoiceResolver('online');
+        userChoiceResolver = null;
+        confirmDownloadModalOpen = false;
+      }
       try {
+        if (previousTask) await previousTask.destroy().catch(() => {});
+        if (!isCurrent()) return;
         let storageToken = principalGuard.capture();
         let stored = await setStoragePrincipalFromSession(storageToken);
+        if (!isCurrent()) return;
         if (!principalGuard.isCurrent(storageToken)) {
           storageToken = principalGuard.capture();
           stored = await refreshOfflineState(true, storageToken, storagePrincipal);
         }
-        if (disposed) return;
+        if (!isCurrent()) return;
         const pdfjs = await loadPdfjs();
-        if (disposed) return;
+        if (!isCurrent()) return;
         pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
         const effectiveUrl = resolvePdfUrl(url);
         const useStored = Boolean(
@@ -1334,6 +1359,7 @@
           knownPdfTotal = stored.sizeBytes;
           estimatedPdfBytes = stored.sizeBytes;
           const buffer = await stored.blob.arrayBuffer();
+          if (!isCurrent()) return;
           if (principalGuard.isCurrent(storageToken) && stored.ownerId === storagePrincipal) {
             source = { data: new Uint8Array(buffer) };
             loadingProgress = 100;
@@ -1365,6 +1391,7 @@
             if (disposed || generation !== documentGeneration) return;
             if (offlineRecord?.blob) {
               const buffer = await offlineRecord.blob.arrayBuffer();
+              if (!isCurrent()) return;
               source = { data: new Uint8Array(buffer) };
               loadingProgress = 100;
             } else {
@@ -1381,7 +1408,7 @@
           loadingProgress = 15;
           source = { url: resolvePdfRequestUrl(effectiveUrl) };
         }
-        if (disposed) return;
+        if (!isCurrent()) return;
         if (!useStored) {
           void requestPdfSize(effectiveUrl).then((size) => {
             if (size && !disposed && generation === documentGeneration) {
@@ -1398,15 +1425,18 @@
           ...source,
           worker: getPdfjsWorker(pdfjs),
           cMapUrl: '/vendor/pdfjs/cmaps/',
+          wasmUrl: '/vendor/pdfjs/wasm/',
+          standardFontDataUrl: '/vendor/pdfjs/standard_fonts/',
           disableRange: false,
           disableStream: false,
           disableAutoFetch: true,
           rangeChunkSize: 262144,
           withCredentials: false,
-        }) as unknown as typeof loadingTask;
+        });
         loadingTask = task;
         if (task) {
-          task.onProgress = ({ loaded, total }) => {
+          task.onProgress = ({ loaded, total }: OnProgressParameters) => {
+            if (!isCurrent()) return;
             const effTotal = total || knownPdfTotal || estimatedPdfBytes;
             if (effTotal && effTotal > 0) {
               const realPercent = Math.min(99, Math.max(15, Math.round((loaded / effTotal) * 100)));
@@ -1417,35 +1447,42 @@
             }
           };
         }
-        let loadedDocument: any = null;
+        let loadedDocument: PDFDocumentProxy | null = null;
         try {
-          loadedDocument = await task?.promise;
+          loadedDocument = await task.promise;
         } catch (streamErr) {
-          if (disposed || generation !== documentGeneration) return;
+          if (!isCurrent()) return;
           console.warn('[PdfReader] Range stream error, fallback to full fetch:', streamErr);
-          const fallbackUrl = (source as any).url || effectiveUrl;
-          pdfFallbackAbort?.abort();
-      for (const task of textRenderTasks.values()) task.cancel();
-      textRenderTasks.clear();
-          pdfFallbackAbort = new AbortController();
-          const buf = await fetchBoundedBytes(fallbackUrl, pdfFallbackAbort.signal);
+          if (loadingTask === task) loadingTask = null;
+          await task.destroy().catch(() => {});
+          if (!isCurrent()) return;
+          const fallbackUrl = resolvePdfRequestUrl('url' in source ? source.url : effectiveUrl);
+          for (const task of textRenderTasks.values()) task.cancel();
+          textRenderTasks.clear();
+          const fallbackAbort = new AbortController();
+          pdfFallbackAbort = fallbackAbort;
+          const buf = await fetchBoundedBytes(fallbackUrl, fallbackAbort.signal);
+          if (!isCurrent()) return;
           const fallbackTask = pdfjs.getDocument({
             data: new Uint8Array(buf),
+            worker: getPdfjsWorker(pdfjs),
             cMapUrl: '/vendor/pdfjs/cmaps/',
+            wasmUrl: '/vendor/pdfjs/wasm/',
+            standardFontDataUrl: '/vendor/pdfjs/standard_fonts/',
           });
+          loadingTask = fallbackTask;
           loadedDocument = await fallbackTask.promise;
         } finally {
-          loadingProgress = 100;
+          if (isCurrent()) loadingProgress = 100;
         }
 
-        if (disposed || !loadedDocument) return;
-        if (generation !== documentGeneration) return;
+        if (!isCurrent() || !loadedDocument) return;
         pdfDocument = loadedDocument as PdfDocumentLike;
         // Web đã cập nhật PDF: tự tải lại bản lưu trong bộ nhớ app (không cần bấm tay).
         if (!isOnlineOnly && offlineState === 'update' && navigator.onLine) void saveOffline();
         void loadOutline(pdfDocument, generation);
         const first = await loadedDocument.getPage(1);
-        if (disposed) return;
+        if (!isCurrent()) return;
         pageCount = loadedDocument.numPages;
         const viewport = first.getViewport({ scale: 1 });
         pageAspectRatio = viewport.height / viewport.width;
@@ -1488,7 +1525,7 @@
         const principalToken = principalGuard.capture();
         const saved = readState();
         const typedProgress = await readTypedProgress(principalToken);
-        if (disposed || !principalGuard.isCurrent(principalToken)) return;
+        if (!isCurrent() || !principalGuard.isCurrent(principalToken)) return;
         await applyPrivatePdfResume(typedProgress, saved, principalToken);
       } catch (cause) {
         if (!disposed && generation === documentGeneration) {
@@ -1504,7 +1541,7 @@
             onNotify(localeStore.current === 'en' ? 'ℹ️ PDF book requires an internet connection' : 'ℹ️ Sách PDF cần kết nối mạng để tải');
           } else {
             isOfflineError = false;
-            error = cause instanceof Error ? `Không thể tải PDF: ${cause.message}` : 'Không thể tải PDF.';
+            error = cause instanceof Error ? (localeStore.current === 'en' ? `Unable to load PDF: ${cause.message}` : `Không thể tải PDF: ${cause.message}`) : localizeUi('Không thể tải PDF.');
             onNotify(`⚠️ ${error}`);
           }
         }
@@ -1516,7 +1553,6 @@
         onNotify(localeStore.current === 'en' ? '📶 Internet connection restored. Loading PDF...' : '📶 Đã có kết nối mạng trở lại. Đang tải sách...');
         isOfflineError = false;
         error = '';
-        documentGeneration += 1;
         void start();
       }
     };
@@ -1533,7 +1569,6 @@
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('resize', updateAutomaticLayout);
       window.removeEventListener(SESSION_CHANGE_EVENT, handleSessionChange);
-      removeGestures();
       cancelSpeech();
       cancelOfflineSave();
       schedulePdfProgress(true);
@@ -1569,7 +1604,7 @@
 
 <svelte:window onpointerdown={handleFloatingPanelPointerDown} />
 
-<section class:paper-dark={background === 'dark'} class:annotations-open={annotationsOpen} class="pdf-shell" data-paper={background} aria-label="Trình đọc PDF">
+<section class:paper-dark={background === 'dark'} class:annotations-open={annotationsOpen} class="pdf-shell" data-paper={background} aria-label={localizeUi('Trình đọc PDF')}>
   {#if !isOfflineError}
   <ReaderToolsPanel bind:open={toolsOpen} scrollElement={viewer}>
   <div class="pdf-controls">
@@ -1582,7 +1617,7 @@
           class:saving={offlineState === 'saving'}
           aria-expanded={confirmDownloadModalOpen || downloadProgressModalOpen || offlinePanelOpen}
           aria-controls="pdf-offline-panel"
-          title={offlineState === 'saved' ? 'Đã tải offline (Bấm để quản lý)' : offlineState === 'saving' ? 'Đang tải để đọc offline' : 'Tải để đọc offline'}
+          title={offlineState === 'saved' ? localizeUi('Đã tải offline (Bấm để quản lý)') : offlineState === 'saving' ? localizeUi('Đang tải để đọc offline') : localizeUi('Tải để đọc offline')}
           onclick={handleOfflineButtonClick}
         >
           <span class="offline-btn-icon" aria-hidden="true">
@@ -1598,26 +1633,26 @@
           </span>
           <span class="offline-btn-label">
             {#if offlineState === 'saving'}
-              Đang tải {offlineProgress.percent !== null ? `${offlineProgress.percent}%` : '...'}
+              {localeStore.current === 'en' ? 'Downloading' : 'Đang tải'} {offlineProgress.percent !== null ? `${offlineProgress.percent}%` : '...'}
             {:else if offlineState === 'saved'}
-              Đã tải offline
+              {localizeUi('Đã tải offline')}
             {:else if offlineState === 'update'}
-              Cập nhật bản mới
+              {localizeUi('Cập nhật bản mới')}
             {:else}
-              Tải để đọc offline
+              {localizeUi('Tải để đọc offline')}
             {/if}
           </span>
         </button>
-        <button class="pdf-action-button" type="button" onclick={onShare} title="Chia sẻ bài viết"><Share2 size={16} strokeWidth={2.1} aria-hidden="true" /><span>Chia sẻ</span></button>
+        <button class="pdf-action-button" type="button" onclick={onShare} title={localizeUi('Chia sẻ bài viết')}><Share2 size={16} strokeWidth={2.1} aria-hidden="true" /><span>{localizeUi('Chia sẻ')}</span></button>
       </div>
     {:else}
-      <div class="pdf-control-group primary-share-group"><button class="pdf-action-button" type="button" onclick={onShare} title="Chia sẻ bài viết"><Share2 size={16} strokeWidth={2.1} aria-hidden="true" /><span>Chia sẻ</span></button></div>
+      <div class="pdf-control-group primary-share-group"><button class="pdf-action-button" type="button" onclick={onShare} title={localizeUi('Chia sẻ bài viết')}><Share2 size={16} strokeWidth={2.1} aria-hidden="true" /><span>{localizeUi('Chia sẻ')}</span></button></div>
     {/if}
     <div class="pdf-control-group pdf-zoom">
-      <button type="button" aria-label="Thu nhỏ" title="Thu nhỏ" onclick={() => setZoom(zoom - 0.05)}>−</button>
+      <button type="button" aria-label={localizeUi('Thu nhỏ')} title={localizeUi('Thu nhỏ')} onclick={() => setZoom(zoom - 0.05)}>−</button>
       <output>{Math.round(displayZoom * 100)}%</output>
-      <button type="button" aria-label="Phóng to" title="Phóng to" onclick={() => setZoom(zoom + 0.05)}>+</button>
-      <button type="button" title="Vừa màn hình" onclick={fitWidth}><span class="desktop-label">Fit</span><span class="mobile-label">Vừa màn hình</span></button>
+      <button type="button" aria-label={localizeUi('Phóng to')} title={localizeUi('Phóng to')} onclick={() => setZoom(zoom + 0.05)}>+</button>
+      <button type="button" title={localizeUi('Vừa màn hình')} onclick={fitWidth}><span class="desktop-label">Fit</span><span class="mobile-label">{localizeUi('Vừa màn hình')}</span></button>
     </div>
     <div class="pdf-control-group pdf-page-status">
       <button
@@ -1625,11 +1660,11 @@
         class="pdf-page-step-btn prev"
         disabled={!pageCount || currentPage <= 1}
         onclick={() => goToPage(currentPage - 1)}
-        title="Trang trước"
-        aria-label="Trang trước"
+        title={localizeUi('Trang trước')}
+        aria-label={localizeUi('Trang trước')}
       >
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
-        <span class="desktop-label">Trước</span>
+        <span class="desktop-label">{localizeUi('Trước')}</span>
       </button>
       <span class="pdf-page-indicator" aria-live="polite">Trang {currentPage} / {pageCount || '…'}</span>
       <button
@@ -1643,20 +1678,20 @@
         <span class="desktop-label">Sau</span>
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
       </button>
-      <form class="pdf-page-form" aria-label="Đi đến trang PDF" onsubmit={submitPage}>
-        <input type="number" inputmode="numeric" min="1" max={Math.max(1, pageCount)} step="1" required bind:value={pageInput} disabled={!pageCount} aria-label="Số trang PDF" />
-        <button type="submit" disabled={!pageCount}>Đi</button>
+      <form class="pdf-page-form" aria-label={localizeUi('Đi đến trang PDF')} onsubmit={submitPage}>
+        <input type="number" inputmode="numeric" min="1" max={Math.max(1, pageCount)} step="1" required bind:value={pageInput} disabled={!pageCount} aria-label={localizeUi('Số trang PDF')} />
+        <button type="submit" disabled={!pageCount}>{localizeUi('Đi')}</button>
       </form>
     </div>
     <div class="pdf-control-group pdf-navigation-buttons">
-      <button type="button" class:active={navigationOpen && navigationTab === 'thumbnails'} aria-expanded={navigationOpen && navigationTab === 'thumbnails'} aria-controls="pdf-navigation-panel" onclick={() => void showNavigation('thumbnails')} title="Ảnh thu nhỏ các trang">Trang</button>
-      <button type="button" class:active={navigationOpen && navigationTab === 'outline'} aria-expanded={navigationOpen && navigationTab === 'outline'} aria-controls="pdf-navigation-panel" onclick={() => void showNavigation('outline')} title="Mục lục trong PDF">Mục lục</button>
+      <button type="button" class:active={navigationOpen && navigationTab === 'thumbnails'} aria-expanded={navigationOpen && navigationTab === 'thumbnails'} aria-controls="pdf-navigation-panel" onclick={() => void showNavigation('thumbnails')} title={localizeUi('Ảnh thu nhỏ các trang')}>{localizeUi('Trang')}</button>
+      <button type="button" class:active={navigationOpen && navigationTab === 'outline'} aria-expanded={navigationOpen && navigationTab === 'outline'} aria-controls="pdf-navigation-panel" onclick={() => void showNavigation('outline')} title={localizeUi('Mục lục trong PDF')}>{localizeUi('Mục lục')}</button>
     </div>
     <div class="pdf-control-group pdf-reading-options">
-      <label class="sr-only" for="pdf-layout-mode">Bố cục trang</label>
-      <select id="pdf-layout-mode" value={layoutPreference} onchange={(event) => { layoutPreference = event.currentTarget.value as typeof layoutPreference; void refreshLayout(); }} title="Bố cục trang">
-        <option value="auto">Tự động</option>
-        <option value="single">Một trang</option>
+      <label class="sr-only" for="pdf-layout-mode">{localizeUi('Bố cục trang')}</label>
+      <select id="pdf-layout-mode" value={layoutPreference} onchange={(event) => { layoutPreference = event.currentTarget.value as typeof layoutPreference; void refreshLayout(); }} title={localizeUi('Bố cục trang')}>
+            <option value="auto">{localizeUi('Tự động')}</option>
+            <option value="single">{localizeUi('Một trang')}</option>
         <option value="spread">Hai trang</option>
       </select>
       <label class="pdf-paper-control">
@@ -1675,7 +1710,7 @@
         aria-pressed={speechState === 'playing' || speechState === 'paused'}
         aria-busy={speechState === 'loading'}
         disabled={!pageCount || speechState === 'loading'}
-        title={speechState === 'playing' ? 'Dừng đọc trang' : speechState === 'paused' ? 'Tiếp tục đọc trang' : 'Đọc trang hiện tại'}
+        title={speechState === 'playing' ? localizeUi('Dừng đọc trang') : speechState === 'paused' ? localizeUi('Tiếp tục đọc trang') : localizeUi('Đọc trang hiện tại')}
         onclick={toggleSpeech}
       >
         <span aria-hidden="true">
@@ -1687,18 +1722,18 @@
             <Volume2 size={16} strokeWidth={2.1} />
           {/if}
         </span>
-        <span class="compact-label">{speechState === 'loading' ? 'Đang tải...' : speechState === 'playing' ? 'Dừng' : speechState === 'paused' ? 'Tiếp' : 'Nghe'}</span>
+        <span class="compact-label">{speechState === 'loading' ? localizeUi('Đang tải...') : speechState === 'playing' ? localizeUi('Dừng') : speechState === 'paused' ? localizeUi('Tiếp') : localizeUi('Nghe')}</span>
       </button>
       {#if speechState === 'paused'}
-        <button type="button" aria-label="Dừng đọc trang" title="Dừng đọc trang" onclick={() => cancelSpeech(false)}><Square size={14} fill="currentColor" strokeWidth={2} aria-hidden="true" /><span class="mobile-label">Dừng đọc</span></button>
+        <button type="button" aria-label={localizeUi('Dừng đọc trang')} title={localizeUi('Dừng đọc trang')} onclick={() => cancelSpeech(false)}><Square size={14} fill="currentColor" strokeWidth={2} aria-hidden="true" /><span class="mobile-label">{localizeUi('Dừng đọc')}</span></button>
       {/if}
       <span class="pdf-voice-default">{localeStore.t.readerToolbar.voiceDefault}</span>
       <select
         class="pdf-speech-select"
-        aria-label="Tốc độ giọng đọc"
+        aria-label={localizeUi('Tốc độ giọng đọc')}
         value={String(ttsSpeed)}
         onchange={(e) => changeTtsSpeed(Number(e.currentTarget.value))}
-        title="Tốc độ giọng đọc"
+        title={localizeUi('Tốc độ giọng đọc')}
       >
         <option value="0.8">0.8×</option>
         <option value="1">1.0×</option>
@@ -1706,12 +1741,12 @@
       </select>
     </div>
     <div class="pdf-control-group pdf-bookmarks">
-      <button class:active={bookmarked} type="button" onclick={() => { offlinePanelOpen = false; toggleBookmark(); }} aria-label="Đánh dấu trang" aria-pressed={bookmarked} title={bookmarked ? 'Bỏ đánh dấu trang này' : 'Đánh dấu trang này'}><Bookmark size={16} strokeWidth={2.1} aria-hidden="true" /><span class="mobile-label">{bookmarked ? 'Bỏ đánh dấu trang này' : 'Đánh dấu trang này'}</span></button>
-      <button class:active={bookmarkListOpen} type="button" onclick={toggleBookmarkList} aria-label="Trang đã đánh dấu" aria-expanded={bookmarkListOpen} title="Trang đã đánh dấu"><List size={16} strokeWidth={2.1} aria-hidden="true" /><span class="mobile-label">Danh sách đã đánh dấu</span></button>
+      <button class:active={bookmarked} type="button" onclick={() => { offlinePanelOpen = false; toggleBookmark(); }} aria-label={localizeUi('Đánh dấu trang')} aria-pressed={bookmarked} title={bookmarked ? localizeUi('Bỏ đánh dấu trang này') : localizeUi('Đánh dấu trang này')}><Bookmark size={16} strokeWidth={2.1} aria-hidden="true" /><span class="mobile-label">{bookmarked ? localizeUi('Bỏ đánh dấu trang này') : localizeUi('Đánh dấu trang này')}</span></button>
+      <button class:active={bookmarkListOpen} type="button" onclick={toggleBookmarkList} aria-label={localizeUi('Trang đã đánh dấu')} aria-expanded={bookmarkListOpen} title={localizeUi('Trang đã đánh dấu')}><List size={16} strokeWidth={2.1} aria-hidden="true" /><span class="mobile-label">{localizeUi('Danh sách đã đánh dấu')}</span></button>
     </div>
     <div class="pdf-control-group pdf-annotations">
-      <button type="button" class:active={annotationsOpen} aria-expanded={annotationsOpen} aria-controls="pdf-annotation-panel" title="Tô sáng và ghi chú văn bản PDF" onclick={() => annotationsOpen = !annotationsOpen}>
-        <Highlighter size={16} strokeWidth={2.1} aria-hidden="true" /><span class="compact-label">Trích dẫn</span>
+      <button type="button" class:active={annotationsOpen} aria-expanded={annotationsOpen} aria-controls="pdf-annotation-panel" title={localizeUi('Tô sáng và ghi chú văn bản PDF')} onclick={() => annotationsOpen = !annotationsOpen}>
+            <Highlighter size={16} strokeWidth={2.1} aria-hidden="true" /><span class="compact-label">{localizeUi('Trích dẫn')}</span>
       </button>
     </div>
 
@@ -1722,21 +1757,21 @@
     <div class="pdf-offline-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="pdf-confirm-dl-title" tabindex="-1">
       <div data-dialog-glass class="pdf-offline-modal-card">
         <div class="pdf-offline-modal-icon">📥</div>
-        <h3 id="pdf-confirm-dl-title">Tải sách để đọc offline</h3>
+        <h3 id="pdf-confirm-dl-title">{localizeUi('Tải sách để đọc offline')}</h3>
         <p class="pdf-offline-modal-desc">
-          Bạn có muốn tải toàn bộ sách PDF <strong>"{title}"</strong> về thiết bị để đọc khi không có mạng không?
+          {#if localeStore.current === 'en'}Do you want to download the entire PDF book <strong>"{title}"</strong> to your device for offline reading?{:else}Bạn có muốn tải toàn bộ sách PDF <strong>"{title}"</strong> về thiết bị để đọc khi không có mạng không?{/if}
         </p>
         {#if estimatedPdfBytes}
           <div class="pdf-offline-modal-size-tag">
-            Dung lượng: <strong>{formatStorageBytes(estimatedPdfBytes)}</strong>
+            {localeStore.current === 'en' ? 'Size:' : 'Dung lượng:'} <strong>{formatStorageBytes(estimatedPdfBytes)}</strong>
           </div>
         {/if}
         <div class="pdf-offline-modal-actions dialog-actions-balanced">
           <button type="button" class="btn-cancel" onclick={() => resolveUserChoice('online')}>
-            Đọc online
+            {localizeUi('Đọc online')}
           </button>
           <button type="button" class="btn-confirm" onclick={() => resolveUserChoice('download')}>
-            Tải về máy
+            {localizeUi('Tải về máy')}
           </button>
         </div>
       </div>
@@ -1747,18 +1782,18 @@
     <div class="pdf-offline-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="pdf-dl-progress-title" tabindex="-1">
       <div data-dialog-glass class="pdf-offline-modal-card">
         <div class="pdf-offline-modal-icon pulse">⏳</div>
-        <h3 id="pdf-dl-progress-title">Đang tải sách PDF...</h3>
+        <h3 id="pdf-dl-progress-title">{localizeUi('Đang tải sách PDF...')}</h3>
         <p class="pdf-offline-modal-sub">{title}</p>
         
         <div class="pdf-dl-progress-display">
           <div class="pdf-dl-percent-number">
-            {offlineProgress.percent !== null ? `${offlineProgress.percent}%` : 'Đang tải...'}
+            {offlineProgress.percent !== null ? `${offlineProgress.percent}%` : localizeUi('Đang tải...')}
           </div>
           <progress
             class="pdf-dl-progress-bar"
             value={offlineProgress.bytesTotal ? offlineProgress.bytesDownloaded : undefined}
             max={offlineProgress.bytesTotal || 100}
-            aria-label="Tiến độ tải sách PDF"
+            aria-label={localizeUi('Tiến độ tải sách PDF')}
           ></progress>
           <div class="pdf-dl-bytes-info">
             <span>{formatStorageBytes(offlineProgress.bytesDownloaded)}</span>
@@ -1774,7 +1809,7 @@
 
         <div class="pdf-offline-modal-actions">
           <button type="button" class="btn-cancel" onclick={() => { cancelOfflineSave(); downloadProgressModalOpen = false; }}>
-            Hủy tải
+            {localizeUi('Hủy tải')}
           </button>
         </div>
       </div>
@@ -1782,60 +1817,60 @@
   {/if}
 
   {#if offlinePanelOpen}
-    <section id="pdf-offline-panel" class="pdf-offline-panel" aria-label="Quản lý PDF ngoại tuyến">
-      <header><strong>PDF ngoại tuyến</strong><button type="button" aria-label="Đóng quản lý ngoại tuyến" onclick={() => offlinePanelOpen = false}>✕</button></header>
+    <section id="pdf-offline-panel" class="pdf-offline-panel" aria-label={localizeUi('Quản lý PDF ngoại tuyến')}>
+      <header><strong>{localizeUi('PDF ngoại tuyến')}</strong><button type="button" aria-label={localizeUi('Đóng quản lý ngoại tuyến')} onclick={() => offlinePanelOpen = false}>✕</button></header>
       <div class="pdf-offline-body">
         {#if offlineState === 'checking'}
-          <p role="status">Đang kiểm tra bộ nhớ…</p>
+          <p role="status">{localizeUi('Đang kiểm tra bộ nhớ…')}</p>
         {:else if offlineState === 'unavailable'}
-          <p role="alert">Trình duyệt này không hỗ trợ lưu PDF an toàn bằng IndexedDB và kiểm tra checksum.</p>
+          <p role="alert">{localizeUi('Trình duyệt này không hỗ trợ lưu PDF an toàn bằng IndexedDB và kiểm tra checksum.')}</p>
         {:else if offlineState === 'saving'}
-          <p role="status">Đang lưu {offlineProgress.percent === null ? formatStorageBytes(offlineProgress.bytesDownloaded) : `${offlineProgress.percent}%`}</p>
-          <progress max={offlineProgress.bytesTotal || 100} value={offlineProgress.bytesTotal ? offlineProgress.bytesDownloaded : undefined} aria-label="Tiến độ lưu PDF ngoại tuyến"></progress>
-          <button type="button" class="pdf-offline-secondary" onclick={cancelOfflineSave}>Hủy</button>
+          <p role="status">{localeStore.current === 'en' ? 'Saving' : 'Đang lưu'} {offlineProgress.percent === null ? formatStorageBytes(offlineProgress.bytesDownloaded) : `${offlineProgress.percent}%`}</p>
+          <progress max={offlineProgress.bytesTotal || 100} value={offlineProgress.bytesTotal ? offlineProgress.bytesDownloaded : undefined} aria-label={localizeUi('Tiến độ lưu PDF ngoại tuyến')}></progress>
+          <button type="button" class="pdf-offline-secondary" onclick={cancelOfflineSave}>{localizeUi('Hủy')}</button>
         {:else if offlineState === 'saved' || offlineState === 'update'}
-          <p><strong>{offlineState === 'update' ? 'Có bản mới trên máy chủ.' : 'Sẵn sàng khi mất mạng.'}</strong><br />Đang dùng {formatStorageBytes(offlineRecord?.sizeBytes || 0)} trên thiết bị.</p>
+          <p><strong>{offlineState === 'update' ? localizeUi('Có bản mới trên máy chủ.') : localizeUi('Sẵn sàng khi mất mạng.')}</strong><br />{localizeUi('Đang dùng {0} trên thiết bị.', formatStorageBytes(offlineRecord?.sizeBytes || 0))}</p>
           <div class="pdf-offline-actions">
-            {#if offlineState === 'update'}<button type="button" onclick={() => void saveOffline()}>Cập nhật</button>{/if}
-            <button type="button" class="pdf-offline-secondary" onclick={() => void removeOffline()}>Xóa và giải phóng</button>
+            {#if offlineState === 'update'}<button type="button" onclick={() => void saveOffline()}>{localizeUi('Cập nhật')}</button>{/if}
+            <button type="button" class="pdf-offline-secondary" onclick={() => void removeOffline()}>{localizeUi('Xóa và giải phóng')}</button>
           </div>
         {:else}
-          {#if offlineError}<p role="alert">{offlineError}</p>{:else}<p>Lưu một bản hoàn chỉnh để đọc khi mất mạng.</p>{/if}
-          <button type="button" onclick={() => void saveOffline()}>{offlineState === 'error' ? 'Thử lại' : 'Lưu trên thiết bị'}</button>
+          {#if offlineError}<p role="alert">{offlineError}</p>{:else}<p>{localizeUi('Lưu một bản hoàn chỉnh để đọc khi mất mạng.')}</p>{/if}
+          <button type="button" onclick={() => void saveOffline()}>{offlineState === 'error' ? localizeUi('Thử lại') : localizeUi('Lưu trên thiết bị')}</button>
         {/if}
-        <small>Tối đa 80 MiB và không vượt dung lượng an toàn còn trống. Trình duyệt vẫn có thể thu hồi dữ liệu. {storagePrincipal === 'anonymous' ? 'Bản khách chỉ thuộc vùng dữ liệu ẩn danh.' : 'Bản này thuộc tài khoản hiện tại.'}</small>
+        <small>{localizeUi('Tối đa 80 MiB và không vượt dung lượng an toàn còn trống. Trình duyệt vẫn có thể thu hồi dữ liệu.')} {storagePrincipal === 'anonymous' ? localizeUi('Bản khách chỉ thuộc vùng dữ liệu ẩn danh.') : localizeUi('Bản này thuộc tài khoản hiện tại.')}</small>
       </div>
     </section>
   {/if}
   <PdfAnnotations targetAnnotationId={quoteTargetId} bind:open={annotationsOpen} {articleId} {contentVersion} document={pdfDocument} page={quoteTargetPage ?? speechPage} {session} {onNotify} />
-  <span class="sr-only" aria-live="polite">{speechState === 'loading' ? `Đang chuẩn bị văn bản trang ${speechPage}` : speechState === 'playing' ? `Đang đọc trang ${speechPage}` : speechState === 'paused' ? `Đã tạm dừng trang ${speechPage}` : ''}</span>
-  {#if pageTextState === 'no-text'}<div class="pdf-capability-message" role="status">Trang này không có lớp văn bản để đọc. Tài liệu quét cần OCR, hiện chưa được hỗ trợ.</div>{/if}
-  {#if pageTextState === 'error'}<div class="pdf-capability-message pdf-capability-error" role="alert">Không thể trích xuất văn bản của trang này.</div>{/if}
+  <span class="sr-only" aria-live="polite">{speechState === 'loading' ? localizeUi('Đang chuẩn bị văn bản trang {0}', speechPage) : speechState === 'playing' ? localizeUi('Đang đọc trang {0}', speechPage) : speechState === 'paused' ? localizeUi('Đã tạm dừng trang {0}', speechPage) : ''}</span>
+  {#if pageTextState === 'no-text'}<div class="pdf-capability-message" role="status">{localizeUi('Trang này không có lớp văn bản để đọc. Tài liệu quét cần OCR, hiện chưa được hỗ trợ.')}</div>{/if}
+  {#if pageTextState === 'error'}<div class="pdf-capability-message pdf-capability-error" role="alert">{localizeUi('Không thể trích xuất văn bản của trang này.')}</div>{/if}
   {#if navigationOpen}
-    <aside id="pdf-navigation-panel" class="pdf-navigation-panel" aria-label={navigationTab === 'thumbnails' ? 'Điều hướng bằng ảnh thu nhỏ' : 'Mục lục PDF'}>
+    <aside id="pdf-navigation-panel" class="pdf-navigation-panel" aria-label={navigationTab === 'thumbnails' ? localizeUi('Điều hướng bằng ảnh thu nhỏ') : localizeUi('Mục lục PDF')}>
       <header>
-        <strong>{navigationTab === 'thumbnails' ? 'Các trang' : 'Mục lục PDF'}</strong>
-        <button type="button" aria-label="Đóng bảng điều hướng" onclick={closeNavigation}>✕</button>
+        <strong>{navigationTab === 'thumbnails' ? localizeUi('Các trang') : localizeUi('Mục lục PDF')}</strong>
+        <button type="button" aria-label={localizeUi('Đóng bảng điều hướng')} onclick={closeNavigation}>✕</button>
       </header>
       {#if navigationTab === 'thumbnails'}
-        <div class="pdf-thumbnail-rail" bind:this={thumbnailRail} aria-label="Danh sách ảnh thu nhỏ">
+        <div class="pdf-thumbnail-rail" bind:this={thumbnailRail} aria-label={localizeUi('Danh sách ảnh thu nhỏ')}>
           {#each Array(pageCount) as _, index}
-            <button type="button" class:active={canonicalPdfPage(index + 1, pageCount, spreadActive) === currentPage} aria-current={canonicalPdfPage(index + 1, pageCount, spreadActive) === currentPage ? 'page' : undefined} aria-label={`Đi đến trang ${index + 1}`} onclick={() => goToPage(index + 1)}>
+            <button type="button" class:active={canonicalPdfPage(index + 1, pageCount, spreadActive) === currentPage} aria-current={canonicalPdfPage(index + 1, pageCount, spreadActive) === currentPage ? 'page' : undefined} aria-label={localizeUi('Đi đến trang {0}', index + 1)} onclick={() => goToPage(index + 1)}>
               <span class="pdf-thumbnail-canvas"><canvas use:thumbnailCanvas={index + 1}></canvas></span>
               <span>Trang {index + 1}</span>
             </button>
           {/each}
         </div>
       {:else if outlineStatus === 'loading'}
-        <p class="pdf-navigation-state" role="status">Đang tải mục lục…</p>
+        <p class="pdf-navigation-state" role="status">{localizeUi('Đang tải mục lục…')}</p>
       {:else if outlineStatus === 'empty'}
-        <p class="pdf-navigation-state">Tài liệu này không có mục lục được nhúng.</p>
+        <p class="pdf-navigation-state">{localizeUi('Tài liệu này không có mục lục được nhúng.')}</p>
       {:else if outlineStatus === 'error'}
-        <p class="pdf-navigation-state" role="alert">Không thể đọc mục lục của tài liệu.</p>
+        <p class="pdf-navigation-state" role="alert">{localizeUi('Không thể đọc mục lục của tài liệu.')}</p>
       {:else}
-        <nav class="pdf-outline" aria-label="Mục lục trong tài liệu">
+        <nav class="pdf-outline" aria-label={localizeUi('Mục lục trong tài liệu')}>
           {#each outlineItems as item (item.id)}
-            <button type="button" style={`--outline-depth:${item.depth}`} disabled={item.pageNumber === null} title={item.pageNumber === null ? 'Mục này không có đích đến trong tài liệu' : `Đi đến trang ${item.pageNumber}`} onclick={() => item.pageNumber && goToPage(item.pageNumber)}>
+            <button type="button" style={`--outline-depth:${item.depth}`} disabled={item.pageNumber === null} title={item.pageNumber === null ? localizeUi('Mục này không có đích đến trong tài liệu') : localizeUi('Đi đến trang {0}', item.pageNumber)} onclick={() => item.pageNumber && goToPage(item.pageNumber)}>
               <span>{item.title}</span>
               {#if item.pageNumber}<small>{item.pageNumber}</small>{:else}<small>—</small>{/if}
             </button>
@@ -1881,7 +1916,7 @@
             {#if localeStore.current === 'en'}
               Tip: Standard books and scriptures in the app are already bundled offline and can be read anytime without an internet connection.
             {:else}
-              Gợi ý: Các sách văn bản và kinh điển trong ứng dụng đã được nạp sẵn và có thể đọc hoàn toàn ngoại tuyến mà không cần mạng.
+              {localizeUi('Gợi ý: Các sách văn bản và kinh điển trong ứng dụng đã được nạp sẵn và có thể đọc hoàn toàn ngoại tuyến mà không cần mạng.')}
             {/if}
           </span>
         </div>
@@ -1893,7 +1928,6 @@
             onclick={() => {
               isOfflineError = false;
               error = '';
-              documentGeneration += 1;
               retryStart();
             }}
           >
@@ -1919,18 +1953,18 @@
     {#if error}
       <div class="pdf-error" role="alert">
         <span>{error}</span>
-        <button type="button" class="pdf-error-retry-btn" onclick={() => { error = ''; documentGeneration += 1; retryStart(); }}>
+        <button type="button" class="pdf-error-retry-btn" onclick={retryStart}>
           {localeStore.current === 'en' ? 'Retry' : 'Thử lại'}
         </button>
       </div>
     {/if}
-    <div class="pdf-viewer" bind:this={viewer} onscroll={onScroll}>
+    <div class="pdf-viewer" bind:this={viewer} use:pdfViewerGestures onscroll={onScroll}>
       <header class="pdf-document-header">
         <div class="pdf-document-meta">
           <span class="pdf-document-category">{categoryIcon} {category}</span>
           {#if dateLabel}<span>{dateLabel}</span>{/if}
           <span class="pdf-document-author">{author}</span>
-          {#if viewCount !== null}<span class="pdf-document-views">👁 {viewCount} lượt xem</span>{/if}
+          {#if viewCount !== null}<span class="pdf-document-views">👁 {viewCount} {localizeUi('lượt xem')}</span>{/if}
         </div>
         <h1 id="reader-title">{title}</h1>
       </header>
@@ -1949,13 +1983,13 @@
       </div>
       <div class="pdf-extras pdf-comments">
         {#if currentArticle.tags.length}
-          <div class="pdf-tags" aria-label="Chủ đề bài viết">
+          <div class="pdf-tags" aria-label={localizeUi('Chủ đề bài viết')}>
             {#each currentArticle.tags as tag}<span>{tag}</span>{/each}
           </div>
         {/if}
         {#if externalUrl}
           <div class="pdf-action-bar">
-            <a href={externalUrl} target="_blank" rel="noopener noreferrer">Xem bài đầy đủ <span aria-hidden="true">↗</span></a>
+            <a href={externalUrl} target="_blank" rel="noopener noreferrer">{localizeUi('Xem bài đầy đủ')} <span aria-hidden="true">↗</span></a>
           </div>
         {/if}
         <MostViewedArticles {currentArticle} {articles} onOpen={onOpenArticle} />
@@ -1964,13 +1998,13 @@
     </div>
   {/if}
   {#if pageCount > 0 && !isOfflineError && !annotationsOpen}
-    <div class="pdf-floating-pager" class:pdf-floating-pager--panel-open={bookmarkListOpen} aria-label="Đánh dấu trang và thu phóng PDF">
+    <div class="pdf-floating-pager" class:pdf-floating-pager--panel-open={bookmarkListOpen} aria-label={localizeUi('Đánh dấu trang và thu phóng PDF')}>
       {#if bookmarkListOpen}
         <section
           class="pdf-bookmark-panel"
           bind:this={bookmarkPanel}
           tabindex="-1"
-          aria-label="Danh sách trang đã đánh dấu"
+          aria-label={localizeUi('Danh sách trang đã đánh dấu')}
           use:readerPanelKeyboard={() => void toggleBookmarkList()}
         >
           <header>
@@ -1978,9 +2012,9 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
                 <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
               </svg>
-              <strong>Trang đã đánh dấu ({bookmarkPages.length})</strong>
+              <strong>{localizeUi('Trang đã đánh dấu ({0})', bookmarkPages.length)}</strong>
             </div>
-            <button type="button" class="pdf-bookmark-close-btn" aria-label="Đóng danh sách đánh dấu" onclick={toggleBookmarkList}>✕</button>
+            <button type="button" class="pdf-bookmark-close-btn" aria-label={localizeUi('Đóng danh sách đánh dấu')} onclick={toggleBookmarkList}>✕</button>
           </header>
           {#if bookmarkPages.length}
             <div class="pdf-bookmark-scroll" role="list">
@@ -1989,15 +2023,15 @@
                   <button type="button" class="pdf-bookmark-jump-btn" onclick={() => goToPage(page)}>
                     <span class="pdf-bookmark-page-label">Trang {page}</span>
                     {#if page === currentPage}
-                      <span class="pdf-bookmark-current-tag">Đang đọc</span>
+                      <span class="pdf-bookmark-current-tag">{localizeUi('Đang đọc')}</span>
                     {/if}
                   </button>
-                  <button type="button" class="pdf-bookmark-del-btn" aria-label={`Xóa đánh dấu trang ${page}`} title={`Xóa đánh dấu trang ${page}`} onclick={() => removeBookmark(page)}>✕</button>
+                  <button type="button" class="pdf-bookmark-del-btn" aria-label={localizeUi('Xóa đánh dấu trang {0}', page)} title={localizeUi('Xóa đánh dấu trang {0}', page)} onclick={() => removeBookmark(page)}>✕</button>
                 </div>
               {/each}
             </div>
           {:else}
-            <p class="pdf-bookmark-empty">Chưa có trang đánh dấu.<br />Nhấn 🔖 để đánh dấu trang hiện tại.</p>
+            <p class="pdf-bookmark-empty">{localizeUi('Chưa có trang đánh dấu.')}<br />{localizeUi('Nhấn 🔖 để đánh dấu trang hiện tại.')}</p>
           {/if}
         </section>
       {/if}
@@ -2007,9 +2041,9 @@
         class="pdf-pager-btn pdf-bookmark-btn"
         class:active={bookmarked}
         onclick={() => toggleBookmark()}
-        aria-label={bookmarked ? `Bỏ đánh dấu trang ${currentPage}` : `Đánh dấu trang ${currentPage}`}
+        aria-label={bookmarked ? localizeUi('Bỏ đánh dấu trang {0}', currentPage) : localizeUi('Đánh dấu trang {0}', currentPage)}
         aria-pressed={bookmarked}
-        title={bookmarked ? `Bỏ đánh dấu trang ${currentPage}` : `Đánh dấu trang ${currentPage}`}
+        title={bookmarked ? localizeUi('Bỏ đánh dấu trang {0}', currentPage) : localizeUi('Đánh dấu trang {0}', currentPage)}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill={bookmarked ? "currentColor" : "none"} stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
@@ -2022,9 +2056,9 @@
         class="pdf-pager-btn pdf-bookmark-list-btn"
         class:active={bookmarkListOpen}
         onclick={toggleBookmarkList}
-        aria-label="Danh sách trang đã đánh dấu"
+        aria-label={localizeUi('Danh sách trang đã đánh dấu')}
         aria-expanded={bookmarkListOpen}
-        title="Danh sách trang đã đánh dấu"
+        title={localizeUi('Danh sách trang đã đánh dấu')}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="9" y1="6" x2="20" y2="6"/>
@@ -2033,21 +2067,21 @@
           <path d="M4 5v14l3-2 3 2V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1z" fill={bookmarkPages.length ? "currentColor" : "none"}/>
         </svg>
         {#if bookmarkPages.length > 0}
-          <span class="pdf-bookmark-badge" aria-label={`${bookmarkPages.length} trang đã đánh dấu`}>{bookmarkPages.length}</span>
+          <span class="pdf-bookmark-badge" aria-label={localizeUi('{0} trang đã đánh dấu', bookmarkPages.length)}>{bookmarkPages.length}</span>
         {/if}
       </button>
 
       <span class="pdf-pager-info sr-only" aria-live="polite">Trang {currentPage} / {pageCount}</span>
 
       <span class="pdf-pager-divider" aria-hidden="true"></span>
-      <div class="pdf-pager-zoom-group" aria-label="Thu phóng PDF">
+      <div class="pdf-pager-zoom-group" aria-label={localizeUi('Thu phóng PDF')}>
         <button
           type="button"
           class="pdf-zoom-btn zoom-out"
           disabled={zoom <= 0.5}
           onclick={() => setZoom(zoom - 0.1)}
-          aria-label="Thu nhỏ"
-          title="Thu nhỏ (−)"
+          aria-label={localizeUi('Thu nhỏ')}
+          title={localizeUi('Thu nhỏ (−)')}
         >
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
         </button>
@@ -2055,8 +2089,8 @@
           type="button"
           class="pdf-pager-zoom-text"
           onclick={fitWidth}
-          title="Đặt lại 100% (Vừa màn hình)"
-          aria-label="Tỷ lệ {Math.round(displayZoom * 100)}%, nhấn để về 100%"
+          title={localizeUi('Đặt lại 100% (Vừa màn hình)')}
+          aria-label={localizeUi('Tỷ lệ {0}%, nhấn để về 100%', Math.round(displayZoom * 100))}
         >
           {Math.round(displayZoom * 100)}%
         </button>
@@ -2065,8 +2099,8 @@
           class="pdf-zoom-btn zoom-in"
           disabled={zoom >= 4}
           onclick={() => setZoom(zoom + 0.1)}
-          aria-label="Phóng to"
-          title="Phóng to (+)"
+          aria-label={localizeUi('Phóng to')}
+          title={localizeUi('Phóng to (+)')}
         >
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </button>
@@ -2085,16 +2119,16 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
           <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
         </svg>
-        <span>Lưu trích dẫn</span>
+        <span>{localizeUi('Lưu trích dẫn')}</span>
       </button>
       <button
         class="pdf-quote-floating-btn secondary"
         type="button"
-        title="Sao chép đoạn văn vào bộ nhớ tạm"
+        title={localizeUi('Sao chép đoạn văn vào bộ nhớ tạm')}
         onmousedown={(e) => e.preventDefault()}
         onclick={() => void handlePdfCopy()}
       >
-        <span>📋 Sao chép</span>
+        <span>📋 {localizeUi('Sao chép')}</span>
       </button>
     </div>
   {/if}
@@ -2239,8 +2273,8 @@
   .pdf-offline-body button:hover{border-color:var(--brown);background:var(--gold);color:var(--on-gold)}
   .pdf-offline-body button.pdf-offline-secondary{border-color:var(--border);background:var(--card);color:var(--text2)}
   .pdf-offline-body button.pdf-offline-secondary:hover{border-color:var(--gold);background:var(--gold-muted);color:var(--brown)}
-  .pdf-capability-message{padding:7px 12px;border-bottom:1px solid #e7d4a8;background:#fff8e5;color:#674d16;font:var(--font-size-body)/1.4 var(--font-app);text-align:center}
-  .pdf-capability-error{background:#fff1ee;color:#8c1c13}
+  .pdf-capability-message{padding:7px 12px;border-bottom:1px solid var(--border);background:var(--gold-light);color:var(--text2);font:var(--font-size-body)/1.4 var(--font-app);text-align:center}
+  .pdf-capability-error{background:color-mix(in srgb,var(--danger-text) 10%,var(--card));color:var(--danger-text)}
   @media(max-width:768px){
     .compact-label,.pdf-action-button span:last-child{display:inline;font-size:var(--font-size-label)}
     .pdf-reading-options select,.pdf-speech-select{height:44px;max-width:none}
@@ -2305,4 +2339,6 @@
   :global([data-theme='dark']) .pdf-offline-tip,:global(.bg-dark) .pdf-offline-tip{background:rgba(212,168,75,.1);border-color:rgba(212,168,75,.3);color:#e5d8c3}
   :global([data-theme='dark']) .pdf-error,:global(.bg-dark) .pdf-error{background:#2a110f;color:#ff9d94;border-color:rgba(255,157,148,.2)}
   :global([data-theme='dark']) .pdf-error-retry-btn,:global(.bg-dark) .pdf-error-retry-btn{background:#3b1714;color:#ffb8b0;border-color:#ff9d94}
+  .pdf-shell :is(.pdf-pager-btn,.pdf-zoom-btn,.pdf-quote-floating-btn,.pdf-bookmark-close-btn,.pdf-bookmark-del-btn){min-width:var(--touch-target-size)!important;min-height:var(--touch-target-size)!important}
+  .pdf-bookmark-panel{padding-bottom:env(safe-area-inset-bottom,0px)}
 </style>

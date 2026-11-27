@@ -1,5 +1,25 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+for (const tab of ['personal', 'community'] as const) {
+  for (const [section, label] of [['kinh', 'Tụng, Đọc Kinh'], ['tri-chu', 'Trì Chú']] as const) {
+    test(`the ${section} widget opens its catalog from the restored ${tab} tab`, async ({ page }) => {
+      await deferStartupNotification(page);
+      await page.addInitScript(tab => history.replaceState({ ...history.state, tuTapUpgradeTab: tab }, '', location.href), tab);
+      await page.goto('/tu-tap');
+      await settleClient(page);
+      await expect(page.locator('.personal-practice')).toBeVisible();
+      await page.evaluate(section => {
+        const path = `/tu-tap?muc=${section}`;
+        history.replaceState(history.state, '', path);
+        window.dispatchEvent(new CustomEvent('quangtu:practice-widget-open', { detail: { path } }));
+      }, section);
+      await expect(page.locator('.personal-practice')).toHaveCount(0);
+      await expect(page.locator('.tt-section-title')).toContainText(label, { ignoreCase: true });
+      expect(await page.evaluate(() => history.state.tuTapUpgradeTab)).toBeUndefined();
+    });
+  }
+}
 
 test('a repeated practice widget link opens the closed tool without resetting an active rosary', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 844 });

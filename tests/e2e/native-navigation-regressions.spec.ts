@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 import { STORE_URLS } from '../../src/lib/contracts/native-app-update';
 
 async function nativeFixture(page: Page, launch?: string, platform: 'android' | 'ios' = 'android', online = false) {
@@ -40,6 +40,31 @@ const warm = (page: Page, path: string) => page.evaluate(path => {
   (window as any).qaUrlOpen({ url: 'vn.quangtu.tutam://' + path });
 }, path);
 
+const notificationPrompt = (page: Page) => page.getByRole('dialog', { name: 'Thông báo tu tập', exact: true });
+
+for (const path of ['/chinh-sach-bao-mat', '/privacy-policy']) {
+  test(`native privacy has one Back and exits a first entry with retained forward history at ${path}`, async ({ page }) => {
+    await nativeFixture(page, undefined, 'ios');
+    await deferStartupNotification(page);
+    await page.goto(path);
+    await settleClient(page);
+    await expect(page.locator('#app-startup')).toHaveCount(0);
+    await expect(page.locator('.qts-nav .nav-back-circle-btn')).toBeVisible();
+    await expect(page.locator('.privacy-container .back-btn')).toHaveCount(0);
+    await page.locator('.qts-nav .nav-logo').click();
+    await expect(page).toHaveURL(/\/$/);
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await page.locator('.qts-nav .nav-back-circle-btn').click();
+    await expect(page).toHaveURL(/\/ca-nhan$/);
+  });
+}
+
+async function deferStartupNotifications(page: Page) {
+  await notificationPrompt(page).getByRole('button', { name: 'Để sau', exact: true }).click();
+  await expect(notificationPrompt(page)).toHaveCount(0);
+}
+
 test('Android shows the Store update before asking for notification permission', async ({ page }) => {
   await nativeFixture(page, undefined, 'android', true);
   let versionRequests = 0;
@@ -50,7 +75,7 @@ test('Android shows the Store update before asking for notification permission',
       json: { nativeUpdates: { android: { version: '1.2.29', build: '33', storeUrl: STORE_URLS.android } } },
     });
   });
-  await page.goto('/');
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   const update = page.locator('[data-native-update-prompt]');
   const permission = page.locator('.notification-modal-card');
   await expect(update).toBeVisible();
@@ -71,8 +96,10 @@ for (const theme of ['light', 'dark'] as const) {
       const page = await context.newPage();
       await nativeFixture(page, undefined, 'ios');
       await page.addInitScript(theme => localStorage.setItem('tutam_dark_mode', theme === 'dark' ? '1' : '0'), theme);
-      await page.goto('/');
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
       await settleClient(page);
+      await expect(page.locator('#app-startup')).toHaveCount(0);
+      await deferStartupNotifications(page);
       expect(await page.evaluate(() => matchMedia('(hover: none) and (pointer: coarse)').matches)).toBe(true);
       const tab = page.locator('.qts-bottom-nav__item[href="/tu-tap"]');
       const icon = tab.locator('.qts-bottom-nav__icon');
@@ -108,8 +135,10 @@ test('content shortcuts route cold and warm launches to their matching sections'
 test('iPhone Widget shortcut focuses its guide topic on cold launch and repeated use', async ({ page }) => {
   const path = '/huong-dan?phan=ung-dung#widget-man-hinh-chinh';
   await nativeFixture(page, 'vn.quangtu.tutam://' + path, 'ios');
-  await page.goto('/');
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page).toHaveURL(path);
+  await expect(page.locator('#app-startup')).toHaveCount(0);
+  await deferStartupNotifications(page);
   const topic = page.locator('#widget-man-hinh-chinh');
   await expect(topic).toBeFocused();
 
@@ -286,6 +315,9 @@ test('closing a cold home reader restores the guest banner without reloading or 
   await page.keyboard.press('Escape');
   await expect(reader).toHaveCount(0);
   await expect(page).toHaveURL(/\/$/);
+  // A reader kept open through the startup permission check suppresses that prompt.
+  await expect(banner.or(notificationPrompt(page))).toBeVisible();
+  if (await notificationPrompt(page).isVisible()) await deferStartupNotifications(page);
   await expect(banner).toBeVisible();
   expect(await page.evaluate(() => window.history.state.articleId)).toBeNull();
   expect(await page.evaluate(() => localStorage.getItem('qa-reader-data-sentinel'))).toBe('keep');
@@ -297,6 +329,7 @@ test('warm home reader close and shallow book Back Forward keep the guest banner
   await settleClient(page);
   const reader = page.locator('.reader-modal');
   const banner = page.locator('.qt-home-login-notice [data-guest-notice-banner]');
+  await deferStartupNotifications(page);
   await expect(banner).toBeVisible();
   await expect.poll(() => page.evaluate(() => typeof (window as any).qaUrlOpen)).toBe('function');
   await warm(page, '/?article=tt_1781528855960&chap=1');
@@ -390,6 +423,9 @@ test('fresh iOS guest home banner opens the real account provider controls', asy
   await page.goto('/');
   const banner = page.locator('.qt-home-login-notice [data-guest-notice-banner]');
   const login = banner.getByRole('button', { name: 'Đăng nhập ngay', exact: true });
+  await expect(notificationPrompt(page)).toBeVisible();
+  await expect(banner).toHaveCount(0);
+  await deferStartupNotifications(page);
   await expect(login).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).qaHomeGuestStates)).toContainEqual({
     isHome: true, authenticated: false, isReadingArticle: false,
@@ -403,7 +439,8 @@ test('fresh iOS guest home banner opens the real account provider controls', asy
     await expect(button).toBeEnabled();
   }
   await expect(page.getByRole('button', { name: 'Đăng nhập bằng Facebook', exact: true })).toHaveCount(0);
-  await page.locator('.cn-subpage-header .cn-subpage-back-btn').click();
+  const header = page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true });
+  await header.getByRole('button', { name: 'Quay lại', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Đăng nhập bằng Google', exact: true })).toHaveCount(0);
   const footer = page.getByRole('navigation', { name: 'Điều hướng nhanh', exact: true });
   await footer.getByRole('link', { name: 'Cá nhân', exact: true }).click();

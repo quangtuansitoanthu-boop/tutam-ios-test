@@ -1,13 +1,33 @@
-import { beginScriptureCopying } from './runtime-helpers';
+import { beginScriptureCopying, deferStartupNotification } from './runtime-helpers';
 import { test, expect, type Page } from '@playwright/test';
 import book from '../../src/lib/data/scripture-copying/dia-tang.json' with { type: 'json' };
 import { normalizeCopyText } from '../../src/lib/domain/practice/scripture-copying';
+test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
+  page.on('dialog', dialog => dialog.accept());
+  // Các bài hồi quy cũ giữ nháp local khi quay lại; hành vi xác nhận được kiểm tra riêng.
+  await page.addLocatorHandler(page.getByRole('dialog', { name: /^(Lưu bản chép trước khi rời\?|Save your copy before leaving\?)$/ }), dialog =>
+    dialog.getByRole('button', { name: /^(Rời không lưu|Leave without saving)$/ }).click());
+});
 
 async function acceptAppConfirm(page: Page, message: string) {
   const dialog = page.locator('dialog[data-app-message]');
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(message);
   await dialog.getByRole('button', { name: 'Đồng ý', exact: true }).click();
+}
+
+async function storedCopyText(page: Page, block: number) {
+  return page.evaluate(block => new Promise<string>((resolve, reject) => {
+    const request = indexedDB.open('tutam-scripture-copying-v1');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result, transaction = db.transaction('drafts');
+      const read = transaction.objectStore('drafts').getAll();
+      transaction.oncomplete = () => { resolve(read.result.find(row => row.sutraId === 'dia-tang' && row.chapter === 1)?.texts[block] ?? ''); db.close(); };
+      transaction.onerror = () => { reject(transaction.error); db.close(); };
+    };
+  }), block);
 }
 
 test('leaving and reopening during composition does not leave passage navigation locked', async ({ page }) => {
@@ -199,7 +219,7 @@ test('finishing a chapter automatically opens the next chapter without crediting
   await prepareBookDraft(page, 1, false);
   await expect(page.locator('#copy-block')).toHaveValue(String(book.chapters[0].blocks.length - 1));
   await finishLastPassage(page, 1);
-  await expect(page.locator('.writing-title p')).toHaveText(book.chapters[1].title);
+  await expect(page.locator('.copy-chapter-location')).toHaveText(book.chapters[1].title);
   await expect(page.locator('#copy-block')).toHaveValue('0');
   await expect(page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true })).toBeFocused();
   await expect(page.getByText('Đã ghi nhận 1 lượt vào Công phu của tôi. Bản chép được giữ nguyên.', { exact: true })).toHaveCount(0);
@@ -212,7 +232,7 @@ test('the final chapter points back to unfinished chapters instead of awarding a
   await finishLastPassage(page, book.chapters.length);
   await expect(page.getByText('Đã chép trọn bộ kinh', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Tiếp tục phẩm/quyển chưa hoàn thành: 1', exact: true }).click();
-  await expect(page.locator('.writing-title p')).toHaveText(book.chapters[0].title);
+  await expect(page.locator('.copy-chapter-location')).toHaveText(book.chapters[0].title);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('quangtu_principal_v1:anonymous:tt_practice_logs_v1') ?? '[]').length)).toBe(0);
 });
 
@@ -266,7 +286,7 @@ test('one full book earns one completion and a new run preserves every old chapt
     await page.screenshot({ path: `test-results/copying-book-complete-${width}-${theme}.png`, fullPage: true });
   }
   await page.getByRole('button', { name: 'Bắt đầu lượt 2', exact: true }).click();
-  await expect(page.locator('.writing-title p')).toHaveText(book.chapters[0].title);
+  await expect(page.locator('.copy-chapter-location')).toHaveText(book.chapters[0].title);
   await expect(page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true })).toHaveText('');
   await expect(page.locator('.book-run-progress')).toContainText('Lượt 2');
   expect(await copyLogs()).toBe(1);
@@ -322,7 +342,7 @@ for (const width of [375, 1440]) test(`idle completion respects composition and 
 test('finishing a passage with Enter advances once and preserves the completed draft', async ({ page }) => {
   const requests: string[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname === '/api/practice/copying') requests.push(request.method()); });
-  await page.goto('/tu-tap/chep-kinh');
+  await page.goto('/tu-tap/chep-kinh', { waitUntil: 'domcontentloaded' });
   await beginScriptureCopying(page);
   const input = page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true });
   const completed = normalizeCopyText(book.chapters[0].blocks[0]);
@@ -337,15 +357,25 @@ test('finishing a passage with Enter advances once and preserves the completed d
   await expect(page.locator('#copy-block option:checked')).toContainText(`2 / ${book.chapters[0].blocks.length}`);
   await expect(input).toBeFocused();
   await input.pressSequentially('Bản chép đoạn tiếp theo');
-  await expect(page.getByText('Đã lưu trên máy', { exact: true })).toBeVisible();
-  page.on('dialog', dialog => dialog.accept());
-  await page.reload();
+  // The compact phone layout hides this status; verify the durable draft itself.
+  await expect.poll(() => storedCopyText(page, 1)).toBe('Bản chép đoạn tiếp theo');
+  const savedStatus = page.getByText('Đã lưu trên máy', { exact: true });
+  await expect(savedStatus).toHaveText('Đã lưu trên máy');
+  if ((page.viewportSize()?.width ?? 1440) > 700) await expect(savedStatus).toBeVisible();
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await beginScriptureCopying(page);
   await expect(page.locator('#copy-block')).toHaveValue('1');
   await expect(input).toHaveText('Bản chép đoạn tiếp theo');
   await page.locator('#copy-block').selectOption({ value: '0' });
   await expect(page.locator('#copy-block option:checked')).toContainText(`1 / ${book.chapters[0].blocks.length}`);
-  await expect(input).toContainText(completed);
+  await expect.poll(() => storedCopyText(page, 0)).toContain(completed);
+  if ((page.viewportSize()?.width ?? 1440) > 700) await expect(input).toContainText(completed);
+  else {
+    // Phones resume a single writing page, while the durable draft contains the whole passage.
+    const visiblePage = (await input.textContent())?.trim() ?? '';
+    expect(visiblePage.length).toBeGreaterThan(0);
+    expect(completed).toContain(visiblePage);
+  }
   expect(requests).toEqual([]);
 });
 
@@ -379,7 +409,8 @@ test('three-step copying expands the editor and preserves local text when choosi
   await expect(input).toHaveCount(0);
   await beginScriptureCopying(page);
   await expect(input).toBeVisible();
-  await expect(page.locator('.tt-topbar')).toBeHidden();
+  const navigation = page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true });
+  await expect(navigation).toBeHidden();
   await expect(page.getByRole('navigation', { name: 'Điều hướng nhanh' })).toBeHidden();
   const before = (await input.boundingBox())!;
   await page.getByRole('button', { name: 'Thu gọn', exact: true }).click();
@@ -390,7 +421,7 @@ test('three-step copying expands the editor and preserves local text when choosi
   await expect(page.getByText('Đã lưu trên máy', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Đổi kinh hoặc phẩm', exact: true }).click();
   await expect(input).toHaveCount(0);
-  await expect(page.locator('.tt-topbar')).toBeVisible();
+  await expect(navigation).toBeVisible();
   await beginScriptureCopying(page);
   await expect(input).toHaveText('Nam mô Phật');
   await page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true }).click();
@@ -420,7 +451,6 @@ test('copying keeps drafts locally and never saves until an authenticated explic
   await input.pressSequentially('Nam mo');
   await expect(page.getByText('Đã lưu trên máy', { exact: true })).toBeVisible();
   await expect.poll(() => writes.length).toBe(0);
-  page.on('dialog', dialog => dialog.accept());
   await page.reload();
   await beginScriptureCopying(page);
   await expect(input).toHaveText('Nam mo');
@@ -433,7 +463,7 @@ test('copying keeps drafts locally and never saves until an authenticated explic
   await page.getByRole('button', { name: 'Đóng rà soát', exact: true }).click();
   await input.dispatchEvent('paste');
   await expect(input).toHaveText('Nam mo Phat');
-  await page.getByRole('button', { name: 'Lưu lên hệ thống', exact: true }).click();
+  await page.getByRole('button', { name: 'Lưu lên máy chủ', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Đăng nhập bằng Google', exact: true })).toBeVisible();
   expect(writes).toEqual([]);
 });
@@ -453,10 +483,10 @@ test('authenticated save acknowledges exactly the submitted snapshot and restore
   await input.pressSequentially('Nam mo');
   await expect(page.getByText('Đã lưu trên máy', { exact: true })).toBeVisible();
   expect(writes).toHaveLength(0);
-  await page.getByRole('button', { name: 'Lưu lên hệ thống', exact: true }).click();
-  await expect(page.getByText('Đã lưu lên hệ thống thành công.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Lưu lên máy chủ', exact: true }).click();
+  await expect(page.getByText('Đã lưu thành công trên máy chủ.', { exact: true })).toBeVisible();
   expect(writes).toHaveLength(1);
-  await page.getByRole('button', { name: 'Lưu lên hệ thống', exact: true }).click();
+  await page.getByRole('button', { name: 'Lưu lên máy chủ', exact: true }).click();
   expect(writes).toHaveLength(1);
   await page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true }).click();
   await page.getByRole('button', { name: 'Xem bản đã lưu trên hệ thống' }).click();
@@ -486,6 +516,7 @@ test('copying remains usable on narrow screens in light and dark', async ({ page
 });
 
 test('login keeps the guest draft separate until the user explicitly adopts and saves it', async ({ page, baseURL }) => {
+  await page.route('**/api/practice/copying?latest=1', route => route.fulfill({ json: { copy: null } }));
   await page.goto('/tu-tap/chep-kinh');
   await beginScriptureCopying(page);
   const input = page.getByLabel('Tự gõ bản chép của bạn');
@@ -500,18 +531,18 @@ test('login keeps the guest draft separate until the user explicitly adopts and 
   await beginScriptureCopying(page);
   await expect(page.getByRole('button', { name: 'Tiếp tục bản chép khách trong tài khoản' })).toBeVisible();
   await expect(input).toHaveText('');
-  expect(requests).toEqual([]);
+  expect(requests).toEqual(['GET']);
   await page.getByRole('button', { name: 'Tiếp tục bản chép khách trong tài khoản' }).click();
   await acceptAppConfirm(page, 'Tiếp tục bản chép khách trong tài khoản này?');
   await expect(input).toHaveText('Ban chep khach');
-  expect(requests).toEqual([]);
-  await page.getByRole('button', { name: 'Lưu lên hệ thống', exact: true }).click();
-  await expect(page.getByText('Đã lưu lên hệ thống thành công.', { exact: true })).toBeVisible();
-  expect(requests).toEqual(['PUT']);
+  expect(requests).toEqual(['GET']);
+  await page.getByRole('button', { name: 'Lưu lên máy chủ', exact: true }).click();
+  await expect(page.getByText('Đã lưu thành công trên máy chủ.', { exact: true })).toBeVisible();
+  expect(requests).toEqual(['GET', 'PUT']);
   await page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true }).click();
   await page.getByRole('button', { name: 'Giữ bản trên máy thành lượt chép riêng' }).click();
   await acceptAppConfirm(page, 'Giữ nguyên nội dung trên máy thành một lượt chép riêng?');
   await expect(page.getByText('Đã giữ thành lượt riêng trên máy. Chưa gửi lên hệ thống.').filter({ visible: true })).toBeVisible();
   await expect(input).toHaveText('Ban chep khach');
-  expect(requests).toEqual(['PUT']);
+  expect(requests).toEqual(['GET', 'PUT']);
 });

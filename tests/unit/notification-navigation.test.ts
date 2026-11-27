@@ -22,7 +22,7 @@ function harness(href = 'https://app.test/phap-thoai', principal: string | null 
     ({click:handleItemClick, read:()=>Array.from(readIds), open:()=>isOpen});`, {
     goto, saveReadState: save, savePendingReadState: vi.fn(), syncReadState: sync, URL, accountPrincipal: principal,
     document: { activeElement: null, body: {} }, bellButtonEl: null, popoverEl: null,
-    window: { location: { origin: 'https://app.test', href, assign } },
+    window: { location: { origin: new URL(href).origin, href, assign } },
   }) as { click: (item: { id: string; link: string; type?: string; principalId?: string }) => void | Promise<void>; read: () => string[]; open: () => boolean };
   return { ...state, goto, assign, save, sync };
 }
@@ -61,6 +61,21 @@ describe('notification navigation', () => {
     const h = harness();
     await h.click({ id: 'path', link: 'https://app.test//other.test/path' });
     expect(h.goto).toHaveBeenCalledWith('https://app.test//other.test/path');
+    expect(h.assign).not.toHaveBeenCalled();
+  });
+
+  it('opens an iOS notification inside the active WebView and preserves the current practice', async () => {
+    const h = harness('capacitor://localhost/tu-tap?action=rosary#reading');
+    await h.click({ id: 'mindful-reaction:r1', type: 'mindful_prayer', link: '/tu-tap?communityPost=p1&communityReaction=r1' });
+    expect(h.goto).toHaveBeenCalledWith('capacitor://localhost/tu-tap?action=rosary&communityPost=p1&communityReaction=r1#reading');
+    expect(h.assign).not.toHaveBeenCalled();
+    expect(h.read()).toEqual(['mindful-reaction:r1']);
+  });
+
+  it('only accepts a Capacitor URL for the current WebView host', async () => {
+    const h = harness('capacitor://localhost/ca-nhan');
+    await h.click({ id: 'other-host', link: 'capacitor://elsewhere/tu-tap' });
+    expect(h.goto).not.toHaveBeenCalled();
     expect(h.assign).not.toHaveBeenCalled();
   });
 

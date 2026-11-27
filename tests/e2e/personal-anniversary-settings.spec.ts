@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 async function verifyTimingGeometry(page: Page, timing: Locator) {
   const times = timing.locator('input[type="time"]');
@@ -118,6 +120,8 @@ test(`inline personal events stay drafts until a valid save and use the device d
   await expect.poll(saved).not.toBe(initial);
   const success = page.locator('#personal-events-settings .reminder-feedback-badge[role="status"]');
   await expect(success).toHaveText('Đã lưu ngày lễ');
+  await expect(alert.getByRole('heading')).toHaveText('Đã thêm ngày lễ cá nhân');
+  await alert.getByRole('button', { name: 'Đóng', exact: true }).click();
   await success.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath(`personal-saved-${theme}.png`) });
   await page.locator('.personal-inline-card').getByRole('button', { name: 'Sửa', exact: true }).click();

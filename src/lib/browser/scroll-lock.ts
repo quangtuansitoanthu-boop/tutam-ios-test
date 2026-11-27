@@ -1,5 +1,28 @@
+import { isNativeApp, nativePlatform } from './native-platform';
+
 const owners = new Set<symbol>();
 let restoreOverflow: Array<() => void> = [];
+
+function fixIosBackground(): () => void {
+  if (typeof window === 'undefined' || !isNativeApp() || nativePlatform() !== 'ios') return () => {};
+  const style = document.body.style;
+  const left = window.scrollX;
+  const top = window.scrollY;
+  const values: Record<string, string> = {
+    position: 'fixed', top: `${-top}px`, left: '0', right: '0', width: '100%', 'overscroll-behavior': 'none',
+  };
+  const previous = Object.keys(values).map(property => ({
+    property, value: style.getPropertyValue(property), priority: style.getPropertyPriority(property),
+  }));
+  for (const [property, value] of Object.entries(values)) style.setProperty(property, value, 'important');
+  return () => {
+    for (const { property, value, priority } of previous) {
+      if (value) style.setProperty(property, value, priority);
+      else style.removeProperty(property);
+    }
+    window.scrollTo({ left, top, behavior: 'instant' });
+  };
+}
 
 function lockOverflow(style: CSSStyleDeclaration): () => void {
   const properties = ['overflow', 'overflow-x', 'overflow-y'];
@@ -30,6 +53,7 @@ export function acquireScrollLock(): () => void {
     restoreOverflow = [document.body, document.documentElement]
       .filter((element): element is HTMLElement => Boolean(element))
       .map((element) => lockOverflow(element.style));
+    restoreOverflow.push(fixIosBackground());
   }
   owners.add(owner);
   return () => {

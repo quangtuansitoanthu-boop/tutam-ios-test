@@ -278,14 +278,24 @@ export async function showUnifiedNotification(
  */
 export async function scheduleUnifiedNotifications(
   items: UnifiedNotificationScheduleOptions[],
+  replacement?: { obsoleteIds: number[]; pendingIds: number[] },
 ): Promise<boolean> {
-  if (items.length === 0) return true;
+  if (items.length === 0) {
+    if (replacement) await cancelUnifiedNotifications(replacement.obsoleteIds, true);
+    return true;
+  }
 
   if (isNativeApp()) {
+    const iosReplacement = nativePlatform() === 'ios' ? replacement : undefined;
+    let scheduled = false;
     try {
       await ensureNotificationChannel();
       const { LocalNotifications } = await import('@capacitor/local-notifications');
-      await LocalNotifications.schedule({
+      // Older installed shells cannot restore exact native requests after a pre-cancel.
+      // Keep their previous schedule rather than exceed the OS queue while replacing it.
+      if (iosReplacement && !supportsTransactionalReplacement
+        && new Set([...iosReplacement.pendingIds, ...items.map(item => item.id)]).size > 64) return false;
+      const options = {
         notifications: items.map((item) => ({
           id: item.id,
           title: item.title,
@@ -299,9 +309,14 @@ export async function scheduleUnifiedNotifications(
           schedule: item.schedule as any,
           extra: item.extra ?? null,
         })),
-      });
+        ...(iosReplacement && supportsTransactionalReplacement ? { replaceReminderIds: iosReplacement.obsoleteIds } : {}),
+      };
+      await LocalNotifications.schedule(options);
+      scheduled = true;
+      if (iosReplacement && !supportsTransactionalReplacement) await cancelUnifiedNotifications(iosReplacement.obsoleteIds, true);
       return true;
     } catch (err) {
+      if (scheduled && iosReplacement && !supportsTransactionalReplacement) throw err;
       console.error('Failed to schedule native notifications:', err);
       return false;
     }
@@ -313,6 +328,7 @@ export async function scheduleUnifiedNotifications(
 }
 
 const reminderTypes = new Set(['daily_schedule', 'lunar_eve', 'lunar_morning', 'personal_eve', 'personal_morning']);
+let supportsTransactionalReplacement = false;
 /** Pending cancellation does not remove private content already visible in Notification Center. */
 export async function clearDeliveredPersonalReminderNotifications(): Promise<void> {
   if (!isNativeApp()) return;
@@ -332,7 +348,10 @@ export function isReminderNotification(item: { extra?: Record<string, unknown> }
 export async function getPendingReminderNotifications(includeUnowned = false): Promise<Array<{ id: number; extra?: Record<string, unknown> }>> {
   if (!isNativeApp()) return [];
   const { LocalNotifications } = await import('@capacitor/local-notifications');
-  const { notifications } = await LocalNotifications.getPending();
+  const result = await LocalNotifications.getPending();
+  const { notifications } = result;
+  supportsTransactionalReplacement = nativePlatform() === 'ios'
+    && (result as typeof result & { transactionalReplacement?: boolean }).transactionalReplacement === true;
   return includeUnowned ? notifications : notifications.filter(isReminderNotification);
 }
 

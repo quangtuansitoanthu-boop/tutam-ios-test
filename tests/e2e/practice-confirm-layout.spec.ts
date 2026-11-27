@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
 
 for (const width of [375, 1440]) for (const dark of [false, true]) {
   test(`practice confirmation covers the viewport without native dialog borders ${width} dark=${dark}`, async ({ page }, info) => {
@@ -33,7 +35,7 @@ for (const width of [375, 1440]) {
     await page.setViewportSize({ width, height: 850 });
     await page.goto('/tu-tap/chep-kinh');
     await settleClient(page);
-    const header = await page.locator('.tt-topbar').boundingBox();
+    const header = await page.locator('.qts-nav').boundingBox();
     const title = await page.locator('.choose-header h1').boundingBox();
     expect(header).not.toBeNull();
     expect(title).not.toBeNull();

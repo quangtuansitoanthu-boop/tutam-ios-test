@@ -564,7 +564,7 @@
   .comments__fab:hover,.comments__fab:active,.comments__fab:focus-visible{opacity:1;transform:translateY(-2px);box-shadow:0 8px 24px color-mix(in srgb,var(--gold) 55%,transparent)}
   .comments__fab:active{cursor:grabbing}
   .comments__fab.open{opacity:0;pointer-events:none}
-  .comments__notice{position:fixed;z-index:9999;bottom:92px;left:50%;max-width:calc(100vw - 32px);padding:10px 18px;border-radius:22px;background:var(--brown-dark);box-shadow:var(--shadow-lg);color:#fff;font-size:13px;font-weight:700;transform:translateX(-50%);animation:commentNoticeIn .25s ease-out}
+  .comments__notice{position:fixed;z-index:9999;bottom:calc(max(var(--bottom-nav-clearance,0px),var(--audio-player-top,0px)) + var(--radius-control));left:50%;max-width:calc(100vw - 32px);padding:10px 18px;border-radius:22px;background:var(--text);box-shadow:var(--shadow-lg);color:var(--bg);font-size:13px;font-weight:700;transform:translateX(-50%);animation:commentNoticeIn .25s ease-out}
   @keyframes commentNoticeIn{from{opacity:0;transform:translate(-50%,16px)}to{opacity:1;transform:translate(-50%,0)}}
   .comment-form-panel{position:fixed;left:0;right:0;bottom:0;z-index:741;max-height:90dvh;overflow-y:auto;margin:0;padding:0;border:0;border-top:2px solid var(--gold);border-radius:0;background:var(--card);box-shadow:0 -8px 32px rgba(0,0,0,.15);color:var(--text);transform:translateY(100%);visibility:hidden;pointer-events:none;transition:transform .3s cubic-bezier(.34,1.1,.64,1),visibility 0s .3s}
   .comment-form-panel.open{transform:translateY(0);visibility:visible;pointer-events:auto;transition:transform .3s cubic-bezier(.34,1.1,.64,1),visibility 0s}
@@ -611,4 +611,5 @@
   .comment-form-panel{line-height:normal}
   .cf-input{font-family:inherit;font-size:14px;font-weight:400;line-height:normal}
   @media(max-width:600px){.cf-input{font-size:16px}}
+  :global(:root[data-native-app='true']) .comment-form-panel{bottom:var(--bottom-nav-clearance);max-height:calc(100dvh - var(--bottom-nav-clearance) - var(--app-safe-top,0px))}
 </style>

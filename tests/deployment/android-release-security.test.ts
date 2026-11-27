@@ -96,3 +96,16 @@ it('leaves notification permission requests to the reminder opt-in flow', () => 
   expect(readFileSync('android/app/src/main/AndroidManifest.xml', 'utf8'))
     .toContain('android.permission.POST_NOTIFICATIONS');
 });
+it('uses Locale.ROOT for MIME type case folding and marks non-translated Android strings', () => {
+  expect(activity).toContain('path.toLowerCase(java.util.Locale.ROOT)');
+  const stringsXml = readFileSync('android/app/src/main/res/values/strings.xml', 'utf8');
+  const entries = [...stringsXml.matchAll(/<string\b([^>]*)>/gu)];
+  expect(entries.length).toBeGreaterThan(0);
+  for (const [, attrs] of entries) {
+    expect(attrs).toContain('translatable="false"');
+  }
+});
+it('routes Capacitor imports exclusively through src/lib/browser wrappers', () => {
+  const modal = readFileSync('src/lib/components/notifications/NotificationPromptModal.svelte', 'utf8');
+  expect(modal).not.toMatch(/['"]@capacitor\//u);
+});

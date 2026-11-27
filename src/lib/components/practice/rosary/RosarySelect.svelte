@@ -118,7 +118,6 @@
     border:1px solid var(--border);border-bottom:0;
     border-radius:var(--radius-feature,24px) var(--radius-feature,24px) 0 0;
     box-shadow:0 -8px 32px rgba(0,0,0,0.22);font-weight:700;
-    transform:translateY(100%);
     will-change:transform
   }
   .rosary-select__dialog[open] .rosary-select__panel{

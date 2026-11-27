@@ -111,8 +111,16 @@ export async function probePdfTotalBytes(
   fetcher: typeof fetch = fetch,
   signal?: AbortSignal,
 ): Promise<number | null> {
+  return probePdfTotalBytesAtUrl(resolvePdfRequestUrl(sourceUrl), fetcher, signal);
+}
+
+/** Probe the transport that just succeeded; do not remap a direct fallback back to the proxy. */
+async function probePdfTotalBytesAtUrl(
+  targetUrl: string,
+  fetcher: typeof fetch,
+  signal?: AbortSignal,
+): Promise<number | null> {
   throwIfAborted(signal);
-  const targetUrl = resolvePdfRequestUrl(sourceUrl);
   try {
     const head = await fetcher(targetUrl, { method: 'HEAD', cache: 'no-store', signal });
     throwIfAborted(signal);
@@ -206,6 +214,7 @@ async function performDownload(
   if (quota.hardLimitBytes <= 0) throw new Error('offline_pdf_quota_exceeded');
 
   const fetchUrl = resolvePdfRequestUrl(input.sourceUrl);
+  let responseUrl = fetchUrl;
 
   const fetcher = options.fetcher ?? fetch;
   let response: Response;
@@ -219,6 +228,7 @@ async function performDownload(
   } catch (err) {
     if (options.signal?.aborted) throw err;
     if (fetchUrl === input.sourceUrl) throw err;
+    responseUrl = input.sourceUrl;
     response = await fetcher(input.sourceUrl, {
       cache: 'no-store',
       signal: options.signal,
@@ -228,7 +238,7 @@ async function performDownload(
 
   let total = declaredResponseSize(response);
   if (total === null) {
-    total = await probePdfTotalBytes(fetchUrl, fetcher, options.signal);
+    total = await probePdfTotalBytesAtUrl(responseUrl, fetcher, options.signal);
   }
   const bytes = await readResponseWithinLimit(response, quota.hardLimitBytes, options.signal, options.onProgress, total);
   const sourceRespVersion = sourceVersion(response, bytes.byteLength);

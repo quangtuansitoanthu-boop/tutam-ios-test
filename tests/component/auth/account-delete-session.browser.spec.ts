@@ -66,7 +66,7 @@ it('does not send account deletion while a native login can still commit its coo
   } finally { release(); }
 });
 
-it('keeps the cookie transaction until the Apple retry finishes, including cancellation', async () => {
+it('releases the settled cookie transaction during Apple reauthorization, including cancellation', async () => {
   mocks.native.mockReturnValue(true);
   mocks.request.mockResolvedValueOnce(Response.json({ code: 'apple_reauthentication_required' }, { status: 409 }));
   let cancel!: () => void;
@@ -76,13 +76,36 @@ it('keeps the cookie transaction until the Apple retry finishes, including cance
   const held = isNativeAuthMutationActive();
   const competing = beginNativeAuthMutation(); competing?.();
   cancel(); await tick(); await tick();
-  expect(held).toBe(true);
-  expect(competing).toBeNull();
+  expect(held).toBe(false);
+  expect(competing).toBeTypeOf('function');
   expect(isNativeAuthMutationActive()).toBe(false);
   expect(mocks.clearBrowser).not.toHaveBeenCalled();
 });
 
-it('opts initial deletion and Apple credential retry into preserving newer cookies', async () => {
+it('allows live CSRF refresh during Apple reauthorization and reacquires the cookie lease before retry', async () => {
+  mocks.native.mockReturnValue(true);
+  mocks.csrf.mockImplementation(async () => {
+    expect(isNativeAuthMutationActive()).toBe(false);
+    return 'csrf-a';
+  });
+  mocks.apple.mockImplementationOnce(async () => {
+    expect(isNativeAuthMutationActive()).toBe(false);
+    return { appleIdentityToken: 'fresh-apple-token', appleAuthorizationCode: 'fresh-apple-code' };
+  });
+  mocks.request.mockImplementation(async () => {
+    expect(isNativeAuthMutationActive()).toBe(true);
+    return mocks.request.mock.calls.length === 1
+      ? Response.json({ code: 'apple_reauthentication_required' }, { status: 409 })
+      : Response.json({ error: 'unavailable' }, { status: 503 });
+  });
+  await confirmDeletion();
+  await vi.waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
+  expect(mocks.csrf).toHaveBeenCalledTimes(2);
+  expect(mocks.apple).toHaveBeenCalledOnce();
+  expect(mocks.clearBrowser).not.toHaveBeenCalled();
+});
+
+it('expires the native cookie under the lease for initial deletion and Apple credential retry', async () => {
   mocks.native.mockReturnValue(true);
   mocks.request.mockResolvedValueOnce(Response.json({ code: 'apple_reauthentication_required' }, { status: 409 }))
     .mockResolvedValueOnce(Response.json({ error: 'unavailable' }, { status: 503 }));
@@ -93,8 +116,8 @@ it('opts initial deletion and Apple credential retry into preserving newer cooki
     expect(path).toBe('/api/auth/delete-account');
     expect(request).toMatchObject({ method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': 'csrf-a' } });
   }
-  expect(JSON.parse(first[1].body)).toEqual({ preserveSessionCookie: true });
-  expect(JSON.parse(retry[1].body)).toEqual({ preserveSessionCookie: true, appleIdentityToken: 'fresh-apple-token', appleAuthorizationCode: 'fresh-apple-code' });
+  expect(JSON.parse(first[1].body)).toEqual({ preserveSessionCookie: false });
+  expect(JSON.parse(retry[1].body)).toEqual({ preserveSessionCookie: false, appleIdentityToken: 'fresh-apple-token', appleAuthorizationCode: 'fresh-apple-code' });
   expect(mocks.clearBrowser).not.toHaveBeenCalled();
 });
 
@@ -147,8 +170,8 @@ it.each([
   await vi.waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(2));
   expect(mocks.apple).toHaveBeenCalledOnce();
   expect(mocks.request.mock.invocationCallOrder[0]).toBeLessThan(mocks.apple.mock.invocationCallOrder[0]);
-  expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toEqual({ preserveSessionCookie: true });
-  expect(JSON.parse(mocks.request.mock.calls[1][1].body)).toEqual({ appleIdentityToken: 'fresh-apple-token', appleAuthorizationCode: 'fresh-apple-code', preserveSessionCookie: true });
+  expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toEqual({ preserveSessionCookie: false });
+  expect(JSON.parse(mocks.request.mock.calls[1][1].body)).toEqual({ appleIdentityToken: 'fresh-apple-token', appleAuthorizationCode: 'fresh-apple-code', preserveSessionCookie: false });
   await tick();
   expect(mocks.logout).not.toHaveBeenCalled();
   expect(mocks.clearLocal).not.toHaveBeenCalled();

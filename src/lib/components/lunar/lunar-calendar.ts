@@ -1,4 +1,10 @@
 export interface LunarDay { day: number; month: number; year: number; leap: boolean; }
+
+export function lunarMonthLength(date: Date, lunar: LunarDay): 29 | 30 {
+  const candidate = new Date(date);
+  candidate.setDate(date.getDate() + (30 - lunar.day));
+  return solarToLunar(candidate.getDate(), candidate.getMonth() + 1, candidate.getFullYear()).day === 30 ? 30 : 29;
+}
 const integer = Math.floor;
 
 export function julianDay(day: number, month: number, year: number): number {

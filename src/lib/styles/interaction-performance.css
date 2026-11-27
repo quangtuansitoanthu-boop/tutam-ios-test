@@ -70,3 +70,5 @@
 :root[data-native-app='true'] .qts-bottom-nav__item:active {
   transform: none;
 }
+
+:root:is([data-native-app='true'],[data-performance='efficient']) :is(select:not([multiple]),.settings-section,.reminder-master-row){backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:var(--card)!important}

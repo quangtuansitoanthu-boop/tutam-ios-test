@@ -41,11 +41,16 @@ export function createPracticeReaderProgressClient(
     return createReadingActivityClient(async (url, init) => {
       if (capturedGeneration !== generation) throw new Error('reading_principal_changed');
       const requestInit = { ...init, signal: init?.signal ?? reads.signal };
-      const native = fetcher === fetch && typeof url === 'string'
-        ? await fetchNativeJsonMutation(url, requestInit) : null;
-      const response = native ?? await fetcher(url, requestInit);
-      if (capturedGeneration !== generation) throw new Error('reading_principal_changed');
-      return response;
+      try {
+        const native = fetcher === fetch && typeof url === 'string'
+          ? await fetchNativeJsonMutation(url, requestInit) : null;
+        const response = native ?? await fetcher(url, requestInit);
+        if (capturedGeneration !== generation) throw new Error('reading_principal_changed');
+        return response;
+      } catch (error) {
+        if (capturedGeneration !== generation) throw new Error('reading_principal_changed');
+        throw error;
+      }
     }, storage);
   };
   let client = newClient();
@@ -61,7 +66,9 @@ export function createPracticeReaderProgressClient(
       let applied = 0;
       while (flushRequested && capturedGeneration === generation) {
         flushRequested = false;
-        applied += await capturedClient.flush({ retryRebasedProgress: true });
+        const count = await capturedClient.flush({ retryRebasedProgress: true });
+        if (capturedGeneration !== generation) throw new Error('reading_principal_changed');
+        applied += count;
       }
       return applied;
     })();

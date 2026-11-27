@@ -53,6 +53,19 @@ it.each([
  expect(document.querySelector('.content-experience-notice em')?.textContent).toBe(copy);
 });
 
+it('dismisses the 10s experience notice manually via the close button and resets on reopen', async () => {
+ component = mount(Harness, { target: document.body }); await settle(); await settle();
+ component.showBook('tt_1781081372340_1_xqcxo'); await settle(); await settle();
+ const closeBtn = document.querySelector<HTMLButtonElement>('.content-experience-notice .cen-close');
+ expect(closeBtn).not.toBeNull();
+ expect(closeBtn?.getAttribute('aria-label')).toBe('Đóng thông báo');
+ closeBtn!.click(); flushSync();
+ expect(document.querySelector('.content-experience-notice')).toBeNull();
+ expect(document.querySelector('.reader-modal')).not.toBeNull();
+ component.showBook(null); flushSync(); component.showBook('tt_1781081372340_1_xqcxo'); await settle(); await settle();
+ expect(document.querySelector('.content-experience-notice')).not.toBeNull();
+});
+
 it('does not write reading progress for notice-collapse clamping, while retaining a later real scroll', async () => {
  io.preserved.mockResolvedValue(false);
  component = mount(Harness, { target: document.body }); await settle(); await settle();

@@ -1,4 +1,13 @@
 import { expect, test } from '@playwright/test';
+import { deferStartupNotification } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
+  page.on('dialog', dialog => dialog.accept());
+  // Các bài hồi quy cũ giữ nháp local khi quay lại; hành vi xác nhận được kiểm tra riêng.
+  await page.addLocatorHandler(page.getByRole('dialog', { name: /^(Lưu bản chép trước khi rời\?|Save your copy before leaving\?)$/ }), dialog =>
+    dialog.getByRole('button', { name: /^(Rời không lưu|Leave without saving)$/ }).click());
+});
 
 for (const locale of ['vi', 'en'] as const) {
   test(`copying preparation ${locale} keeps drafts and adds no cloud requests`, async ({ page }, testInfo) => {
@@ -16,10 +25,12 @@ for (const locale of ['vi', 'en'] as const) {
     const collapse = () => guide.getByRole('button', { name: locale === 'vi' ? 'Thu gọn' : 'Collapse', exact: true });
     await expect(expand()).toHaveAttribute('aria-expanded', 'false');
     await expect(guide.locator('section').first()).toBeHidden();
-    await expand().click();
+    // Safari does not focus a button on pointer click; test keyboard focus retention explicitly.
+    await expand().focus();
+    await expand().press('Enter');
     await expect(collapse()).toHaveAttribute('aria-expanded', 'true');
     await expect(guide.locator('section:visible')).toHaveCount(6);
-    await collapse().click();
+    await collapse().press('Enter');
     await expect(guide.locator('section:visible')).toHaveCount(0);
     await expect(expand()).toBeFocused();
     await expect(guide.locator('section')).toHaveCount(6);
@@ -45,24 +56,32 @@ for (const locale of ['vi', 'en'] as const) {
     await editor.pressSequentially('Nam mô Phật');
     await expect(page.getByText(locale === 'vi' ? 'Đã lưu trên máy' : 'Saved on this device', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: locale === 'vi' ? 'Đổi kinh hoặc phẩm' : 'Change scripture or chapter', exact: true }).click();
+    await expect(page.locator('.books')).toBeVisible();
     await page.getByTestId('start-copying').click();
     await expect(guide).toBeVisible();
     await expect(expand()).toHaveAttribute('aria-expanded', 'false');
     await expect(editor).toHaveCount(0);
-    await page.locator('.tt-topbar .tt-back-btn').click();
+    const back = page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true })
+      .getByRole('button', { name: locale === 'vi' ? 'Quay lại' : 'Back', exact: true });
+    await back.click();
     await page.locator('.books button').first().click();
     await expect(guide).toBeVisible();
     await page.getByTestId('confirm-copying-guide').click();
     await expect(editor).toHaveText('Nam mô Phật');
     await page.getByRole('button', { name: locale === 'vi' ? 'Đổi kinh hoặc phẩm' : 'Change scripture or chapter', exact: true }).click();
+    await expect(page.locator('.books')).toBeVisible();
     for (let index = 0; index < 3; index += 1) {
       const book = page.locator('.books button').nth(index);
       const title = await book.locator('strong').innerText();
       await book.click();
       await expect(guide).toBeVisible();
-      await expect(page.locator('.choose-header > p')).toHaveText(title);
+      for (const heading of [page.locator('.choose-header > p'), page.locator('#copy-preparation-book')]) {
+        await expect(heading).toHaveText(title, { useInnerText: true });
+        await expect(heading).toHaveCSS('text-align', 'center');
+        await expect(heading).toHaveCSS('font-weight', '700');
+      }
       await expect(guide.locator('section')).toHaveCount(6);
-      await page.locator('.tt-topbar .tt-back-btn').click();
+      await back.click();
     }
     expect(cloudRequests).toEqual([]);
   });

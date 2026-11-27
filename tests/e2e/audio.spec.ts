@@ -1,10 +1,18 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { principalStorageKey } from '../../src/lib/browser/principal-storage';
 import { readFileSync } from 'node:fs';
 import { loginAsMember, loginAsAdmin, settleClient, logoutThroughAccount, useNativeApiWithLocalBackend } from './runtime-helpers';
 
 const memberStorageKey = (key: string) => principalStorageKey('e2e-member', key);
 const offlineTalks = JSON.parse(readFileSync('src/lib/data/offline-talks.json', 'utf8')) as Array<{ id: string; tieu_de: string }>;
+const dreamStories = 'Các câu chuyện được kể trong album này đều từ những giấc mơ độ vong của chị Hoa và các anh thầy pháp, đây đều là các trải nghiệm cá nhân, không khẳng định tất cả đều là sự thực, do đó quý vị tin thì suy ngẫm, không tin xem giải trí, mong quý vị tôn trọng và không phỉ báng các nội dung có trong sách ạ';
+const journeys = 'Sách này dựa trên trải nghiệm cá nhân trong các giấc mộng của cư sĩ Dương Sinh ở Thánh Hiền đường, không khẳng định tất cả đều là sự thực, do đó quý vị tin thì suy ngẫm, không tin xem giải trí, mong quý vị tôn trọng và không phỉ báng các nội dung có trong sách ạ';
+const hueHienDreams = 'Các câu chuyện được kể trong album này đều từ những giấc mơ của cư sĩ Thích Nữ Huệ Hiền, đây đều là các trải nghiệm cá nhân, không khẳng định tất cả đều là sự thực, do đó quý vị tin thì suy ngẫm, không tin xem giải trí, mong quý vị tôn trọng và không phỉ báng các nội dung có trong sách ạ';
+async function dismissFirstRunNotification(page: Page): Promise<void> {
+  const prompt = page.getByRole('dialog', { name: 'Thông báo tu tập' });
+  await prompt.getByRole('button', { name: 'Để sau', exact: true }).click();
+  await expect(prompt).toHaveCount(0);
+}
 // Logout revokes the real session; each configured project owns its fixture.
 const audioPrincipalSessions = new Map([
   ['mobile-390-light', 'e2e-audio-logout-mobile-390-light-session-token'],
@@ -15,9 +23,9 @@ const audioPrincipalSessions = new Map([
 
 test.describe('Pháp Thoại public and download contracts', () => {
   for (const [bookId, title, message] of [
-    ['tt_1781452671270', 'ĐỊA NGỤC DU KÝ', 'Sách này dựa trên trải nghiệm cá nhân trong các giấc mộng của cư sĩ Dương Sinh ở Thánh Hiền đường, quý vị tin thì suy ngẫm, không tin xem giải trí'],
-    ['tt_1781517395283', 'LUÂN HỒI DU KÝ', 'Sách này dựa trên trải nghiệm cá nhân trong các giấc mộng của cư sĩ Dương Sinh ở Thánh Hiền đường, quý vị tin thì suy ngẫm, không tin xem giải trí'],
-    ['tt_1781081372340_1_xqcxo', 'SỨ MỆNH ĐỘ VONG', 'Các câu chuyện được kể trong album này đều từ những giấc mơ độ vong của chị Hoa và các anh thầy pháp, đây đều là các trải nghiệm cá nhân, do đó quý vị tin thì quý vị suy ngẫm, không tin xem giải trí ạ'],
+    ['tt_1781452671270', 'ĐỊA NGỤC DU KÝ', journeys],
+    ['tt_1781517395283', 'LUÂN HỒI DU KÝ', journeys],
+    ['tt_1781081372340_1_xqcxo', 'SỨ MỆNH ĐỘ VONG', dreamStories],
   ]) {
     test(`approved book notice keeps the reader open after ten seconds: ${title}`, async ({ page }) => {
       await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -28,6 +36,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
       await settleClient(page);
       const card = page.locator('.art-card').filter({ hasText: title });
       await expect(card).toHaveCount(1);
+      await dismissFirstRunNotification(page);
       await page.clock.install({ time: new Date('2026-11-18T08:00:00Z') });
       await page.clock.pauseAt(new Date('2026-11-18T08:00:01Z'));
       await card.locator('.art-card__open').click();
@@ -53,12 +62,11 @@ test.describe('Pháp Thoại public and download contracts', () => {
     });
   }
 
-  const dreamStories = 'Các câu chuyện được kể trong album này đều từ những giấc mơ độ vong của chị Hoa và các anh thầy pháp, đây đều là các trải nghiệm cá nhân, do đó quý vị tin thì quý vị suy ngẫm, không tin xem giải trí ạ';
   for (const [albumId, noticeText] of [
     ['pt_drive_c435791b562e6f6e9d345b414df4a273', dreamStories],
     ['pt_drive_f72e42f4cbb7db4312f96f4a1f28e2b4', dreamStories],
-    ['pt_drive_74959767068eaae1db4846f62b62eda8', 'Sách này dựa trên trải nghiệm cá nhân trong các giấc mộng của cư sĩ Dương Sinh ở Thánh Hiền đường, quý vị tin thì suy ngẫm, không tin xem giải trí'],
-    ['pt_1781961851755', 'Các câu chuyện được kể trong album này đều từ những giấc mơ của cư sĩ Thích Nữ Huệ Hiền, đây đều là các trải nghiệm cá nhân, do đó quý vị tin thì quý vị suy ngẫm, không tin xem giải trí ạ'],
+    ['pt_drive_74959767068eaae1db4846f62b62eda8', journeys],
+    ['pt_1781961851755', hueHienDreams],
   ]) {
   test(`shows the approved justified Bookerly story notice without adding API requests: ${albumId}`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -67,17 +75,22 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await page.route(/\/api\/talks(?:\?|$)/u, route => route.fulfill({ json: [album] }));
     await page.goto('/phap-thoai');
     await settleClient(page);
+    await dismissFirstRunNotification(page);
+    const opener = page.locator('.pt-card').filter({ hasText: album.tieu_de }).locator('.pt-card-thumb');
+    await expect(opener).toBeVisible();
+    await page.waitForLoadState('networkidle');
     const withSavedPosition = albumId === 'pt_drive_f72e42f4cbb7db4312f96f4a1f28e2b4';
     if (withSavedPosition) {
       await page.evaluate(({ key, id }) => {
         localStorage.setItem(key, JSON.stringify({ albumId: id, trackIndex: 0, pos: 63, savedAt: Date.now() }));
       }, { key: memberStorageKey(`tutam_pt_pos_${albumId}`), id: albumId });
     }
-    await page.clock.install({ time: new Date('2026-11-18T08:00:00Z') });
-    await page.clock.pauseAt(new Date('2026-11-18T08:00:01Z'));
+    const now = Date.now();
+    await page.clock.install({ time: new Date(now) });
+    await page.clock.pauseAt(new Date(now + 1000));
     const extraApiRequests: string[] = [];
     page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/')) extraApiRequests.push(request.url()); });
-    await page.locator('.pt-card').filter({ hasText: album.tieu_de }).locator('.pt-card-thumb').click();
+    await opener.click();
     const notice = page.getByRole('complementary', { name: 'Lưu ý về nội dung' });
     await expect(notice).toBeVisible();
     await expect(notice.locator('em')).toHaveText(noticeText);
@@ -224,12 +237,15 @@ test.describe('Pháp Thoại public and download contracts', () => {
     }] }));
     let metadataRequests = 0;
     let mediaRequests = 0;
+    let finishMedia!: () => void;
+    const pendingMedia = new Promise<void>(resolve => { finishMedia = resolve; });
     await page.route('https://archive.org/metadata/e2e-sized/files', (route) => {
       metadataRequests++;
       return route.fulfill({ json: { result: [{ name: 'track.mp3', size: '2500000' }] } });
     });
-    await page.route('https://archive.org/download/e2e-sized/track.mp3', (route) => {
+    await page.route('https://archive.org/download/e2e-sized/track.mp3', async (route) => {
       mediaRequests++;
+      await pendingMedia;
       return route.fulfill({ body: 'test audio', contentType: 'audio/mpeg' });
     });
     await page.goto('/phap-thoai');
@@ -245,9 +261,29 @@ test.describe('Pháp Thoại public and download contracts', () => {
     expect(metadataRequests).toBe(1);
     expect(mediaRequests).toBe(0);
     await page.screenshot({ path: `test-results/offline-confirm-${test.info().project.name}.png` });
-    await confirmation.getByRole('button', { name: 'Có, tải offline' }).click();
-    await expect.poll(() => mediaRequests).toBe(1);
-    await expect(confirmation).toHaveCount(0);
+    try {
+      await confirmation.getByRole('button', { name: 'Có, tải offline' }).click();
+      await expect.poll(() => mediaRequests).toBe(1);
+      await expect(confirmation).toHaveCount(0);
+
+      const progress = page.getByRole('dialog', { name: 'Đang tải album Pháp thoại...' });
+      const card = progress.locator('.audio-offline-modal-card');
+      await expect(card).toBeVisible();
+      await page.setViewportSize({ width: 375, height: 230 });
+      await expect.poll(async () => {
+        const bounds = await card.boundingBox();
+        return bounds !== null && bounds.y >= 0 && bounds.y + bounds.height <= 230;
+      }).toBe(true);
+
+      const beforeScroll = (await card.boundingBox())!;
+      await page.mouse.move(1, 120);
+      await page.mouse.wheel(0, 260);
+      await expect.poll(() => card.boundingBox()).toEqual(beforeScroll);
+      await progress.getByRole('button', { name: 'Hủy tải', exact: true }).click();
+      await expect(progress).toHaveCount(0);
+    } finally {
+      finishMedia();
+    }
   });
 
   test('keeps playback active when navigating away from Pháp Thoại', async ({ page }) => {
@@ -293,6 +329,50 @@ test.describe('Pháp Thoại public and download contracts', () => {
           >= Math.ceil(bar.getBoundingClientRect().height + parseFloat(getComputedStyle(bar).bottom));
       })).toBe(true);
     }
+  });
+
+  test('reveals the dismissed player when the listener plays the same album again', async ({ page }) => {
+    await loginAsMember(page);
+    // Keep playback active while the listener swipes and returns to the same track.
+    await page.route('**/assets/audio/tieng-mo.m4a', route =>
+      route.fulfill({ path: 'assets/audio/nhac-thien-01.m4a', contentType: 'audio/mp4' }));
+    await page.goto('/phap-thoai');
+    await settleClient(page);
+    const card = page.locator('.pt-card').filter({ hasText: 'Pháp thoại kiểm thử E2E' });
+    await card.locator('.pt-card-thumb').click();
+    const album = page.locator('.album-dialog');
+    const track = album.getByRole('button', { name: 'Phát Tiếng mõ kiểm thử', exact: true });
+    const bar = page.getByRole('region', { name: 'Trình phát Pháp Thoại' });
+    const albumBottom = () => album.evaluate(node => node.getBoundingClientRect().bottom);
+    const initialBottom = await albumBottom();
+    await track.click();
+
+    for (const play of [track, album.locator('.pt-as-play-all-btn')]) {
+      await expect(bar.getByRole('button', { name: 'Tạm dừng' })).toBeVisible();
+      if (page.viewportSize()!.width <= 768) {
+        await expect.poll(async () => (await albumBottom()) - (await bar.boundingBox())!.y).toBeLessThanOrEqual(1);
+      }
+      const hint = bar.locator('.pt-mp-swipe-hint');
+      const bounds = (await hint.boundingBox())!;
+      const y = bounds.y + bounds.height / 2;
+      await page.mouse.move(bounds.x + bounds.width * 0.25, y);
+      await page.mouse.down();
+      await page.mouse.move(bounds.x + bounds.width * 0.65, y, { steps: 8 });
+      await page.mouse.up();
+      await expect(bar).toHaveCount(0);
+      if (page.viewportSize()!.width <= 768) await expect.poll(albumBottom).toBeCloseTo(initialBottom, 0);
+      await expect(album.locator('.pt-as-track-item.active')).toHaveCount(1);
+      await play.click();
+    }
+    await expect(bar.getByRole('button', { name: 'Tạm dừng' })).toBeVisible();
+    await bar.getByRole('button', { name: 'Tạm dừng' }).click();
+    await expect(bar.getByRole('button', { name: 'Phát', exact: true })).toBeVisible();
+    await bar.getByRole('button', { name: 'Mở rộng trình phát Pháp Thoại' }).click();
+    const expanded = page.getByRole('dialog', { name: 'Chi tiết trình phát Pháp Thoại' });
+    await expect(expanded).toBeVisible();
+    await expanded.press('Escape');
+    await expect(expanded).toHaveCount(0);
+    await expect(album).toBeVisible();
   });
 
   test('keeps playback mounted through browser Back navigation', async ({ page }) => {
@@ -406,6 +486,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
 
     await page.goto('/phap-thoai');
     await settleClient(page);
+    await dismissFirstRunNotification(page);
 
     const saveResumePosition = () => page.evaluate((position) => {
       localStorage.setItem(position.key, JSON.stringify(position.value));
@@ -548,6 +629,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await loginAsMember(page);
     await page.goto('/phap-thoai');
     await settleClient(page);
+    await dismissFirstRunNotification(page);
 
     const albumName = 'Pháp thoại kiểm thử E2E';
     const card = page.locator('.pt-card').filter({ hasText: albumName });
@@ -641,6 +723,10 @@ test.describe('Pháp Thoại public and download contracts', () => {
 
   test('member can browse and start playback', async ({ page }) => {
     await loginAsMember(page);
+    const reminder = page.getByRole('dialog', { name: 'Thông báo tu tập' });
+    await page.addLocatorHandler(reminder, () => reminder.getByRole('button', { name: 'Để sau' }).click());
+    await page.route('**/assets/branding/tu-tap-logo.png', route =>
+      route.fulfill({ path: 'assets/branding/tu-tap-logo.png', contentType: 'image/png' }));
     await page.goto('/phap-thoai');
     await settleClient(page);
 
@@ -695,6 +781,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await loginAsMember(page);
     await page.goto('/phap-thoai');
     await settleClient(page);
+    await dismissFirstRunNotification(page);
     const album = page.locator('article').filter({ hasText: 'Pháp thoại kiểm thử E2E' });
     await album.getByRole('button', { name: /^Phát album / }).click();
 
@@ -718,9 +805,13 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await expect(progress).toHaveValue('30');
     if (await detail.isVisible()) await detail.getByRole('button',{name:'Thu nhỏ trình phát',exact:true}).click();
 
-    await page.locator('#main-content').focus();
+    const main = page.locator('#main-content');
+    await main.focus();
+    await expect(main).toBeFocused();
     await page.keyboard.press('Space');
     await expect(player.getByRole('button', { name: 'Tạm dừng' })).toBeVisible();
+    await expect(player.getByRole('status')).toHaveText('Âm thanh đang bật');
+    await expect(main).toBeFocused();
     await page.keyboard.press('m');
     await expect(player.getByRole('status')).toHaveText('Âm thanh đang tắt');
     if ((page.viewportSize()?.width ?? 0) > 480) {
@@ -737,7 +828,11 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await page.goto('/');
     await settleClient(page);
 
-    await page.getByRole('button', { name: 'Đăng nhập ngay', exact: true }).click();
+    const login = page.getByRole('button', { name: 'Đăng nhập ngay', exact: true });
+    const notification = page.getByRole('dialog', { name: 'Thông báo tu tập' });
+    await expect(login.or(notification)).toBeVisible();
+    if (await notification.isVisible()) await dismissFirstRunNotification(page);
+    await login.click();
     await expect(page).toHaveURL(/\/ca-nhan\?tab=account/);
     await expect(page.getByRole('button', { name: 'Đăng nhập bằng Google', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Đăng nhập bằng Facebook', exact: true })).toHaveCount(0);
@@ -748,7 +843,7 @@ test.describe('Pháp Thoại public and download contracts', () => {
     await page.getByRole('button', { name: 'Mở album Pháp thoại kiểm thử E2E' }).click();
     const albumDialog = page.getByRole('dialog', { name: 'Pháp thoại kiểm thử E2E' });
     await expect(albumDialog).toBeVisible();
-    await page.evaluate(() => window.dispatchEvent(new CustomEvent('quangtu:login-required')));
+    await albumDialog.getByRole('button', { name: 'Tải Tiếng mõ kiểm thử', exact: true }).click();
     await expect(page).toHaveURL(/\/ca-nhan\?tab=account/);
     await expect(page.getByRole('button', { name: 'Đăng nhập bằng Google', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Đăng nhập bằng Facebook', exact: true })).toHaveCount(0);

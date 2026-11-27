@@ -7,13 +7,13 @@ export interface PracticeFabController {
 
 export function clampPracticeFabPosition(
   position: PracticeFabPosition,
-  viewport: { width: number; height: number },
+  viewport: { width: number; height: number; top?: number },
   size: { width: number; height: number },
   inset = 8
 ): PracticeFabPosition {
   return {
     x: Math.max(inset, Math.min(viewport.width - size.width - inset, position.x)),
-    y: Math.max(inset, Math.min(viewport.height - size.height - inset, position.y))
+    y: Math.max((viewport.top ?? 0) + inset, Math.min(viewport.height - size.height - inset, position.y))
   };
 }
 
@@ -46,20 +46,40 @@ export function createPracticeFabController(
   let startTop = 0;
   let fitX = 0;
   let fitY = 0;
+  const ownerDocument = element.ownerDocument;
+  const root = ownerDocument?.documentElement;
+  const bottomNav = ownerDocument?.querySelector<HTMLElement>('.qts-bottom-nav');
+  // Custom property có thể chứa max()/env(); đo padding để lấy px đã được CSS giải quyết.
+  const safeAreaProbe = ownerDocument?.createElement('span');
+  if (safeAreaProbe && root) {
+    safeAreaProbe.setAttribute('aria-hidden', 'true');
+    safeAreaProbe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;width:0;height:0;padding:var(--app-safe-top,0px) 0 0;';
+    root.append(safeAreaProbe);
+  }
+
+  function availableViewport() {
+    const nav = bottomNav?.getBoundingClientRect();
+    const rootStyle = root && typeof getComputedStyle === 'function' ? getComputedStyle(root) : null;
+    const audioClearance = Math.max(0, parseFloat(rootStyle?.getPropertyValue('--audio-player-top') ?? '') || 0);
+    const top = safeAreaProbe && typeof getComputedStyle === 'function'
+      ? Math.max(0, parseFloat(getComputedStyle(safeAreaProbe).paddingTop) || 0) : 0;
+    return {
+      width: window.innerWidth,
+      height: Math.min(nav && nav.height > 0 ? nav.top : window.innerHeight, window.innerHeight - audioClearance),
+      top
+    };
+  }
 
   function setFitOffset(x: number, y: number): void {
     fitX = x;
     fitY = y;
-    element.style.marginLeft = x ? `${x}px` : '';
-    element.style.marginTop = y ? `${y}px` : '';
+    element.style.translate = x || y ? `${x}px ${y}px` : '';
   }
 
-  function fitExpandedPanel(): void {
+  function fitToViewport(): void {
     const rect = element.getBoundingClientRect();
     const base = { x: rect.left - fitX, y: rect.top - fitY };
-    const next = element.classList.contains('panel-open')
-      ? clampPracticeFabPosition(base, { width: window.innerWidth, height: window.innerHeight }, rect)
-      : base;
+    const next = clampPracticeFabPosition(base, availableViewport(), rect);
     setFitOffset(next.x - base.x, next.y - base.y);
   }
 
@@ -69,10 +89,7 @@ export function createPracticeFabController(
     element.style.bottom = 'auto';
     element.style.transform = 'none';
     const rect = element.getBoundingClientRect();
-    const next = clampPracticeFabPosition(position, {
-      width: window.innerWidth,
-      height: window.innerHeight
-    }, {
+    const next = clampPracticeFabPosition(position, availableViewport(), {
       width: rect.width || 60,
       height: rect.height || 200
     });
@@ -154,7 +171,7 @@ export function createPracticeFabController(
 
   function onResize(): void {
     if (element.classList.contains('panel-open')) {
-      fitExpandedPanel();
+      fitToViewport();
       return;
     }
     const rect = element.getBoundingClientRect();
@@ -166,14 +183,18 @@ export function createPracticeFabController(
   window.addEventListener('pointerup', finishDrag, true);
   window.addEventListener('pointercancel', finishDrag, true);
   element.addEventListener('click', onClick, true);
-  // A panel can grow after the user parked its collapsed button at an edge.
-  // Offset the visible panel without moving the saved anchor.
-  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitExpandedPanel);
+  // Keep the controls above the bottom navigation as the panel or navigation resizes.
+  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitToViewport);
   observer?.observe(element);
+  if (bottomNav) observer?.observe(bottomNav);
+  // Dùng khoảng trống do player owner cập nhật, kể cả khi player xuất hiện sau FAB.
+  const clearanceObserver = root && typeof MutationObserver !== 'undefined'
+    ? new MutationObserver(fitToViewport) : null;
+  if (root) clearanceObserver?.observe(root, { attributes: true, attributeFilter: ['style', 'data-native-app', 'data-native-insets'] });
   window.addEventListener('resize', onResize);
   const initialFrame = initialPosition
     ? requestAnimationFrame(() => {
-      if (element.classList.contains('panel-open')) fitExpandedPanel();
+      if (element.classList.contains('panel-open')) fitToViewport();
       else {
         const clamped = apply(initialPosition);
         if (clamped.x !== initialPosition.x || clamped.y !== initialPosition.y) onSave(clamped);
@@ -184,6 +205,8 @@ export function createPracticeFabController(
     apply,
     destroy() {
       observer?.disconnect();
+      clearanceObserver?.disconnect();
+      safeAreaProbe?.remove();
       if (initialFrame !== undefined) cancelAnimationFrame(initialFrame);
       window.clearTimeout(dragTimer);
       window.clearTimeout(snapTimer);

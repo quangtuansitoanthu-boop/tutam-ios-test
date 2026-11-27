@@ -2,11 +2,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/svelte-query';
 
 const mocks = vi.hoisted(() => ({
+  evict: vi.fn(async (_urls: readonly string[], isCurrent?: () => boolean) => { isCurrent?.(); }),
   session: { authenticated: true, user: { id: 'offline-admin-a', email: '', avatarUrl: '', displayName: 'Admin', role: 'admin' }, csrfToken: 'test', expiresAt: null } as {
     authenticated: boolean; user: { id: string; email: string; avatarUrl: string; displayName: string; role: 'admin' | 'ctv' | 'user' } | null; csrfToken: string | null; expiresAt: string | null;
   },
   bundle: null as unknown[] | null,
 }));
+vi.mock('$lib/browser/native-talk-audio', () => ({ evictNativeTalkCache: mocks.evict }));
 vi.mock('$lib/stores/session.svelte', () => ({
   getBrowserSessionSnapshot: () => mocks.session,
   refreshBrowserSession: async () => mocks.session,
@@ -105,6 +107,7 @@ function memoryIndexedDb() {
 
 beforeEach(async () => {
   vi.resetModules();
+  mocks.evict.mockClear();
   databases = new Map();
   blockCatalogWrites = false;
   beforeCursorEvent = undefined;
@@ -121,6 +124,24 @@ async function downloadPrivate() {
   await downloads.downloadAlbumForOffline(privateAlbum, { authorize: async () => {}, fetcher: vi.fn(async () => new Response(new Blob(['private bytes']))) });
 }
 
+it('reopens an unexpectedly closed audio database without letting an old close invalidate the new handle', async () => {
+  const first = await database.openOfflineAudioDatabase();
+  const closed = first.onclose!;
+  closed.call(first, new Event('close'));
+  const second = await database.openOfflineAudioDatabase();
+  expect(second).not.toBe(first);
+  closed.call(first, new Event('close'));
+  expect(await database.openOfflineAudioDatabase()).toBe(second);
+});
+
+it('retains a track title when its legacy blob is authorized by an owned album', async () => {
+  const track = { url: '/legacy-title.mp3', albumId: 'title-album', title: 'Lecture title', blob: new Blob(['audio']), downloadedAt: 1 };
+  await database.putOfflineTrack(track);
+  await database.putOfflineAlbum({ id: 'title-album', title: 'Album title', desc: '', trackCount: 1, downloadedAt: 1,
+    visibility: 'public', trackUrls: [track.url] });
+  expect(await database.getOfflineTrack(track.url)).toMatchObject({ title: 'Lecture title', visibility: 'public' });
+});
+
 it('does not relabel a private admin download as public through guest native fallback', async () => {
   await downloadPrivate();
   mocks.session = guest();
@@ -136,7 +157,9 @@ it.each(['guest', 'other-admin', 'role-loss'] as const)('does not expose private
   } };
   expect(await database.getOfflineTrack(privateAlbum.tracks[0].url)).toBeNull();
   expect(await database.getOfflineTracksForAlbum(privateAlbum.id)).toEqual([]);
-  expect((await database.readOfflineLibrarySnapshot()).albums).toEqual([]);
+  const snapshot = await database.readOfflineLibrarySnapshot();
+  expect(snapshot.albums).toEqual([]);
+  expect(database.offlineCatalogProgress(snapshot, privateAlbum)).toEqual({ count: 0, status: 'none' });
   expect(databases.get('tutam_offline_audio')?.get('tracks')?.size).toBe(1);
 });
 
@@ -156,6 +179,20 @@ it('keeps legacy public blobs readable when existing bundled catalog proves albu
   mocks.bundle = [{ id: legacy.id, tieu_de: legacy.title, visibility: 'public', tracks: [{ title: track.title, url: track.url }] }];
   expect((await database.getOfflineTrack(track.url))?.blob.size).toBe(track.blob.size);
   expect((await database.getOfflineTracksForAlbum(legacy.id)).map(row => row.url)).toEqual([track.url]);
+  const snapshot = await database.readOfflineLibrarySnapshot();
+  expect(database.offlineCatalogProgress(snapshot, { id: legacy.id, tracks: [track] })).toEqual({ count: 1, status: 'downloaded' });
+  expect(database.offlineCatalogProgress(snapshot, { id: legacy.id, tracks: [track, { url: '/new' }] })).toEqual({ count: 1, status: 'partial' });
+});
+
+it('requires readable bytes for every catalog URL even after an album was marked complete', async () => {
+  const id = 'damaged-download';
+  const tracks = [{ url: '/saved' }, { url: '/empty' }];
+  for (const track of tracks) await database.putOfflineTrack({ ...track, title: track.url, albumId: id,
+    downloadedAt: 1, visibility: 'public', blob: new Blob(track.url === '/saved' ? ['audio'] : []) });
+  await database.putOfflineAlbum({ id, title: id, desc: '', downloadedAt: 1, visibility: 'public', trackCount: 2,
+    trackUrls: tracks.map(track => track.url) });
+  const snapshot = await database.readOfflineLibrarySnapshot();
+  expect(database.offlineCatalogProgress(snapshot, { id, tracks })).toEqual({ count: 1, status: 'partial' });
 });
 
 it('retains partial public download counts before the album completion record exists', async () => {
@@ -214,9 +251,11 @@ it('deletes only unreferenced blobs when removing albums that share downloaded p
     visibility: 'public', trackUrls: [shared] });
   expect((await database.getOfflineTracksForAlbum('delete-b')).map(row => row.url)).toEqual([shared]);
   await database.deleteOfflineAlbum('delete-a');
+  expect(mocks.evict).toHaveBeenLastCalledWith([onlyA], expect.any(Function));
   expect(await database.getOfflineTrack(onlyA)).toBeNull();
   expect((await database.getOfflineTracksForAlbum('delete-b')).map(row => row.url)).toEqual([shared]);
   await database.deleteOfflineAlbum('delete-b');
+  expect(mocks.evict).toHaveBeenLastCalledWith([shared], expect.any(Function));
   expect(databases.get('tutam_offline_audio')?.get('tracks')?.has(shared)).toBe(false);
 });
 

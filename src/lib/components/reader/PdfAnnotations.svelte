@@ -43,6 +43,7 @@
     targetAnnotationId = null,
   }: Props = $props();
   const locale = getLocaleContext();
+  const isEn = $derived(locale.current === 'en');
   let handledTarget = '';
 
   let text = $state('');
@@ -239,12 +240,12 @@
       if (!principalGuard.isCurrent(principalToken)) return;
       annotations = client.cachedAnnotations().filter((row) => row.contentKind === 'pdf' && row.contentId === articleId);
       closeEditor();
-      onNotify('✓ Đã lưu trích dẫn PDF');
+      onNotify(isEn ? '✓ PDF quote saved' : '✓ Đã lưu trích dẫn PDF');
     } catch (cause) {
       if (!principalGuard.isCurrent(principalToken)) return;
       onNotify(isReadingActivityCapacityError(cause)
-        ? '❌ Hàng đợi đọc ngoại tuyến đã đầy. Hãy kết nối để đồng bộ rồi thử lại.'
-        : '⚠️ Trích dẫn PDF đang được giữ để thử đồng bộ lại.');
+        ? (isEn ? '❌ Offline reading queue is full. Reconnect to sync and try again.' : '❌ Hàng đợi đọc ngoại tuyến đã đầy. Hãy kết nối để đồng bộ rồi thử lại.')
+        : (isEn ? '⚠️ PDF quote is saved locally and will sync later.' : '⚠️ Trích dẫn PDF đang được giữ để thử đồng bộ lại.'));
     } finally {
       if (principalGuard.isCurrent(principalToken)) saving = false;
     }
@@ -255,7 +256,7 @@
     const principalToken = principalGuard.capture();
     const annotationId = active.id;
     const currentClient = client;
-    if (!await confirmInApp('Xóa trích dẫn này?')) return;
+    if (!await confirmInApp(isEn ? 'Delete this quote?' : 'Xóa trích dẫn này?')) return;
     if (!principalGuard.isCurrent(principalToken) || client !== currentClient || active?.id !== annotationId) return;
     try {
       client.enqueueAnnotationDelete(active.id);
@@ -263,12 +264,12 @@
       closeEditor();
       await client.flush().catch(() => 0);
       if (!principalGuard.isCurrent(principalToken)) return;
-      onNotify('Đã xóa trích dẫn PDF');
+      onNotify(isEn ? 'PDF quote deleted' : 'Đã xóa trích dẫn PDF');
     } catch (cause) {
       if (!principalGuard.isCurrent(principalToken)) return;
       onNotify(isReadingActivityCapacityError(cause)
-        ? '❌ Hàng đợi đọc ngoại tuyến đã đầy; trích dẫn chưa bị xóa.'
-        : '⚠️ Chưa thể xóa trích dẫn PDF lúc này.');
+        ? (isEn ? '❌ Offline reading queue is full; quote was not deleted.' : '❌ Hàng đợi đọc ngoại tuyến đã đầy; trích dẫn chưa bị xóa.')
+        : (isEn ? '⚠️ Could not delete PDF quote right now.' : '⚠️ Chưa thể xóa trích dẫn PDF lúc này.'));
     }
   }
 
@@ -308,26 +309,26 @@
 
 <div class="pdf-annotation-host">
   {#if open}
-    <section data-dialog-glass id="pdf-annotation-panel" class="pdf-annotation-panel" aria-label={`Văn bản và trích dẫn trang ${page}`}>
-      <header><div><strong>Trích dẫn PDF</strong><small>Trang {page}</small></div><button type="button" aria-label="Đóng bảng trích dẫn" onclick={toggle}>✕</button></header>
-      {#if textStatus === 'loading'}<p class="panel-state" role="status">Đang đọc lớp văn bản…</p>
-      {:else if textStatus === 'empty'}<p class="panel-state">Trang này không có lớp văn bản để tô sáng. Tài liệu quét cần OCR.</p>
-      {:else if textStatus === 'error'}<p class="panel-state" role="alert">Không thể đọc văn bản của trang này.</p>
+    <section data-dialog-glass id="pdf-annotation-panel" class="pdf-annotation-panel" aria-label={isEn ? `Text and quotes for page ${page}` : `Văn bản và trích dẫn trang ${page}`}>
+      <header><div><strong>{isEn ? 'PDF Quotes' : 'Trích dẫn PDF'}</strong><small>{isEn ? `Page ${page}` : `Trang ${page}`}</small></div><button type="button" aria-label={isEn ? 'Close quotes panel' : 'Đóng bảng trích dẫn'} onclick={toggle}>✕</button></header>
+      {#if textStatus === 'loading'}<p class="panel-state" role="status">{isEn ? 'Reading text layer…' : 'Đang đọc lớp văn bản…'}</p>
+      {:else if textStatus === 'empty'}<p class="panel-state">{isEn ? 'This page has no selectable text layer. Scanned PDFs require OCR.' : 'Trang này không có lớp văn bản để tô sáng. Tài liệu quét cần OCR.'}</p>
+      {:else if textStatus === 'error'}<p class="panel-state" role="alert">{isEn ? 'Could not read text on this page.' : 'Không thể đọc văn bản của trang này.'}</p>
       {:else if textStatus === 'ready'}
-        <p class="selection-help">Chọn một đoạn bằng chuột, cảm ứng hoặc bàn phím để tô sáng.</p>
-        <div class="pdf-selectable-text" bind:this={textArea} role="textbox" aria-label="Văn bản trang PDF để chọn trích dẫn" aria-readonly="true" tabindex="0" onmouseup={() => requestAnimationFrame(captureSelection)} ontouchend={() => requestAnimationFrame(captureSelection)} onkeyup={(event) => { if (event.shiftKey) requestAnimationFrame(captureSelection); }}>
+        <p class="selection-help">{isEn ? 'Select a passage by mouse, touch, or keyboard to highlight.' : 'Chọn một đoạn bằng chuột, cảm ứng hoặc bàn phím để tô sáng.'}</p>
+        <div class="pdf-selectable-text" bind:this={textArea} role="textbox" aria-label={isEn ? 'PDF page text for quote selection' : 'Văn bản trang PDF để chọn trích dẫn'} aria-readonly="true" tabindex="0" onmouseup={() => requestAnimationFrame(captureSelection)} ontouchend={() => requestAnimationFrame(captureSelection)} onkeyup={(event) => { if (event.shiftKey) requestAnimationFrame(captureSelection); }}>
           {#each segments as segment}
             {#if segment.annotation}<button type="button" class="text-highlight" data-quote-id={segment.annotation.id} data-color={segment.annotation.color} onclick={() => edit(segment.annotation!)}>{segment.text}</button>{:else}{segment.text}{/if}
           {/each}
         </div>
-        {#if pageAnnotations.some((annotation) => annotation.anchorStatus === 'orphaned')}<p class="orphan-message">⚠ Có trích dẫn không còn khớp với trang này. Bản gốc vẫn được giữ trong “Trích dẫn của tôi”.</p>{/if}
+        {#if pageAnnotations.some((annotation) => annotation.anchorStatus === 'orphaned')}<p class="orphan-message">{isEn ? '⚠ Some quotes no longer match this page. Originals remain saved in “My quotes”.' : '⚠ Có trích dẫn không còn khớp với trang này. Bản gốc vẫn được giữ trong “Trích dẫn của tôi”.'}</p>{/if}
       {/if}
       {#if draft || active}
         <div class="pdf-annotation-editor">
           <blockquote>{active?.quoteText || draft?.quoteText}</blockquote>
-          <fieldset><legend>Màu</legend><label><input type="radio" bind:group={color} value="yellow" /> Vàng</label><label><input type="radio" bind:group={color} value="green" /> Xanh</label></fieldset>
-          <label>Ghi chú<textarea bind:value={note} maxlength="12000" rows="3"></textarea></label>
-          <div class:dialog-actions-balanced={!active}>{#if active}<button class="danger" type="button" onclick={() => void remove()}>Xóa</button>{/if}<button type="button" onclick={closeEditor}>Hủy</button><button class="primary" type="button" disabled={saving} onclick={() => void save()}>{saving ? 'Đang lưu…' : 'Lưu'}</button></div>
+          <fieldset><legend>{isEn ? 'Color' : 'Màu'}</legend><label><input type="radio" bind:group={color} value="yellow" /> {isEn ? 'Yellow' : 'Vàng'}</label><label><input type="radio" bind:group={color} value="green" /> {isEn ? 'Green' : 'Xanh'}</label></fieldset>
+          <label>{isEn ? 'Note' : 'Ghi chú'}<textarea bind:value={note} maxlength="12000" rows="3"></textarea></label>
+          <div class:dialog-actions-balanced={!active}>{#if active}<button class="danger" type="button" onclick={() => void remove()}>{isEn ? 'Delete' : 'Xóa'}</button>{/if}<button type="button" onclick={closeEditor}>{isEn ? 'Cancel' : 'Hủy'}</button><button class="primary" type="button" disabled={saving} onclick={() => void save()}>{saving ? (isEn ? 'Saving…' : 'Đang lưu…') : (isEn ? 'Save' : 'Lưu')}</button></div>
         </div>
       {/if}
     </section>
@@ -335,5 +336,6 @@
 </div>
 
 <style>
-  .pdf-annotation-host{display:contents}.pdf-annotation-panel{position:fixed;z-index:770;top:116px;right:10px;bottom:12px;display:flex;width:min(410px,calc(100vw - 20px));overflow:hidden;flex-direction:column;border:1px solid var(--dialog-surface-border,var(--border));border-radius:12px;background:var(--dialog-surface-background,var(--card));color:var(--text);box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));font-family:var(--font-app)}.pdf-annotation-panel>header{display:flex;min-height:48px;align-items:center;justify-content:space-between;padding:5px 7px 5px 13px;border-bottom:1px solid var(--border2)}.pdf-annotation-panel header div{display:flex;flex-direction:column}.pdf-annotation-panel header small{color:var(--muted);font-size:10px}.pdf-annotation-panel header button{width:34px;height:34px;border:0;border-radius:7px;background:transparent;color:inherit;cursor:pointer}.panel-state{margin:0;padding:24px;color:var(--muted);font-size:var(--font-size-body);line-height:1.6}.selection-help{margin:0;padding:9px 12px;border-bottom:1px solid var(--border2);color:var(--muted);font-size:var(--font-size-meta)}.pdf-selectable-text{min-height:0;overflow:auto;flex:1;padding:16px;outline:none;color:var(--text);font-family:var(--font-reader);font-size:15px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}.pdf-selectable-text:focus-visible{box-shadow:inset 0 0 0 3px color-mix(in srgb,var(--gold) 45%,transparent)}.pdf-selectable-text .text-highlight{display:inline;margin:0;padding:.04em .08em;border:0;border-radius:3px;color:var(--highlight-ink);cursor:pointer;font:inherit;line-height:inherit;white-space:inherit;user-select:text}.pdf-selectable-text .text-highlight[data-color='yellow']{background:#ffe68a}.pdf-selectable-text .text-highlight[data-color='green']{background:#b8e7b0}.pdf-selectable-text .text-highlight:focus-visible{outline:3px solid var(--gold)}.orphan-message{margin:0;padding:8px 12px;border-top:1px solid #ddc27d;background:#fff8df;color:#604812;font-size:var(--font-size-meta)}.pdf-annotation-editor{max-height:45%;overflow:auto;padding:12px;border-top:1px solid var(--border);background:var(--bg2);font-size:11px}.pdf-annotation-editor blockquote{max-height:78px;overflow:auto;overflow-wrap:anywhere;margin:0 0 9px;font:13px/1.5 var(--font-reader)}.pdf-annotation-editor fieldset{display:flex;gap:12px;margin:0 0 8px;padding:0;border:0}.pdf-annotation-editor legend{font-weight:700}.pdf-annotation-editor>label{display:flex;flex-direction:column;gap:4px;font-weight:700}.pdf-annotation-editor textarea{box-sizing:border-box;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text);font:12px var(--font-app);resize:vertical}.pdf-annotation-editor>div{display:flex;justify-content:flex-end;gap:5px;margin-top:8px}.pdf-annotation-editor button{min-height:34px;padding:5px 10px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text);cursor:pointer;font:700 var(--font-size-label) var(--font-app)}.pdf-annotation-editor button.primary{border-color:var(--gold);background:var(--gold);color:var(--on-gold)}.pdf-annotation-editor button.danger{margin-right:auto;color:var(--danger-text)}.pdf-annotation-panel button:focus-visible,.pdf-annotation-panel textarea:focus-visible{outline:3px solid color-mix(in srgb,var(--gold) 45%,transparent);outline-offset:2px}@media(max-width:540px){.pdf-annotation-panel{top:104px;bottom:max(70px,calc(env(safe-area-inset-bottom) + 62px));right:5px;width:calc(100vw - 10px)}}
+  .pdf-annotation-host{display:contents}.pdf-annotation-panel{position:fixed;z-index:770;top:calc(116px + var(--app-safe-top,env(safe-area-inset-top,0px)));right:10px;bottom:12px;display:flex;width:min(410px,calc(100vw - 20px));overflow:hidden;flex-direction:column;border:1px solid var(--dialog-surface-border,var(--border));border-radius:12px;background:var(--dialog-surface-background,var(--card));color:var(--text);box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));font-family:var(--font-app)}.pdf-annotation-panel>header{display:flex;min-height:48px;align-items:center;justify-content:space-between;padding:5px 7px 5px 13px;border-bottom:1px solid var(--border2)}.pdf-annotation-panel header div{display:flex;flex-direction:column}.pdf-annotation-panel header small{color:var(--muted);font-size:10px}.pdf-annotation-panel header button{width:34px;height:34px;border:0;border-radius:7px;background:transparent;color:inherit;cursor:pointer}.panel-state{margin:0;padding:24px;color:var(--muted);font-size:var(--font-size-body);line-height:1.6}.selection-help{margin:0;padding:9px 12px;border-bottom:1px solid var(--border2);color:var(--muted);font-size:var(--font-size-meta)}.pdf-selectable-text{min-height:0;overflow:auto;flex:1;padding:16px;outline:none;color:var(--text);font-family:var(--font-reader);font-size:15px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}.pdf-selectable-text:focus-visible{box-shadow:inset 0 0 0 3px color-mix(in srgb,var(--gold) 45%,transparent)}.pdf-selectable-text .text-highlight{display:inline;margin:0;padding:.04em .08em;border:0;border-radius:3px;color:var(--highlight-ink);cursor:pointer;font:inherit;line-height:inherit;white-space:inherit;user-select:text}.pdf-selectable-text .text-highlight[data-color='yellow']{background:#ffe68a}.pdf-selectable-text .text-highlight[data-color='green']{background:#b8e7b0}.pdf-selectable-text .text-highlight:focus-visible{outline:3px solid var(--gold)}.orphan-message{margin:0;padding:8px 12px;border-top:1px solid var(--border);background:var(--gold-light);color:var(--text2);font-size:var(--font-size-meta)}.pdf-annotation-editor{max-height:45%;overflow:auto;padding:12px;border-top:1px solid var(--border);background:var(--bg2);font-size:11px}.pdf-annotation-editor blockquote{max-height:78px;overflow:auto;overflow-wrap:anywhere;margin:0 0 9px;font:13px/1.5 var(--font-reader)}.pdf-annotation-editor fieldset{display:flex;gap:12px;margin:0 0 8px;padding:0;border:0}.pdf-annotation-editor legend{font-weight:700}.pdf-annotation-editor>label{display:flex;flex-direction:column;gap:4px;font-weight:700}.pdf-annotation-editor textarea{box-sizing:border-box;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text);font:12px var(--font-app);resize:vertical}.pdf-annotation-editor>div{display:flex;justify-content:flex-end;gap:5px;margin-top:8px}.pdf-annotation-editor button{min-height:34px;padding:5px 10px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text);cursor:pointer;font:700 var(--font-size-label) var(--font-app)}.pdf-annotation-editor button.primary{border-color:var(--gold);background:var(--gold);color:var(--on-gold)}.pdf-annotation-editor button.danger{margin-right:auto;color:var(--danger-text)}.pdf-annotation-panel button:focus-visible,.pdf-annotation-panel textarea:focus-visible{outline:3px solid color-mix(in srgb,var(--gold) 45%,transparent);outline-offset:2px}@media(max-width:540px){.pdf-annotation-panel{top:calc(104px + var(--app-safe-top,env(safe-area-inset-top,0px)));bottom:max(70px,calc(env(safe-area-inset-bottom) + 62px));right:5px;width:calc(100vw - 10px)}}
+  .pdf-annotation-panel button{min-width:var(--touch-target-size);min-height:var(--touch-target-size)}
 </style>

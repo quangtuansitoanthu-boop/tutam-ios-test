@@ -189,6 +189,13 @@ describe('Thanh Tinh Tam Domain Logic', () => {
     expect(infoEn.dayTitle).toContain('Holy Day');
     expect(infoEn.reasons.some(r => r.desc.includes('precept'))).toBe(true);
     expect(infoEn.harmSummary).toBeTruthy();
+    expect(infoEn.viaName).not.toContain('Di Lặc');
+    expect(infoEn.kiengDamReason).not.toContain('Tết Nguyên Đán');
+  });
+
+  it('uses the Vietnam civil date at midnight independently of the device time zone', () => {
+    const info = getThanhTinhAbstinenceInfo(new Date('2026-02-16T17:30:00Z'), true);
+    expect(info.viaName).toContain('Maitreya');
   });
 });
 

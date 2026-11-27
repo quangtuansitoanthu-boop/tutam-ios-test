@@ -57,20 +57,17 @@ test.describe('route visual structure', () => {
     });
   }
 
-  test('each route keeps its shared header, return header and guide footer', async ({ page }) => {
+  test('each route keeps its shared header and the guide exposes its return action', async ({ page }) => {
     for (const route of ['/', '/kinh-sach', '/phap-thoai', '/tu-tap', '/huong-dan']) {
       await page.goto(route);
       await settleClient(page);
-      if (route === '/tu-tap') {
-        await expect(page.locator('.tt-topbar')).toBeVisible();
-        await expect(page.locator('.qts-nav')).toHaveCount(0);
-      } else {
-        await expect(page.locator('.qts-nav')).toBeVisible();
-        await expect(page.locator('.nl-name')).toContainText(route === '/phap-thoai' ? 'Kho Pháp Thoại' : 'Tu tập');
-      }
-      await expect(page.getByRole('contentinfo')).toHaveCount(route === '/huong-dan' ? 1 : 0);
+      const header = page.locator('nav.qts-nav');
+      await expect(header).toBeVisible();
+      await expect(header.locator('.nl-name')).toHaveText(route === '/phap-thoai' ? 'Kho Pháp Thoại' : 'Tu Tập Phật Pháp');
+      await expect(page.getByRole('contentinfo')).toHaveCount(0);
     }
-    await expect(page.getByText(/Giới thiệu về tác giả/)).toBeVisible();
+    await expect(page.locator('nav.qts-nav').getByRole('button', { name: 'Quay lại', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Hướng Dẫn Tu Tập', exact: true })).toBeVisible();
   });
 
   test('the Google login button fits inside the current viewport', async ({ page }) => {
@@ -125,21 +122,37 @@ test.describe('route visual structure', () => {
       expect(await page.evaluate(key => localStorage.getItem(key), principalStorageKey(TEST_MEMBER_ID, 'tt_bg'))).toBe(savedPaper);
       await expect(preview).toHaveCSS('background-color', 'rgb(21, 18, 13)');
       await expect(preview.locator('.tt-preview__wrap')).toHaveCSS('background-color', 'rgb(21, 18, 13)');
-      await expect(preview.locator('.tt-preview__start-card p')).toHaveCSS('color', 'rgb(149, 133, 112)');
-      await expect(preview.locator('.tt-preview__chapter-copy small')).toHaveCSS('color', 'rgb(149, 133, 112)');
-
+      const inkColors = await preview.evaluate(element => {
+        const sample = document.createElement('span');
+        element.append(sample);
+        try {
+          return [74, 72].map(opacity => {
+            sample.style.color = `color-mix(in srgb, var(--reading-paper-dark-ink) ${opacity}%, transparent)`;
+            return getComputedStyle(sample).color;
+          });
+        } finally { sample.remove(); }
+      });
+      await expect(preview.locator('.tt-preview__start-card p')).toHaveCSS('color', inkColors[0]);
+      await expect(preview.locator('.tt-preview__chapter-copy small').first()).toHaveCSS('color', inkColors[1]);
       const contrastRatios = await preview.evaluate((element) => {
-        const rgb = (value: string) => value.match(/\d+/gu)!.slice(0, 3).map(Number);
-        const luminance = (value: string) => {
-          const channels = rgb(value).map((channel) => {
+        const context = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
+        const luminance = () => {
+          const pixel = context.getImageData(0, 0, 1, 1).data;
+          const channels = Array.from(pixel.slice(0, 3)).map((channel) => {
             const normalized = channel / 255;
             return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
           });
           return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
         };
         const ratio = (foreground: Element, background: Element) => {
-          const light = luminance(getComputedStyle(foreground).color);
-          const dark = luminance(getComputedStyle(background).backgroundColor);
+          for (const surface of [element, background]) {
+            context.fillStyle = getComputedStyle(surface).backgroundColor;
+            context.fillRect(0, 0, 1, 1);
+          }
+          const dark = luminance();
+          context.fillStyle = getComputedStyle(foreground).color;
+          context.fillRect(0, 0, 1, 1);
+          const light = luminance();
           return (Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05);
         };
         return [

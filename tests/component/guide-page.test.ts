@@ -32,4 +32,16 @@ describe('guide page ownership', () => {
     expect(install).toContain('await installPrompt.prompt()');
     expect(install).toContain('Thêm vào Màn hình chính');
   });
+
+  it('provides persistent A-/A+ font scale controls across study and app guide modes', () => {
+    expect(route).toContain('tutam_guide_font_scale_v1');
+    expect(route).toContain('guide-font-bar');
+    expect(route).toContain('A−');
+    expect(route).toContain('A+');
+    expect(route).toContain('--guide-font-scale:');
+    expect(styles).toContain('.guide-font-bar');
+    expect(styles).toContain('min-width: 44px;');
+    expect(styles).toContain('min-height: 44px;');
+    expect(styles).toContain('var(--guide-font-scale, 1)');
+  });
 });

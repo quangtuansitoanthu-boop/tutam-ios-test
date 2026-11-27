@@ -22,6 +22,8 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Tu tập lưu ảnh thẻ tu tập, trích dẫn và kết quả quẻ vào thư viện ảnh khi bạn chọn Lưu hình ảnh.</string>
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIApplicationSceneManifest</key>
@@ -45,7 +47,7 @@
     </dict>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
-      <string>armv7</string>
+      <string>arm64</string>
     </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>

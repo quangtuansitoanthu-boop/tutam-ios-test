@@ -93,14 +93,15 @@ export async function fetchNativeJsonMutation(input: string, init: RequestInit, 
   const origin = loginEndpoint ? loginOrigin : savedRemoteOrigin();
   const url = new URL(loginEndpoint ? input : resolveApiUrl(input), origin);
   if (url.origin !== origin || !url.pathname.startsWith('/api/')) return null;
-  // Chặn thao tác đã hủy trước khi gửi; sau khi bridge gửi phải giữ receipt để tránh ghi lặp.
+  // Chặn trước khi gửi. Sau khi gửi, abort chỉ dừng caller chờ; SDK không hủy
+  // native task/Set-Cookie hay hoàn tác write, vì vậy caller không được retry mù.
   if (init.signal?.aborted) throw init.signal.reason ?? new DOMException('Aborted', 'AbortError');
   const headers = new Headers(init.headers);
   // Every write targets an allowlisted NATIVE_BACKEND_ORIGINS host, so use that
   // exact backend origin to satisfy expectedOrigin() on both Workers and custom domain.
   headers.set('Origin', url.origin);
   const rawBody = typeof init.body === 'string' ? init.body.trim() : '';
-  const response = await CapacitorHttp.request({
+  const pending = CapacitorHttp.request({
     url: url.href,
     method,
     headers: Object.fromEntries(headers.entries()),
@@ -109,6 +110,20 @@ export async function fetchNativeJsonMutation(input: string, init: RequestInit, 
     connectTimeout: 12_000,
     readTimeout: 12_000,
   });
+  // Logout/deletion may expire an HttpOnly cookie. Their auth lease must stay
+  // held until native HTTP and WK cookie sync settle, even after UI cancellation.
+  const cookieMutation = method === 'POST' && ['/api/auth/logout', '/api/auth/delete-account'].includes(url.pathname);
+  const signal = cookieMutation ? null : init.signal;
+  let onAbort: (() => void) | undefined;
+  const response = await (signal ? Promise.race([
+    pending,
+    new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    }),
+  ]).finally(() => { if (onAbort) signal.removeEventListener('abort', onAbort); }) : pending);
+  if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
   return new Response([204, 205, 304].includes(response.status) ? null
     : typeof response.data === 'string' ? response.data : JSON.stringify(response.data), {
     status: response.status,

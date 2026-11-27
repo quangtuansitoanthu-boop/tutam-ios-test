@@ -40,7 +40,7 @@ function setup() {
     APPLE_PRIVATE_KEY: signingKey, APPLE_TOKEN_ENCRYPTION_KEY: 'test-only-encryption-material-at-least-32-characters',
   } as any;
   const fetcher = vi.fn(async (input: string, init: RequestInit) => {
-    expect(init.redirect).toBe('error');
+    expect(init.redirect).toBe('manual');
     const body = new URLSearchParams(String(init.body));
     expect(body.get('client_id')).toBe('vn.quangtu.tutam');
     expect(body.get('client_secret')?.split('.')).toHaveLength(3);
@@ -83,5 +83,28 @@ it('keeps the retained token unrevoked when Apple fails', async () => {
   await storeAppleAuthorization(state.env, 'owner-a', 'apple-a', 'code-a');
   state.fetcher.mockResolvedValueOnce(new Response(null, { status: 503 }));
   await expect(revokeStoredAppleAuthorization(state.env, 'owner-a', 'apple-a')).rejects.toThrow();
+  expect(state.row().revoked_at).toBeNull();
+});
+
+it.each([301, 302, 303, 307, 308])('rejects an Apple redirect (%s) before storing the grant', async status => {
+  const state = setup();
+  const cancel = vi.fn();
+  const response = new Response(new ReadableStream({ cancel }), {
+    status, headers: { location: 'https://unexpected.example/collect' },
+  });
+  state.fetcher.mockResolvedValueOnce(response);
+  await expect(storeAppleAuthorization(state.env, 'owner-a', 'apple-a', 'code-a')).rejects.toThrow('apple-authorization-unavailable');
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(state.fetcher).toHaveBeenCalledOnce();
+  expect(state.row()).toBeNull();
+});
+
+it('does not mark the retained grant revoked after a redirect', async () => {
+  const state = setup();
+  await storeAppleAuthorization(state.env, 'owner-a', 'apple-a', 'code-a');
+  const cancel = vi.fn();
+  state.fetcher.mockResolvedValueOnce(new Response(new ReadableStream({ cancel }), { status: 307 }));
+  await expect(revokeStoredAppleAuthorization(state.env, 'owner-a', 'apple-a')).rejects.toThrow('apple-authorization-unavailable');
+  expect(cancel).toHaveBeenCalledOnce();
   expect(state.row().revoked_at).toBeNull();
 });

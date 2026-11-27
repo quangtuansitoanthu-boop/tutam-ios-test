@@ -715,7 +715,7 @@
   }
 
   @media(max-height:520px){
-    .meditation-screen header{padding-block:8px}
+    .meditation-screen header{padding-block:calc(8px + var(--app-safe-top,env(safe-area-inset-top,0px))) 8px}
     .meditation-screen main{padding:6px 16px}
     .meditation-screen__visual,.meditation-screen__still{width:64px;height:64px;font-size:40px}
     .meditation-screen__breath span{font-size:32px}

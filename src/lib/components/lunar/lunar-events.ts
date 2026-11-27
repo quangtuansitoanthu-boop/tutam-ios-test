@@ -1,5 +1,5 @@
 import type { LunarDay } from './lunar-calendar';
-import { solarToLunar } from './lunar-calendar';
+import { lunarMonthLength, solarToLunar } from './lunar-calendar';
 import lunarEventsEnRaw from '$lib/data/lunar-events-en.json';
 
 export const VIA_DAYS_EN: Record<string, string> = (lunarEventsEnRaw as { viaDays?: Record<string, string> })?.viaDays ?? {};
@@ -8,11 +8,13 @@ export const ABSTINENCE_DAYS_EN: Record<string, { reason: string; harm: string }
 export interface LunarEventNotificationInfo {
   isEvent: boolean;
   isThapTrai: boolean;
+  thapTraiIndex?: number;
   kiengDam: { harm: string; reason: string } | null;
   lunarDay: number;
   lunarMonth: number;
   lunarYear: number;
   lunarLeap?: boolean;
+  monthLength?: 29 | 30;
   viaName: string | null;
   viaKey?: string | null;
 }
@@ -270,17 +272,6 @@ const ABSTINENCE_DAYS: Record<string, { reason: string; harm: string }> = {
     "12-30": { reason: "Chư thần giáng hạ xem xét thiện ác", harm: "Phạm lỗi hành dâm thì nam lẫn nữ đều chết" }
 };
 
-function lunarMonthLength(date: Date, lunar: LunarDay): 29 | 30 {
-  const candidate = new Date(date);
-  candidate.setDate(date.getDate() + (30 - lunar.day));
-  const candidateLunar = solarToLunar(
-    candidate.getDate(),
-    candidate.getMonth() + 1,
-    candidate.getFullYear(),
-  );
-  return candidateLunar.day === 30 ? 30 : 29;
-}
-
 export const HARM_TRANSLATIONS_EN: Record<string, string> = {
   'Giảm thọ mười hai năm': 'Lifespan shortened by twelve years',
   'Giảm thọ': 'Shortened lifespan',
@@ -335,7 +326,6 @@ export function getLunarEventForLunarDay(lunar: LunarDay, monthLength: number, l
   }
 
   const key = `${lunar.month}-${eventDay}`;
-  const key29 = `${lunar.month}-29`;
   const key30 = `${lunar.month}-30`;
   const isEn = locale === 'en';
   const viaName = lunar.leap ? null : isEn
@@ -345,18 +335,11 @@ export function getLunarEventForLunarDay(lunar: LunarDay, monthLength: number, l
   let kiengDam: { harm: string; reason: string } | null = null;
   if (isEn) {
     const enDay = ABSTINENCE_DAYS_EN[key];
-    const en29 = ABSTINENCE_DAYS_EN[key29];
-    const en30 = ABSTINENCE_DAYS_EN[key30];
     const viRaw = ABSTINENCE_DAYS[key] ?? (monthLength === 29 && lunar.day === 29 ? ABSTINENCE_DAYS[key30] : null);
 
-    if (enDay || en29 || en30) {
-      const primary = (monthLength === 29 && lunar.day === 29)
-        ? (en29 || en30 || enDay)
-        : (enDay || en29);
-      const secondary = (monthLength === 29 && lunar.day === 29) ? en30 : null;
-
-      const reason = primary?.reason || secondary?.reason || '';
-      let harm = primary?.harm || secondary?.harm || '';
+    if (enDay) {
+      const reason = enDay.reason || '';
+      let harm = enDay.harm || '';
       if (!harm && viRaw?.harm) {
         harm = translateHarmToEn(viRaw.harm);
       } else if (harm) {
@@ -375,16 +358,19 @@ export function getLunarEventForLunarDay(lunar: LunarDay, monthLength: number, l
     kiengDam = ABSTINENCE_DAYS[key] ?? null;
   }
 
-  const isThapTrai = thapTraiDays.includes(lunar.day);
+  const thapTraiIndex = thapTraiDays.indexOf(lunar.day);
+  const isThapTrai = thapTraiIndex >= 0;
 
   return {
     isEvent: isThapTrai || viaName !== null || kiengDam !== null,
     isThapTrai,
+    thapTraiIndex: isThapTrai ? thapTraiIndex : undefined,
     kiengDam,
     lunarDay: lunar.day,
     lunarMonth: lunar.month,
     lunarYear: lunar.year,
     lunarLeap: lunar.leap,
+    monthLength: monthLength === 29 ? 29 : 30,
     viaName,
     viaKey: viaName ? key : null,
   };
@@ -413,12 +399,11 @@ export function localizeLunarEvent(
   if (!info) return null;
   if (locale !== 'en') return info;
 
-  const key = `${info.lunarMonth}-${info.lunarDay}`;
-  const key30 = `${info.lunarMonth}-30`;
+  const eventDay = info.lunarDay === 29 && info.monthLength === 29 ? 30 : info.lunarDay;
+  const key = `${info.lunarMonth}-${eventDay}`;
   const enVia = info.lunarLeap ? null : VIA_DAYS_EN[info.viaKey || key] || info.viaName;
   
   const dayEnKieng = ABSTINENCE_DAYS_EN[key];
-  const day30EnKieng = ABSTINENCE_DAYS_EN[key30];
 
   let reason = '';
   let harm = '';
@@ -426,16 +411,6 @@ export function localizeLunarEvent(
   if (dayEnKieng) {
     reason = dayEnKieng.reason;
     harm = dayEnKieng.harm;
-    // Nếu ngày 29 (tháng thiếu gộp ngày 30) mà ngày 29 chưa có harm, lấy harm ngày 30:
-    if (!harm && info.lunarDay === 29 && day30EnKieng?.harm) {
-      harm = day30EnKieng.harm;
-      if (day30EnKieng.reason && !reason.includes(day30EnKieng.reason)) {
-        reason = `${reason} — ${day30EnKieng.reason}`;
-      }
-    }
-  } else if (info.lunarDay === 29 && day30EnKieng) {
-    reason = day30EnKieng.reason;
-    harm = day30EnKieng.harm;
   } else if (info.kiengDam) {
     reason = translateGeneratedReasonToEn(info.kiengDam.reason);
     harm = translateHarmToEn(info.kiengDam.harm);

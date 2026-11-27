@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ listener: vi.fn(), pending: vi.fn(), cancel: vi.fn(), delivered: vi.fn(), removeDelivered: vi.fn(), platform: vi.fn(() => 'android'), checkExact: vi.fn(), changeExact: vi.fn(), schedule: vi.fn(), channel: vi.fn() }));
+const mocks = vi.hoisted(() => ({ listener: vi.fn(), appListener: vi.fn(), pending: vi.fn(), cancel: vi.fn(), delivered: vi.fn(), removeDelivered: vi.fn(), platform: vi.fn(() => 'android'), checkExact: vi.fn(), changeExact: vi.fn(), schedule: vi.fn(), channel: vi.fn() }));
 vi.mock('$lib/browser/native-platform', () => ({ isNativeApp: () => true, nativePlatform: mocks.platform }));
+vi.mock('@capacitor/app', () => ({ App: { addListener: mocks.appListener } }));
 vi.mock('@capacitor/local-notifications', () => ({ LocalNotifications: { addListener: mocks.listener, getPending: mocks.pending, cancel: mocks.cancel, getDeliveredNotifications: mocks.delivered, removeDeliveredNotifications: mocks.removeDelivered, checkExactNotificationSetting: mocks.checkExact, changeExactNotificationSetting: mocks.changeExact, schedule: mocks.schedule, createChannel: mocks.channel } }));
 import { cancelAllUnifiedNotifications, getPendingReminderNotifications, cancelUnifiedNotifications, getExactReminderPermission, requestExactReminderPermission } from '../../src/lib/browser/native-notifications';
 import { scheduleUnifiedNotifications } from '../../src/lib/browser/native-notifications';
 import { clearDeliveredPersonalReminderNotifications } from '../../src/lib/browser/native-notifications';
 import { addNotificationActionListener } from '../../src/lib/browser/native-notifications';
-beforeEach(() => { mocks.pending.mockReset(); mocks.cancel.mockReset().mockResolvedValue(undefined); mocks.platform.mockReturnValue('android'); mocks.schedule.mockReset().mockResolvedValue(undefined); mocks.channel.mockReset().mockResolvedValue(undefined); });
+import { addAppActiveListener } from '../../src/lib/browser/native-app-lifecycle';
+beforeEach(() => { mocks.appListener.mockReset(); mocks.pending.mockReset(); mocks.cancel.mockReset().mockResolvedValue(undefined); mocks.platform.mockReturnValue('android'); mocks.schedule.mockReset().mockResolvedValue(undefined); mocks.channel.mockReset().mockResolvedValue(undefined); });
 afterEach(() => vi.restoreAllMocks());
 it('finishes notification teardown when its native bridge is already closed', async () => {
   let removals = 0;
@@ -86,4 +88,23 @@ it('does not interpret an OS read failure as an empty schedule', async () => {
 it('reports migration cancellation failures so they can be retried', async () => {
   mocks.cancel.mockRejectedValue(new Error('OS rejected cancellation'));
   await expect(cancelUnifiedNotifications([123], true)).rejects.toThrow('OS rejected cancellation');
+});
+it('triggers foreground callback only when active and removes appStateChange listener even if disposed early', async () => {
+  let callback: ((state: { isActive: boolean }) => void) | undefined;
+  let resolveListener: ((handle: { remove: () => Promise<void> }) => void) | undefined;
+  let removed = 0;
+  mocks.appListener.mockImplementationOnce((_event, fn) => {
+    callback = fn;
+    return new Promise(resolve => { resolveListener = resolve; });
+  });
+  const onActive = vi.fn();
+  const stop = addAppActiveListener(onActive);
+  await vi.waitFor(() => expect(callback).toBeTypeOf('function'));
+  callback?.({ isActive: false });
+  callback?.({ isActive: true });
+  expect(onActive).toHaveBeenCalledTimes(1);
+  stop();
+  resolveListener?.({ remove: async () => { removed++; throw new Error('Bridge closed'); } });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  expect(removed).toBe(1);
 });

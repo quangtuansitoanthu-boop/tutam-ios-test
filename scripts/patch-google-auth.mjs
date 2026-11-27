@@ -3,10 +3,12 @@ import path from 'node:path';
 import { patchIosGoogleSdk } from './lib/ios-google-sdk-patch.mjs';
 import { patchIosLocalNotifications } from './lib/ios-local-notifications-patch.mjs';
 import { patchIosWebViewDiagnostics } from './lib/ios-webview-diagnostics-patch.mjs';
+import { patchNativeHttp } from './lib/native-http-patch.mjs';
 
 patchIosGoogleSdk();
 patchIosLocalNotifications();
 patchIosWebViewDiagnostics();
+patchNativeHttp();
 
 const targetFile = path.resolve('node_modules/@codetrix-studio/capacitor-google-auth/android/src/main/java/com/codetrixstudio/capacitor/GoogleAuth/GoogleAuth.java');
 

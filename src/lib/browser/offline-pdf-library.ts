@@ -46,7 +46,7 @@ export async function fetchHomepageWithOfflinePdfs(
     );
     const timedOut = cause instanceof DOMException && (cause.name === 'TimeoutError' || cause.name === 'AbortError');
     if (isNativeApp() && (serviceUnavailable || timedOut)) {
-      return loadCombinedOfflineLibrary('guest', principalId, async () => [], signal, cause);
+      return loadCombinedOfflineLibrary('guest', principalId, readDownloads, signal, cause);
     }
     if (!networkFailures.has(cause)) throw cause;
     return loadCombinedOfflineLibrary(role, principalId, readDownloads, signal, cause);

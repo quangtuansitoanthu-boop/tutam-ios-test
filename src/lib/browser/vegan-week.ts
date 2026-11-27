@@ -1,5 +1,5 @@
 import { fetchPublicMedia } from './public-media-fallback';
-import { isVeganWeek, sameVeganDish, REGIONAL_VEGAN_FIRST_WEEK, ROTATING_VEGAN_VERSION, VEGAN_RECIPE_REVISION, VEGAN_ROTATION_REVISION, VEGAN_PACKAGE_MAX_BYTES, vietnamWeek, type VeganWeek } from '$lib/contracts/vegan-week';
+import { isVeganWeek, sameVeganDish, LEGACY_ROTATING_RECIPE_COUNT, REGIONAL_VEGAN_FIRST_WEEK, ROTATING_VEGAN_VERSION, VEGAN_RECIPE_REVISION, VEGAN_ROTATION_REVISION, VEGAN_PACKAGE_MAX_BYTES, vietnamWeek, type VeganWeek } from '$lib/contracts/vegan-week';
 
 const prefix = 'tutam:vegan-week:v1:';
 const bundledRotationWeeks = new Set(['2026-11-09', '2026-11-16', '2026-11-23']);
@@ -85,10 +85,14 @@ function revisePack(pack: VeganWeek, catalog: VeganWeek): VeganWeek {
       const { minutes, ingredients, steps } = correction;
       return { ...recipe, minutes, ingredients, steps };
     });
+    if (recipes.length === LEGACY_ROTATING_RECIPE_COUNT && recipes.every(recipe => byId.has(recipe.id))) {
+      const existing = new Set(recipes.map(recipe => recipe.id));
+      recipes.push(...catalog.recipes.filter(recipe => !existing.has(recipe.id)));
+    }
     revised = { ...pack, recipes, recipeRevision: VEGAN_RECIPE_REVISION };
   }
   if (needsBundledRotation(pack.week, pack) && catalog.week === pack.week) {
-    const ids = new Set(pack.recipes.map(recipe => recipe.id));
+    const ids = new Set(revised.recipes.map(recipe => recipe.id));
     const days = catalog.days.every(day => day.every(id => ids.has(id))) ? catalog.days : pack.days;
     revised = { ...revised, days, rotationRevision: catalog.rotationRevision };
   }

@@ -11,7 +11,7 @@
   import { alertInApp } from '$lib/browser/app-dialog';
   import { recordPracticeParticipation } from '$lib/browser/practice-participation';
   import { followTextareaCaret } from '$lib/browser/copying-caret';
-  import type { MindfulPostReceipt } from '$lib/contracts/mindful-community';
+  import type { MindfulPostKind, MindfulPostReceipt } from '$lib/contracts/mindful-community';
   import { mindfulShareFailureKey } from '$lib/browser/mindful-community-client';
   import MindfulReviewNotice from './MindfulReviewNotice.svelte';
 
@@ -29,6 +29,11 @@
   let nickname = $state('');
   let status = $state('');
   let failed = $state(false);
+  let shareStatusKind = $state<MindfulPostKind | null>(null);
+  let shareStatusBanner = $state<HTMLParagraphElement>();
+  let repentanceNotice = $state<ReturnType<typeof MindfulReviewNotice>>();
+  let goodDeedNotice = $state<ReturnType<typeof MindfulReviewNotice>>();
+  let clearedAfterShare = $state<Partial<Record<MindfulPostKind, string>>>({});
   let sharing = $state<'repentance' | 'good_deed' | null>(null);
   let busy = $state(false);
   let saveNoticeOpen = $state(false);
@@ -52,13 +57,7 @@
     const trimmed = value.trim();
     if (!trimmed || trimmed.length > 40 || /[\u0000-\u001f\u007f]/u.test(trimmed)) return;
     try {
-      const saved = storage.saveNickname(trimmed);
-      nickname = saved;
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('tt_community_nickname_v1', saved);
-        localStorage.setItem('tt_last_community_nickname', saved);
-      }
-      failed = false;
+      if (storage.getNickname() !== trimmed) storage.saveNickname(trimmed);
     } catch {
       // Bỏ qua lỗi tạm thời khi người dùng đang gõ dở
     }
@@ -87,8 +86,13 @@
     if (!target) return;
     const next = withSnippet(label, target);
     if (next.length > 20_000) return;
-    if (target === 'repentance') repentance = next;
-    else goodDeeds = next;
+    editEntry(target, next);
+  }
+
+  function editEntry(kind: MindfulPostKind, value: string): void {
+    delete clearedAfterShare[kind];
+    if (kind === 'repentance') repentance = value;
+    else goodDeeds = value;
   }
 
   async function startWriting(): Promise<void> {
@@ -125,8 +129,7 @@
   }
 
   function clearEntry(): void {
-    if (clearTarget === 'repentance') repentance = '';
-    else if (clearTarget === 'good_deed') goodDeeds = '';
+    if (clearTarget) editEntry(clearTarget, '');
     clearTarget = null;
     status = ''; failed = false;
   }
@@ -134,39 +137,37 @@
   $effect(() => {
     const owner = storage;
     const selectedDate = date;
-    revision += 1;
     receipts = {}; latestReceipt = null;
+    clearedAfterShare = {}; shareStatusKind = null;
     sharing = null; clearTarget = null; busy = false; saveNoticeOpen = false; status = ''; failed = false;
     repentance = ''; goodDeeds = ''; nickname = '';
     try {
       const entry = owner.getReflections().find(item => item.date === selectedDate);
       repentance = entry?.repentance ?? ''; goodDeeds = entry?.goodDeeds ?? '';
       reflectionBaseline = JSON.stringify([selectedDate, entry?.repentance ?? '', entry?.goodDeeds ?? '']);
-      // Tự động nạp biệt danh đã lưu từ storage hoặc khôi phục từ localStorage
-      const savedNick = owner.getNickname();
-      if (savedNick) {
-        nickname = savedNick;
-      } else if (typeof localStorage !== 'undefined') {
-        const fallback = localStorage.getItem('tt_community_nickname_v1') || localStorage.getItem('tt_last_community_nickname') || '';
-        if (fallback) {
-          nickname = fallback;
-          try { owner.saveNickname(fallback); } catch {}
-        }
-      }
+      nickname = owner.getNickname();
     } catch { failed = true; status = untrack(() => copy.notReady); }
+    return () => { clearTimeout(nicknameDebounceTimer); revision += 1; };
   });
   $effect(() => { storage; blockedReceipt = null; });
 
+  function privateReflection() {
+    // Sau khi gửi, chỉ làm trống khung soạn. Lưu ô còn lại vẫn phải giữ bản riêng.
+    return { date, repentance: clearedAfterShare.repentance ?? repentance, goodDeeds: clearedAfterShare.good_deed ?? goodDeeds };
+  }
+
   function save(): boolean {
+    const entry = privateReflection();
     try {
-      storage.saveReflection({ date, repentance, goodDeeds, updatedAt: new Date().toISOString() });
+      storage.saveReflection({ ...entry, updatedAt: new Date().toISOString() });
       if (nickname.trim()) persistNickname(nickname);
-      reflectionBaseline = JSON.stringify([date, repentance, goodDeeds]);
+      reflectionBaseline = JSON.stringify([entry.date, entry.repentance, entry.goodDeeds]);
       failed = false; status = copy.saved; return true;
     } catch { failed = true; status = copy.saveError; return false; }
   }
   async function saveManually(kind: 'repentance' | 'good_deed', trigger: HTMLButtonElement): Promise<void> {
     if (busy || saveNoticeOpen) return;
+    shareStatusKind = null;
     trigger.focus({ preventScroll: true });
     if (nickname.trim()) persistNickname(nickname);
     const currentRevision = revision;
@@ -189,7 +190,8 @@
   /** Guard same-principal remounts: a failed local save must keep this draft on screen. */
   export function preserveDraft(): boolean {
     if (nickname.trim()) persistNickname(nickname);
-    return JSON.stringify([date, repentance, goodDeeds]) !== reflectionBaseline ? save() : true;
+    const entry = privateReflection();
+    return JSON.stringify([entry.date, entry.repentance, entry.goodDeeds]) !== reflectionBaseline ? save() : true;
   }
   function saveNickname(): void {
     clearTimeout(nicknameDebounceTimer);
@@ -204,10 +206,11 @@
   }
   function requestShare(kind: 'repentance' | 'good_deed'): void {
     if (busy || blockedReceipt || hasPendingShare(kind)) return;
+    shareStatusKind = kind;
     if (!onShare) { if (onSignIn && save()) onSignIn(); return; }
     if (!nickname.trim()) { failed = true; status = copy.nicknameRequired; return; }
     if (!validPublicShare(kind)) return;
-    if (save()) sharing = kind;
+    if (save()) { status = ''; sharing = kind; }
   }
   function hasPendingShare(kind: 'repentance' | 'good_deed'): boolean {
     const receipt = receipts[kind];
@@ -246,19 +249,42 @@
     try {
       const receipt = await onShare(kind, content.normalize('NFC').trim(), nickname.normalize('NFC').trim());
       if (currentRevision !== revision) return;
-      if (receipt) {
-        receipts[kind] = receipt; latestReceipt = receipt;
-        if (receipt.accountLocked) blockedReceipt = receipt;
+      sharing = null;
+      if (!receipt) { failed = true; status = copy.shareError; return; }
+      receipts[kind] = receipt; latestReceipt = receipt;
+      if (receipt.accountLocked) blockedReceipt = receipt;
+      const removed = receipt.reviewState === 'removed' || receipt.status === 'removed';
+      const rejected = receipt.reviewState === 'rejected';
+      const pending = receipt.reviewState === 'pending';
+      const accepted = !receipt.accountLocked && !removed && !rejected && (pending || receipt.status === 'published');
+      failed = !accepted;
+      status = receipt.accountLocked ? copy.shareLocked : removed ? copy.shareRemoved : rejected ? copy.shareRejected
+        : pending ? '' : accepted ? copy.shared : copy.shareError;
+      if (accepted) {
+        editEntry(kind, '');
+        clearedAfterShare[kind] = content;
+        await tick();
+        if (currentRevision !== revision) return;
+        if (pending) {
+          const notice = kind === 'repentance' ? repentanceNotice : goodDeedNotice;
+          notice?.focusDetails();
+          await alertInApp(copy.sharePendingConfirmation);
+        } else {
+          shareStatusBanner?.focus();
+        }
       }
-      sharing = null; failed = false;
-      status = receipt?.accountLocked ? copy.shareLocked : receipt?.reviewState === 'pending' ? copy.sharePending
-        : receipt?.reviewState === 'removed' ? copy.shareRemoved : receipt?.reviewState === 'rejected' ? copy.shareRejected : copy.shared;
     } catch (error) {
       if (currentRevision !== revision) return;
       sharing = null; failed = true; status = copy[mindfulShareFailureKey(error)];
     } finally { if (currentRevision === revision) busy = false; }
   }
 </script>
+
+{#snippet shareStatus(kind: MindfulPostKind)}
+  {#if shareStatusKind === kind && status}
+    <p bind:this={shareStatusBanner} class="share-status share-status--banner" class:error={failed} role="status" tabindex="-1">{status}</p>
+  {/if}
+{/snippet}
 
 {#snippet editorTools(target: 'repentance' | 'good_deed')}
   <div class="editor-tools">
@@ -338,7 +364,9 @@
     </button>
   </div>
 
-  <MindfulReviewNotice receipt={blockedReceipt ?? latestReceipt} />
+  {#if blockedReceipt || latestReceipt?.reviewState !== 'pending' || latestReceipt.status === 'removed' || showGuide}
+    <MindfulReviewNotice receipt={blockedReceipt ?? latestReceipt} journal />
+  {/if}
 
   {#if showGuide}
     <div class="guide-banner">
@@ -408,7 +436,7 @@
             use:followTextareaCaret
             aria-label={copy.repentance}
             bind:this={repentanceEditor}
-            bind:value={repentance}
+            bind:value={() => repentance, (value) => editEntry('repentance', value)}
             maxlength="20000"
             placeholder={copy.repentancePlaceholder}
             class="journal-textarea"
@@ -443,9 +471,14 @@
           </blockquote>
         </div>
 
-        {#if receipts.repentance}<MindfulReviewNotice receipt={receipts.repentance} compact />{/if}
+        {#if receipts.repentance}
+          {#key receipts.repentance.id}
+            <MindfulReviewNotice bind:this={repentanceNotice} receipt={receipts.repentance} compact journal />
+          {/key}
+        {/if}
 
         <div class="actions">
+          {@render shareStatus('repentance')}
           <button
             type="button"
             class="btn-save-private"
@@ -487,7 +520,7 @@
           <textarea
             use:followTextareaCaret
             aria-label={copy.goodDeeds}
-            bind:value={goodDeeds}
+            bind:value={() => goodDeeds, (value) => editEntry('good_deed', value)}
             maxlength="20000"
             placeholder={copy.goodPlaceholder}
             class="journal-textarea"
@@ -522,9 +555,14 @@
           </blockquote>
         </div>
 
-        {#if receipts.good_deed}<MindfulReviewNotice receipt={receipts.good_deed} compact />{/if}
+        {#if receipts.good_deed}
+          {#key receipts.good_deed.id}
+            <MindfulReviewNotice bind:this={goodDeedNotice} receipt={receipts.good_deed} compact journal />
+          {/key}
+        {/if}
 
         <div class="actions">
+          {@render shareStatus('good_deed')}
           <button
             type="button"
             class="btn-save-private"
@@ -546,7 +584,7 @@
       </section>
     </div>
     {#if !onShare}<p class="notice">{onSignIn ? copy.signInToShare : copy.unavailable}</p>{/if}
-    <p class="share-status" class:error={failed} role="status">{status}</p>
+    {#if shareStatusKind === null}<p class="share-status" class:error={failed} role="status">{status}</p>{/if}
   {/if}
 </div>
 
@@ -568,7 +606,7 @@
       {#if zenTarget === 'repentance'}
         <textarea
           aria-label={copy.repentance}
-          bind:value={repentance}
+          bind:value={() => repentance, (value) => editEntry('repentance', value)}
           maxlength="20000"
           placeholder={copy.repentancePlaceholder}
           class="zen-textarea"
@@ -577,7 +615,7 @@
       {:else}
         <textarea
           aria-label={copy.goodDeeds}
-          bind:value={goodDeeds}
+          bind:value={() => goodDeeds, (value) => editEntry('good_deed', value)}
           maxlength="20000"
           placeholder={copy.goodPlaceholder}
           class="zen-textarea"
@@ -643,6 +681,18 @@
     overflow-wrap: anywhere;
     color: var(--text2);
   }
+  .share-status--banner {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: calc(var(--space-page) * 0.5) var(--space-page);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: var(--gold-light);
+    color: var(--text);
+    font-size: var(--font-size-label);
+    font-weight: 700;
+  }
+  .share-status--banner.error { color: var(--danger-text); }
   .share-confirm-copy p {
     margin: 0 0 calc(var(--space-page) * 0.6);
     font-size: var(--font-size-label);
@@ -898,7 +948,8 @@
   }
   .snippet-pill {
     flex-shrink: 0;
-    min-height: 38px;
+    min-width: var(--touch-target-size);
+    min-height: var(--touch-target-size);
     padding: 4px 12px;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -929,7 +980,7 @@
   .journal-textarea {
     --journal-nav-clearance: 0px;
     width: 100%;
-    min-height: calc(var(--space-page) * 13 + var(--journal-nav-clearance));
+    min-height: calc(var(--space-page) * 14 + var(--journal-nav-clearance));
     padding: calc(var(--space-page) * 0.75);
     padding-block-end: calc(var(--space-page) * 0.75 + var(--journal-nav-clearance));
     scroll-margin-block-end: calc(var(--journal-nav-clearance) + var(--space-page));
@@ -1262,7 +1313,12 @@
       width: 100%;
       min-width: 0;
       flex: 1;
+    }
+    .meta-input--date {
       text-align: end;
+    }
+    .meta-input--text {
+      text-align: start;
     }
     .guide-toggle-button {
       width: 100%;

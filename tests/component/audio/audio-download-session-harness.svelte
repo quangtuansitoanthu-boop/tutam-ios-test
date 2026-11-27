@@ -19,6 +19,9 @@
     catalogAlbums = [album, additionalAlbum];
     selectedAlbumId = additionalAlbum.id;
   }
+  export function replaceTrack() {
+    catalogAlbums = [{ ...album, tracks: [album.tracks[0], { title: 'Replacement', url: '/audio/replacement.mp3' }] }];
+  }
   export function showAlbum(id: string) {
     const nextAlbum = { ...album, id, tieu_de: 'Selected story album' };
     catalogAlbums = [album, nextAlbum];

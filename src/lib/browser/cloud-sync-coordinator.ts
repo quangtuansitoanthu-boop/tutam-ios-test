@@ -9,6 +9,7 @@ import {
 import { createPrincipalStorage } from './principal-storage';
 
 const SYNC_BASELINE_KEY = 'quangtu_sync_baseline_v1';
+const SYNC_PENDING_TOMBSTONES_KEY = 'quangtu_sync_pending_tombstones_v1';
 
 export const LEGACY_AGGREGATE_SYNC_OWNER = Object.freeze({
   aggregateTable: 'user_sync_data',
@@ -25,13 +26,20 @@ export interface AggregateSyncClient {
 
 export function createCloudSyncCoordinator(storage: StorageLike, client: AggregateSyncClient) {
   interface PendingPush {
+    kind: 'push';
     rejecters: Array<(reason?: unknown) => void>;
     resolvers: Array<(snapshot: LegacyAggregateSyncSnapshot) => void>;
     userId: string;
   }
+  interface PendingPull {
+    kind: 'pull';
+    resolve: (snapshot: LegacyAggregateSyncSnapshot | null) => void;
+    reject: (reason?: unknown) => void;
+    userId: string;
+  }
 
   interface PrincipalSyncState {
-    pendingPushes: PendingPush[];
+    pendingPushes: Array<PendingPush | PendingPull>;
     optimisticBaseline: LegacyAggregateSyncSnapshot | null;
     pendingTombstones: AggregateSyncTombstones | undefined;
     pushInProgress: boolean;
@@ -46,7 +54,7 @@ export function createCloudSyncCoordinator(storage: StorageLike, client: Aggrega
     const created: PrincipalSyncState = {
       optimisticBaseline: readBaseline(scopedStorage),
       pendingPushes: [],
-      pendingTombstones: undefined,
+      pendingTombstones: readPendingTombstones(scopedStorage),
       pushInProgress: false,
       storage: scopedStorage,
     };
@@ -55,31 +63,79 @@ export function createCloudSyncCoordinator(storage: StorageLike, client: Aggrega
   };
 
   const advanceBaseline = (state: PrincipalSyncState, snapshot: LegacyAggregateSyncSnapshot) => {
-    state.optimisticBaseline = snapshot;
     storeBaseline(state.storage, snapshot);
+    state.optimisticBaseline = snapshot;
   };
 
   // Each state instance is one principal generation. Retiring it also invalidates
   // continuations already awaiting transport, including a later return to A.
   const isCurrent = (state: PrincipalSyncState, userId: string) => principalStates.get(userId) === state;
 
-  const pushLatestSnapshot = async (state: PrincipalSyncState, userId: string) => {
+  const captureLocalDeletions = (state: PrincipalSyncState) => {
     const snapshot = readAggregateSyncSnapshot(state.storage);
     const baseline = state.optimisticBaseline ?? readBaseline(state.storage);
-    const nextTombstones = baseline ? buildTombstones(baseline, snapshot) : undefined;
-    const tombstones = combinePendingTombstones(state.pendingTombstones, nextTombstones, snapshot);
+    const next = baseline ? buildTombstones(baseline, snapshot) : undefined;
+    const pending = combinePendingTombstones(state.pendingTombstones, next, snapshot);
+    if (JSON.stringify(pending) !== JSON.stringify(state.pendingTombstones)) {
+      storePendingTombstones(state.storage, pending);
+      state.pendingTombstones = pending;
+    }
+    return snapshot;
+  };
+
+  const pushLatestSnapshot = async (state: PrincipalSyncState, userId: string) => {
+    const snapshot = captureLocalDeletions(state);
+    const tombstones = state.pendingTombstones;
     const outbound = tombstones ? { ...snapshot, syncTombstones: tombstones } : snapshot;
 
     // Treat an attempted snapshot as the in-memory baseline immediately. A queued
     // deletion must tombstone data from an earlier request even if its response is
     // delayed or the client cannot know whether the server applied it.
-    state.optimisticBaseline = snapshot;
-    state.pendingTombstones = tombstones;
+    // Lưu cả snapshot đã thử gửi để sau process death vẫn biết thao tác xóa
+    // có thể cần thu hồi một lần ghi mà server đã nhận nhưng client chưa ACK.
+    advanceBaseline(state, snapshot);
     await client.push(userId, outbound);
     if (!isCurrent(state, userId)) throw new Error('sync_principal_changed');
     advanceBaseline(state, snapshot);
+    storePendingTombstones(state.storage, undefined);
     state.pendingTombstones = undefined;
     return snapshot;
+  };
+
+  const pullLatestSnapshot = async (state: PrincipalSyncState, userId: string): Promise<LegacyAggregateSyncSnapshot | null> => {
+    captureLocalDeletions(state);
+    const aggregateSnapshot = await client.pull(userId);
+    if (!isCurrent(state, userId)) return null;
+
+    captureLocalDeletions(state);
+    if (aggregateSnapshot) {
+      const applied = applyAggregateSyncSnapshot(state.storage, {
+        ...aggregateSnapshot,
+        syncTombstones: mergeTombstones(aggregateSnapshot.syncTombstones, state.pendingTombstones),
+      });
+      if (state.pendingTombstones || !sameSnapshotContent(aggregateSnapshot, applied)) {
+        await pushLatestSnapshot(state, userId);
+        if (!isCurrent(state, userId)) return null;
+      } else advanceBaseline(state, applied);
+      return applied;
+    }
+
+    const playerSnapshot = client.pullPlayerFallback ? await client.pullPlayerFallback(userId) : null;
+    if (!isCurrent(state, userId)) return null;
+    const latestLocal = captureLocalDeletions(state);
+    if (!playerSnapshot) {
+      if (!hasSnapshotContent(latestLocal) && !state.pendingTombstones) return null;
+      return pushLatestSnapshot(state, userId);
+    }
+
+    applyAggregateSyncSnapshot(state.storage, {
+      ...latestLocal,
+      ptAlbumPositions: playerSnapshot.ptAlbumPositions,
+      ptPlayerState: playerSnapshot.ptPlayerState,
+      ptRecentAlbums: playerSnapshot.ptRecentAlbums,
+      syncTombstones: state.pendingTombstones,
+    });
+    return pushLatestSnapshot(state, userId);
   };
 
   const drainPushQueue = async (state: PrincipalSyncState) => {
@@ -89,10 +145,16 @@ export function createCloudSyncCoordinator(storage: StorageLike, client: Aggrega
       while (state.pendingPushes.length) {
         const pending = state.pendingPushes.shift()!;
         try {
-          const snapshot = await pushLatestSnapshot(state, pending.userId);
-          for (const resolve of pending.resolvers) resolve(snapshot);
+          if (pending.kind === 'pull') {
+            pending.resolve(isCurrent(state, pending.userId) ? await pullLatestSnapshot(state, pending.userId) : null);
+          } else {
+            if (!isCurrent(state, pending.userId)) throw new Error('sync_principal_changed');
+            const snapshot = await pushLatestSnapshot(state, pending.userId);
+            for (const resolve of pending.resolvers) resolve(snapshot);
+          }
         } catch (cause) {
-          for (const reject of pending.rejecters) reject(cause);
+          if (pending.kind === 'pull') pending.reject(cause);
+          else for (const reject of pending.rejecters) reject(cause);
         }
       }
     } finally {
@@ -103,55 +165,22 @@ export function createCloudSyncCoordinator(storage: StorageLike, client: Aggrega
   const enqueuePush = (userId: string) => new Promise<LegacyAggregateSyncSnapshot>((resolve, reject) => {
     const state = stateFor(userId);
     const coalesced = state.pendingPushes[state.pendingPushes.length - 1];
-    if (coalesced?.userId === userId) {
+    if (coalesced?.kind === 'push' && coalesced.userId === userId) {
       coalesced.resolvers.push(resolve);
       coalesced.rejecters.push(reject);
     } else {
-      state.pendingPushes.push({ userId, resolvers: [resolve], rejecters: [reject] });
+      state.pendingPushes.push({ kind: 'push', userId, resolvers: [resolve], rejecters: [reject] });
     }
     void drainPushQueue(state);
   });
 
   return {
-    async pull(userId: string): Promise<LegacyAggregateSyncSnapshot | null> {
-      const state = stateFor(userId);
-      const localSnapshot = readAggregateSyncSnapshot(state.storage);
-      const aggregateSnapshot = await client.pull(userId);
-      if (!isCurrent(state, userId)) return null;
-
-      if (aggregateSnapshot) {
-        const applied = applyAggregateSyncSnapshot(state.storage, aggregateSnapshot);
-        if (!sameSnapshotContent(aggregateSnapshot, applied)) {
-          await client.push(userId, applied);
-          if (!isCurrent(state, userId)) return null;
-        }
-        advanceBaseline(state, applied);
-        return applied;
-      }
-
-      const playerSnapshot = client.pullPlayerFallback
-        ? await client.pullPlayerFallback(userId)
-        : null;
-      if (!isCurrent(state, userId)) return null;
-
-      if (!playerSnapshot) {
-        if (!hasSnapshotContent(localSnapshot)) return null;
-        await client.push(userId, localSnapshot);
-        if (!isCurrent(state, userId)) return null;
-        advanceBaseline(state, localSnapshot);
-        return localSnapshot;
-      }
-
-      const applied = applyAggregateSyncSnapshot(state.storage, {
-        ...localSnapshot,
-        ptAlbumPositions: playerSnapshot.ptAlbumPositions,
-        ptPlayerState: playerSnapshot.ptPlayerState,
-        ptRecentAlbums: playerSnapshot.ptRecentAlbums,
+    pull(userId: string): Promise<LegacyAggregateSyncSnapshot | null> {
+      return new Promise((resolve, reject) => {
+        const state = stateFor(userId);
+        state.pendingPushes.push({ kind: 'pull', userId, resolve, reject });
+        void drainPushQueue(state);
       });
-      await client.push(userId, applied);
-      if (!isCurrent(state, userId)) return null;
-      advanceBaseline(state, applied);
-      return applied;
     },
 
     async push(userId: string): Promise<LegacyAggregateSyncSnapshot> {
@@ -163,11 +192,42 @@ export function createCloudSyncCoordinator(storage: StorageLike, client: Aggrega
       if (!state) return;
       principalStates.delete(userId);
       for (const pending of state.pendingPushes.splice(0)) {
-        for (const reject of pending.rejecters) reject(reason);
+        if (pending.kind === 'pull') pending.resolve(null);
+        else for (const reject of pending.rejecters) reject(reason);
       }
       state.pendingTombstones = undefined;
     },
   };
+}
+
+function mergeTombstones(left: AggregateSyncTombstones | undefined, right: AggregateSyncTombstones | undefined) {
+  return combinePendingTombstones(left, right, {
+    bookmarks: [], listenedHistory: [], practiceLogs: [], ptAlbumPositions: {}, ptPlayerState: null, ptRecentAlbums: [],
+  });
+}
+
+function readPendingTombstones(storage: StorageLike): AggregateSyncTombstones | undefined {
+  const raw = storage.getItem(SYNC_PENDING_TOMBSTONES_KEY);
+  if (raw === null) return undefined;
+  const parsed: unknown = JSON.parse(raw);
+  if (parsed === null) return undefined;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid_sync_pending_tombstones');
+  for (const [key, value] of Object.entries(parsed)) {
+    if (key === 'ptPlayerState') {
+      if (value !== null && (!value || typeof value !== 'object' || typeof value.deletedAt !== 'number' || !Number.isFinite(value.deletedAt))) {
+        throw new Error('invalid_sync_pending_tombstones');
+      }
+    } else if (!['bookmarks', 'listenedHistory', 'practiceLogs', 'ptAlbumPositions', 'ptRecentAlbums'].includes(key)
+      || !Array.isArray(value) || !value.every(entry => entry && typeof entry.key === 'string'
+        && typeof entry.deletedAt === 'number' && Number.isFinite(entry.deletedAt))) {
+      throw new Error('invalid_sync_pending_tombstones');
+    }
+  }
+  return parsed as AggregateSyncTombstones;
+}
+
+function storePendingTombstones(storage: StorageLike, tombstones: AggregateSyncTombstones | undefined): void {
+  storage.setItem(SYNC_PENDING_TOMBSTONES_KEY, JSON.stringify(tombstones ?? null));
 }
 
 function combinePendingTombstones(

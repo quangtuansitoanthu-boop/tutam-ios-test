@@ -316,6 +316,70 @@
   font-size: var(--font-size-meta);
 }
 
+/* 3b. THANH CHỈNH CỠ CHỮ HƯỚNG DẪN (A− / 100% / A+) */
+.guide-font-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border2);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+
+.guide-font-label {
+  color: var(--text2);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+}
+
+.guide-font-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guide-font-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: linear-gradient(155deg, var(--card), var(--bg2));
+  color: var(--brown);
+  cursor: pointer;
+  font-family: var(--font-app);
+  font-size: var(--font-size-label);
+  font-weight: 800;
+  box-shadow: inset 0 1.5px 0 color-mix(in srgb, var(--card) 88%, transparent), inset 0 -2px 0 rgba(60, 40, 10, 0.1), var(--shadow-sm);
+  transition: transform var(--motion-press) var(--ease-standard), border-color var(--motion-press) var(--ease-standard);
+}
+
+.guide-font-btn:hover:not(:disabled) {
+  border-color: var(--gold);
+}
+
+.guide-font-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.97);
+}
+
+.guide-font-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.guide-font-value {
+  min-width: 44px;
+  color: var(--text2);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 /* 4. GUIDE SECTIONS (ACCORDIONS CÓ CHIỀU SÂU & ICON BADGE) */
 .guide-sections {
   display: grid;
@@ -345,7 +409,7 @@
   padding: 12px 20px;
   color: var(--brown);
   cursor: pointer;
-  font-size: var(--font-size-card-title);
+  font-size: calc(var(--font-size-card-title) * var(--guide-font-scale, 1));
   font-weight: 750;
   line-height: 1.45;
   list-style: none;
@@ -385,7 +449,7 @@
 }
 
 .guide-section__title-text {
-  font-size: var(--font-size-card-title);
+  font-size: calc(var(--font-size-card-title) * var(--guide-font-scale, 1));
   font-weight: 750;
   color: var(--brown);
   letter-spacing: -0.1px;
@@ -426,7 +490,7 @@
 .guide-quote blockquote,
 .guide-faq__answer p,
 .guide-install-steps {
-  font-size: 15px;
+  font-size: calc(var(--font-size-ritual-reading) * var(--guide-font-scale, 1));
   line-height: 1.76;
   text-align: justify;
   text-justify: inter-word;
@@ -462,7 +526,7 @@
   gap: 8px;
   margin: 0 0 14px;
   color: var(--brown);
-  font-size: var(--font-size-card-title);
+  font-size: calc(var(--font-size-card-title) * var(--guide-font-scale, 1));
   font-weight: 750;
   line-height: 1.45;
 }
@@ -508,7 +572,7 @@
 .guide-quote figcaption {
   margin: 0 0 6px;
   color: var(--text);
-  font-size: 14.5px;
+  font-size: calc(var(--font-size-card-title) * var(--guide-font-scale, 1));
   font-weight: 750;
   line-height: 1.45;
   text-align: left;
@@ -552,8 +616,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--gold), var(--brown));
-  color: #fff;
+  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  color: var(--on-gold);
   font-size: 13px;
   font-weight: 800;
   box-shadow: 0 3px 10px rgba(180, 130, 45, 0.25);
@@ -572,7 +636,7 @@
 .guide-bullets ul {
   margin: 0;
   padding-left: 20px;
-  font-size: 15px;
+  font-size: calc(var(--font-size-ritual-reading) * var(--guide-font-scale, 1));
   line-height: 1.76;
 }
 
@@ -605,7 +669,6 @@
 .guide-callout strong {
   display: block;
   color: var(--brown);
-  font-size: var(--font-size-body);
 }
 
 .guide-callout--warning strong {
@@ -694,7 +757,6 @@
   border-radius: 12px;
   background: var(--gold-light);
   color: var(--brown);
-  font-size: 14px;
   font-weight: 700;
   line-height: 1.6;
 }
@@ -729,7 +791,7 @@
   padding: 12px 16px;
   color: var(--text);
   cursor: pointer;
-  font-size: var(--font-size-body);
+  font-size: calc(var(--font-size-card-title) * var(--guide-font-scale, 1));
   font-weight: 700;
   line-height: 1.5;
   list-style: none;
@@ -761,10 +823,6 @@
 
 .guide-faq__answer p {
   margin: 0 0 10px;
-  font-size: var(--font-size-body);
-  line-height: 1.76;
-  text-align: justify;
-  text-justify: inter-word;
 }
 
 .guide-faq__answer p:last-child {
@@ -791,7 +849,7 @@
   background: color-mix(in srgb, var(--gold) 8%, var(--card));
   border: 1px dashed color-mix(in srgb, var(--gold) 30%, transparent);
   color: var(--brown);
-  font-size: var(--font-size-body);
+  font-size: calc(var(--font-size-body) * var(--guide-font-scale, 1));
   font-style: italic;
   line-height: 1.75;
   text-align: center;
@@ -847,7 +905,7 @@
   }
 
   .guide-section__title-text {
-    font-size: var(--font-size-card-title);
+    font-size: calc(var(--font-size-card-title) * var(--guide-font-scale, 1));
   }
 
   .guide-section__body {
@@ -877,7 +935,6 @@
   .guide-quote blockquote,
   .guide-faq__answer p,
   .guide-install-steps {
-    font-size: var(--font-size-body);
     line-height: 1.72;
   }
 }
@@ -889,6 +946,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .guide-font-btn,
   .guide-section__chevron,
   .guide-faq__toggle {
     transition: none;

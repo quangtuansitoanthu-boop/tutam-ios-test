@@ -7,6 +7,7 @@
   import { Play, Pause, Repeat2, Volume2, Settings } from '@lucide/svelte';
   import { PRECEPT_UI } from '$lib/i18n/precept-interface';
   import { isNativeApp } from '$lib/browser/native-platform';
+  import { addAppActiveListener } from '$lib/browser/native-app-lifecycle';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
   import { getThemeContext } from '$lib/stores/theme.svelte';
   import { thanhTinhTranslations } from '$lib/i18n/thanh-tinh-translations';
@@ -121,9 +122,12 @@
   let sosOscillator: OscillatorNode | null = null;
   let sosLfo: OscillatorNode | null = null;
   let sosGainNode: GainNode | null = null;
-  let sosAlarmInterval: ReturnType<typeof setInterval> | null = null;
   let sosAlarmSecondsLeft = $state(120);
   let isSosAlarmPlaying = $state(false);
+  const sosCountdown = createPracticeAudioCountdown(
+    seconds => { sosAlarmSecondsLeft = seconds; },
+    () => stopSosAlarm(),
+  );
 
   // Check-in Solemn Confirmation Modal
   let showCheckInModal = $state(false);
@@ -131,7 +135,8 @@
   // Audio Player for Chú Lăng Nghiêm (Primary & Fallback Sources)
   const iosAudioBundle = import.meta.env.VITE_CONTENT_PLATFORM === 'ios';
   const AUDIO_SOURCES = iosAudioBundle
-    ? ['/assets/audio/chu-lang-nghiem.mp3'] : [
+    ? ['/assets/audio/chu-lang-nghiem.mp3',
+      'https://quangtu.vn/assets/audio/chu-lang-nghiem-dieu-am-tinh-tuan-20261023.mp3'] : [
     '/assets/audio/chu-lang-nghiem-dieu-am-tinh-tuan-20261023.mp3?v=trim9-20261025',
     'https://quangtu.vn/assets/audio/chu-lang-nghiem-dieu-am-tinh-tuan-20261023.mp3'
   ];
@@ -167,21 +172,17 @@
 
   // Web Audio wake lock
   let wakeLock: ReturnType<typeof createWakeLockController> | null = null;
-  let wakeLockActive = false;
 
   async function holdWakeLock() {
-    if (wakeLockActive || !open) return;
+    if (!open || (!isPlaying && !isSosAlarmPlaying)) return;
     const owner = wakeLock ??= createWakeLockController();
-    wakeLockActive = true;
-    const acquired = await owner.request();
-    if (owner !== wakeLock || !open) { await owner.release(); return; }
-    wakeLockActive = acquired;
+    await owner.request();
+    if (owner !== wakeLock || !open || (!isPlaying && !isSosAlarmPlaying)) await owner.release();
   }
 
   function releaseWakeLock() {
     const owner = wakeLock;
     wakeLock = null;
-    wakeLockActive = false;
     void owner?.destroy();
   }
 
@@ -258,11 +259,15 @@
       if (open && document.visibilityState !== 'hidden') {
         refreshCheckInClock(new Date(), true);
         audioCountdown.refresh();
+        sosCountdown.refresh();
+        if (isPlaying || isSosAlarmPlaying) void holdWakeLock();
       }
     };
     window.addEventListener('focus', foreground);
     document.addEventListener('visibilitychange', foreground);
+    const stopNativeActive = addAppActiveListener(foreground);
     return () => {
+      stopNativeActive();
       window.removeEventListener('focus', foreground);
       document.removeEventListener('visibilitychange', foreground);
     };
@@ -716,23 +721,16 @@
 
       osc.start();
       lfo.start();
+      // Audio vẫn có thể chạy khi JS bị treo nền; giới hạn còi ngay trên đồng hồ audio.
+      osc.stop(ctx.currentTime + 120);
+      lfo.stop(ctx.currentTime + 120);
 
       sosOscillator = osc;
       sosLfo = lfo;
       sosGainNode = mainGain;
       isSosAlarmPlaying = true;
-      sosAlarmSecondsLeft = 120; // 2 minutes
-
       void holdWakeLock();
-
-      if (sosAlarmInterval) clearInterval(sosAlarmInterval);
-      sosAlarmInterval = setInterval(() => {
-        if (sosAlarmSecondsLeft > 0) {
-          sosAlarmSecondsLeft -= 1;
-        } else {
-          stopSosAlarm();
-        }
-      }, 1000);
+      sosCountdown.start(120);
     } catch {
       // AudioContext might fail on browsers requiring user gesture
     }
@@ -740,10 +738,7 @@
 
   function stopSosAlarm() {
     stopTibetanSingingBowl();
-    if (sosAlarmInterval) {
-      clearInterval(sosAlarmInterval);
-      sosAlarmInterval = null;
-    }
+    sosCountdown.stop();
     isSosAlarmPlaying = false;
     if (!isPlaying) releaseWakeLock();
     if (sosGainNode && sosAudioCtx) {
@@ -3268,7 +3263,7 @@
   .reference-view .tt-title-icon,.reference-view .tt-subtitle{display:none}
   .reference-view .btn-back{background:transparent;border-color:transparent;color:var(--brown);padding:var(--radius-sm)}
   .reference-view .tt-tabs-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;border-bottom:1px solid var(--border);background:transparent;gap:var(--radius-sm);padding-block:var(--radius-control)}
-  .practice-theme.reference-view .tt-tabs-nav .tt-tab-btn{width:100%;min-width:0;min-height:44px;padding:var(--radius-sm);white-space:normal;border:1px solid var(--border);border-radius:var(--radius-control);background:var(--gold-light);color:var(--brown);box-shadow:none}
+  .practice-theme.reference-view .tt-tabs-nav .tt-tab-btn{width:100%;min-width:0;min-height:44px;padding:var(--radius-sm);white-space:normal;border:1px solid var(--border);border-radius:var(--radius-control);background:var(--card);color:var(--text2);box-shadow:none}
   .practice-theme.reference-view .tt-tabs-nav .tt-tab-btn.active{border-color:var(--gold);color:var(--on-gold);background:var(--gold)}
   @media(min-width:640px){.reference-view .tt-tabs-nav{grid-template-columns:repeat(3,minmax(0,1fr))}}
   @media(min-width:960px){.reference-view .tt-tabs-nav{grid-template-columns:repeat(6,minmax(0,1fr))}}
@@ -3911,9 +3906,6 @@
   /* Cùng hệ vàng–kem cho cả chương trình; các trạng thái nguy cơ vẫn có màu cảnh báo. */
   .reference-view :is(.tt-onboarding-card,.community-banner,.streak-card,.progress-hero-card,.sos-banner,.sos-card,.sos-consequence-section,.diet-header-card,.diet-rule-card,.lifestyle-card,.repent-header-card,.repent-ritual-card,.repent-recovery-actions,.relapse-warning-banner,.modal-dialog){background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);box-shadow:var(--shadow);color:var(--text)}
   .reference-view .relapse-warning-banner{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 8%,var(--card))}
-  .reference-view .tt-tab-btn{background:var(--card);border:1px solid var(--border);color:var(--text2)}
-  .reference-view .tt-tab-btn.active{background:var(--gold-light);border-color:var(--gold);color:var(--brown)}
-  :global([data-theme='dark']) .reference-view .tt-tab-btn.active{color:var(--gold2)}
   .reference-view .modal-dialog{background:var(--dialog-surface-background,var(--card));border-color:var(--dialog-surface-border,var(--border));box-shadow:var(--dialog-surface-shadow,var(--shadow-xl))}
   .reference-view .tt-onboarding-card{margin-top:var(--radius-card)}
   .reference-view :is(.progress-current-status-box,.witness-box,.consequence-card,.phys-item,.squat-counter-box,.mantra-text-box,.mantra-content,.repent-quote-box,.repent-script,.rec-step,.reset-streak-box,.pledge-vow-box,.pledge-privacy-reassure,.checkin-question-box,.recovery-track-bar){background:var(--gold-light);border-color:var(--border);color:var(--text2);box-shadow:none}

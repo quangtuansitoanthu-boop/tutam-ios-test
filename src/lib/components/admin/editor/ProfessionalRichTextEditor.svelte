@@ -1,5 +1,6 @@
 <script lang="ts">
   import { promptInApp } from '$lib/browser/app-dialog';
+  import { mediaFileContentType } from '$lib/utils/media-file-content-type';
   import { sanitizeStoredHtml } from '$lib/domain/content-sanitizer';
   import { cleanPastedHtml, formatPlainTextToHtml } from './paste-cleaner';
   import { createArticleLinkHtml, createArticleTableHtml, isSafeEditorLink } from '../articles/article-content-editor';
@@ -100,7 +101,7 @@
     onError('');
     try {
       for (const file of files) {
-        if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+        if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mediaFileContentType(file))) {
           throw new Error('Chỉ hỗ trợ ảnh JPEG, PNG, WebP và GIF.');
         }
         const url = await uploadImage(file);

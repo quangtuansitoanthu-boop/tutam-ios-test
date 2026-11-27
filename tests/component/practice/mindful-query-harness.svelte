@@ -1,8 +1,8 @@
 <script lang="ts">
   import { QueryClientProvider, type QueryClient } from '@tanstack/svelte-query';
   import MindfulCommunity from '$lib/components/practice/community/MindfulCommunity.svelte';
-  let { client }: { client: QueryClient } = $props();
+  let { client, canModerate = false }: { client: QueryClient; canModerate?: boolean } = $props();
 </script>
 <QueryClientProvider {client}>
-  <MindfulCommunity principalId="A" nickname="Đồng Tu" />
+  <MindfulCommunity principalId="A" {canModerate} nickname="Đồng Tu" />
 </QueryClientProvider>

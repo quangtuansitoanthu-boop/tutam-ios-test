@@ -2,10 +2,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { onlineManager, QueryClient } from '@tanstack/svelte-query';
 import Harness from './notification-bell-harness.svelte';
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), admin: vi.fn(), goto: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), admin: vi.fn(), goto: vi.fn(), reads: vi.fn() }));
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
 vi.mock('$lib/browser/mindful-community-client', () => ({ fetchMindfulNotifications: mocks.fetch }));
 vi.mock('$lib/browser/session-csrf', () => ({ fetchWithSessionRefresh: mocks.admin }));
+vi.mock('$lib/browser/notification-read-state', () => ({ requestNotificationReadState: mocks.reads }));
 vi.mock('$lib/stores/session.svelte', () => ({ SESSION_CONTEXT: Symbol('session') }));
 vi.mock('$lib/browser/native-platform', () => ({ isNativeApp: () => false }));
 vi.mock('$lib/components/lunar/lunar-events', () => ({ getLunarEvent: () => ({ lunarDay: 2, lunarMonth: 1, isThapTrai: false }) }));
@@ -26,6 +27,7 @@ async function start(initial = user('a'), ready = true) {
 beforeEach(() => {
   onlineManager.setOnline(true);
   mocks.fetch.mockReset().mockResolvedValue(page()); mocks.admin.mockReset(); mocks.goto.mockReset();
+  mocks.reads.mockReset().mockResolvedValue([]);
   localStorage.clear(); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.mount();
 });
 afterEach(async () => { if (component) await unmount(component); component = undefined; client.clear(); client.unmount(); vi.restoreAllMocks(); localStorage.clear(); document.body.replaceChildren(); });
@@ -122,4 +124,35 @@ it('marks read locally and keeps normal reminders available without a write or f
   document.querySelector<HTMLButtonElement>('.empty-history-btn')?.click(); await settle();
   expect(document.querySelector('.mindful-item')?.classList.contains('unread')).toBe(false);
   expect(mocks.fetch).toHaveBeenCalledTimes(1); expect(mocks.admin).not.toHaveBeenCalled();
+});
+
+it('reuses fresh read-state on foreground and ignores an unrelated window focus', async () => {
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  await start();
+  await vi.waitFor(() => expect(mocks.reads).toHaveBeenCalledTimes(1));
+  document.dispatchEvent(new Event('visibilitychange'));
+  window.dispatchEvent(new Event('focus'));
+  window.dispatchEvent(new Event('online'));
+  await settle(); await settle();
+  expect(mocks.reads).toHaveBeenCalledTimes(1);
+});
+
+it('coalesces stale foreground reads while still flushing a tap made during the GET', async () => {
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  await start();
+  await vi.waitFor(() => expect(mocks.reads).toHaveBeenCalledTimes(1));
+  client.setQueriesData({ queryKey: ['notification-read-state', 'a'] }, data => data, { updatedAt: Date.now() - 60_001 });
+  let finish!: (ids: string[]) => void;
+  mocks.reads.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  document.dispatchEvent(new Event('visibilitychange'));
+  window.dispatchEvent(new Event('focus'));
+  window.dispatchEvent(new Event('online'));
+  await settle();
+  expect(mocks.reads.mock.calls.filter(call => !call[2])).toHaveLength(2);
+  bell().click(); await settle();
+  document.querySelector<HTMLButtonElement>('.mark-all-btn')!.click(); await settle();
+  finish([]); await settle(); await settle();
+  expect(mocks.reads.mock.calls.filter(call => !call[2])).toHaveLength(2);
+  expect(mocks.reads.mock.calls.some(call => call[2] === true && call[0].includes('mindful-reaction:one'))).toBe(true);
+  expect(JSON.parse(localStorage.getItem('quangtu_notifications_read_a') ?? '[]')).toContain('mindful-reaction:one');
 });

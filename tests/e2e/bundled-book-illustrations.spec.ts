@@ -2,8 +2,12 @@ import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import manifest from '../../src/lib/data/mission-book-images.json' with { type: 'json' };
 import videoManifest from '../../src/lib/data/quang-tu-facebook-videos.json' with { type: 'json' };
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 import mobileImages from '../../assets/book-content/mobile-image-variants.json' with { type: 'json' };
+
+test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
+});
 
 test('old book HTML still opens illustrations after mobile asset compression', async ({ page }) => {
   const entry = mobileImages.superseded[0];

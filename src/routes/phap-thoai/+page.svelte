@@ -13,7 +13,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import AudioCatalog, { type TalkAlbum } from '$lib/components/audio/AudioCatalog.svelte';
   import AudioCatalogSkeleton from '$lib/components/audio/AudioCatalogSkeleton.svelte';
-  import { readOfflineLibrarySnapshot } from '$lib/browser/offline-audio-database';
+  import { offlineCatalogProgress, readOfflineLibrarySnapshot, type OfflineLibrarySnapshot } from '$lib/browser/offline-audio-database';
   import {
     applyRemotePlayerSync,
     captureAudioLibraryStorageSnapshot,
@@ -78,8 +78,9 @@
   let listenLaterAlbumIds = $state<string[]>([]);
   let collectionBusyKeys = $state<string[]>([]);
   let collectionStatus = $state('');
-  let offlineAlbumIds = $state<string[]>([]);
-  let offlineBytes = $state(0);
+  let offlineSnapshot = $state.raw<OfflineLibrarySnapshot | null>(null);
+  let offlineReadGeneration = 0;
+  const offlineBytes = $derived(offlineSnapshot?.bytes ?? 0);
   const sessionStore = getSessionContext();
   const role = $derived(sessionStore.value.user?.role ?? 'guest');
   const catalogPrincipalId = $derived(sessionStore.value.authenticated ? sessionStore.value.user?.id ?? null : null);
@@ -105,6 +106,7 @@
   const albums = $derived((albumsQuery.data ?? []).map((album) => ({ ...album,
     playCount: playCounts.get(album.id),
   })));
+  const offlineAlbumIds = $derived(albums.filter(album => offlineCatalogProgress(offlineSnapshot, album).status === 'downloaded').map(album => album.id));
   const topAlbums = $derived(albums.filter((album) => album.visibility !== 'private' && (album.playCount ?? 0) > 0)
     .sort((a, b) => (b.playCount ?? 0) - (a.playCount ?? 0) || a.id.localeCompare(b.id)).slice(0, 10));
   let refreshNotice = $state<string | null>(null);
@@ -150,7 +152,7 @@
   const favoriteCount = $derived(favoriteAlbumIds.filter((albumId) => albums.some((album) => album.id === albumId)).length);
   const listenLaterCount = $derived(listenLaterAlbumIds.filter((albumId) => albums.some((album) => album.id === albumId)).length);
   const recentCount = $derived(recentAlbumIds.filter((albumId) => albums.some((album) => album.id === albumId)).length);
-  const offlineCount = $derived(offlineAlbumIds.filter((albumId) => albums.some((album) => album.id === albumId)).length);
+  const offlineCount = $derived(offlineAlbumIds.length);
 
   function topicIcon(name: string): string {
     return TOPIC_ICONS[name] ?? '🎧';
@@ -161,17 +163,18 @@
   }
 
   async function refreshClientCollections(generation = collectionGeneration): Promise<void> {
+    if (generation !== collectionGeneration) return;
+    const readGeneration = ++offlineReadGeneration;
     recentAlbumIds = readStoredRecentAlbums();
     favoriteAlbumIds = readStoredLibrary('favorite').map((item) => item.albumId);
     listenLaterAlbumIds = readStoredLibrary('listen_later').map((item) => item.albumId);
     const session = sessionStore.value;
-    const offline = await readOfflineLibrarySnapshot().catch(() => ({ albums: [], bytes: 0, trackCounts: {} }));
-    if (generation !== collectionGeneration
+    const offline = await readOfflineLibrarySnapshot().catch(() => null);
+    if (readGeneration !== offlineReadGeneration || generation !== collectionGeneration
       || session.authenticated !== sessionStore.value.authenticated
       || session.user?.id !== sessionStore.value.user?.id
       || session.user?.role !== sessionStore.value.user?.role) return;
-    offlineAlbumIds = offline.albums.map((album) => album.id);
-    offlineBytes = offline.bytes;
+    offlineSnapshot = offline;
     if (topic === 'offline' && offlineAlbumIds.length === 0) topic = 'all';
   }
 
@@ -385,6 +388,10 @@
         ? sessionStore.value.user?.id ?? null
         : null;
       if (!collectionRequests.transition(nextPrincipalId)) {
+        if (previousRole !== nextCatalogRole) {
+          offlineSnapshot = null;
+          void refreshClientCollections();
+        }
         if (previousRole === 'admin' && nextCatalogRole !== 'admin') handleSelectAlbum(null);
         return;
       }
@@ -404,6 +411,7 @@
         checkedInitialUrl = false;
       } else handleSelectAlbum(null);
       collectionGeneration += 1;
+      offlineSnapshot = null;
       collectionBusyKeys = [];
       collectionStatus = '';
       void refreshClientCollections(collectionGeneration);
@@ -613,7 +621,6 @@
       {offlineAlbumIds}
       {role}
       {selectedAlbumId}
-      onOfflineChanged={refreshClientCollections}
       onSelectAlbum={handleSelectAlbum}
       onCollectionToggle={(album, collection) => void toggleCollection(album, collection)}
     />

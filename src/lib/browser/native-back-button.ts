@@ -6,12 +6,50 @@ import { dismissTopModal } from './modal-dialog';
 let backButtonInitialized = false;
 let backButtonInitialization: Promise<void> | undefined;
 let lastBackPressTime = 0;
+let nativeHistoryCanGoBack: (() => boolean) | undefined;
+
+/** Dùng chung cho Back trong header và cử chỉ/native; không đếm lịch sử Forward. */
+export function canNavigateBack(): boolean {
+  if (!browser) return false;
+  return nativeHistoryCanGoBack?.() ?? window.history.length > 1;
+}
+
+function trackNativeNavigationHistory(): () => boolean {
+  const key = '__tutam_native_history_v1';
+  const history = window.history;
+  const isState = (value: unknown): value is Record<string, unknown> =>
+    Object.prototype.toString.call(value) === '[object Object]';
+  const depthOf = (value: unknown): number => {
+    const depth = isState(value) ? value[key] : undefined;
+    return typeof depth === 'number' && Number.isSafeInteger(depth) && depth >= 0 ? depth : 0;
+  };
+  let depth = depthOf(history.state);
+  const push = history.pushState;
+  const replace = history.replaceState;
+  // Chỉ thêm key riêng; giữ nguyên toàn bộ state của router và caller khác.
+  if (isState(history.state)) replace.call(history, { ...history.state, [key]: depth }, '');
+  history.pushState = (state: unknown, title: string, url?: string | URL | null) => {
+    const next = isState(state) ? depth + 1 : 0;
+    push.call(history, isState(state) ? { ...state, [key]: next } : state, title, url);
+    depth = next;
+  };
+  history.replaceState = (state: unknown, title: string, url?: string | URL | null) => {
+    replace.call(history, isState(state) ? { ...state, [key]: depth } : state, title, url);
+    if (!isState(state)) depth = 0;
+  };
+  window.addEventListener('popstate', event => { depth = depthOf(event.state); });
+  return () => depth > 0;
+}
 
 export async function initializeNativeBackButton(): Promise<void> {
   if (!browser || !isNativeApp() || backButtonInitialized) return;
   if (backButtonInitialization) return backButtonInitialization;
 
   backButtonInitialization = (async () => {
+    if (!nativeHistoryCanGoBack && typeof window.history?.pushState === 'function'
+      && typeof window.history?.replaceState === 'function' && typeof window.addEventListener === 'function') {
+      nativeHistoryCanGoBack = trackNativeNavigationHistory();
+    }
     function handleBack(canGoBack: boolean | undefined, handleRootBack?: () => void) {
       if (dismissTopModal()) return;
       const notificationClose = document.querySelector<HTMLElement>('.notification-popover .close-popover-btn');
@@ -19,12 +57,12 @@ export async function initializeNativeBackButton(): Promise<void> {
         notificationClose.click();
         return;
       }
-      for (const selector of ['#copy-options .panel-heading button', '.copy-writing .issues-heading button', '.copy-writing .writing-back, .copy-writing .writing-bar > .icon-button']) {
+      for (const selector of ['#copy-options .panel-heading button', '.copy-writing .issues-heading button', '.copy-writing .writing-back', '.copy-writing .writing-bar > .icon-button']) {
         const close = document.querySelector<HTMLElement>(selector);
         if (close && close.offsetParent !== null) { close.click(); return; }
       }
       const routeBack = document.querySelector('[data-practice-route-back]')
-        ? document.querySelector<HTMLElement>('.tt-topbar .tt-back-btn') : null;
+        ? (document.querySelector<HTMLElement>('.tt-topbar .tt-back-btn') ?? document.querySelector<HTMLElement>('.qts-nav .nav-back-circle-btn')) : null;
       if (routeBack && routeBack.offsetParent !== null) { routeBack.click(); return; }
       const readerPanelClose = document.querySelector<HTMLElement>('.pdf-bookmark-panel [aria-label="Đóng danh sách đánh dấu"], .reader-tools-panel.open .sheet-close-btn');
       if (readerPanelClose && readerPanelClose.offsetParent !== null) {
@@ -81,9 +119,13 @@ export async function initializeNativeBackButton(): Promise<void> {
 
       // 2. Kiểm tra nếu có bất kỳ Modal nào khác đang mở (Login, Hộp thoại xác nhận, Lightbox ảnh, Tracker, Khuyến tu, Thanh Tịnh Tâm, v.v.)
       const openModals = Array.from(document.querySelectorAll<HTMLElement>('.modal-backdrop, .login-overlay, .reader-image-lightbox, .quote-card-overlay, .tt-overlay.open, .album-overlay, .article-admin-overlay, .admin-member-overlay, .reader-overlay, .tt-modal-overlay, .cn-modal-scrim, .admin-shell__scrim, .thanh-tinh-overlay'));
-      // Child/successor overlays are rendered after their parent. Back must
-      // cancel that layer first; never use a form's generic submit/OK button.
-      for (const openModal of openModals.reverse()) {
+      const layer = (element: HTMLElement): number => {
+        const value = typeof window.getComputedStyle === 'function'
+          ? window.getComputedStyle(element).zIndex : element.style?.zIndex;
+        return Number.parseInt(value || '', 10) || 0;
+      };
+      // Ưu tiên lớp đang ở trên; cùng z-index thì lớp xuất hiện sau đóng trước.
+      for (const openModal of openModals.reverse().sort((a, b) => layer(b) - layer(a))) {
         const closeBtn = openModal.querySelector<HTMLElement>('.btn-back, .btn-cancel-modal, .btn-cancel, .btn-cancel-checkin, .tt-dialog-cancel, button.close, .lightbox-close, .tt-tracker__close, .tt-rec-toggle-btn, .tt-modal-close, .admin-shell__scrim, [aria-label="Đóng"], [aria-label="Close"], [aria-label="Hủy"], [aria-label="Quay lại danh mục"], [aria-label="Quay lại"]');
         if (closeBtn && closeBtn.offsetParent !== null) {
           closeBtn.click();
@@ -108,10 +150,14 @@ export async function initializeNativeBackButton(): Promise<void> {
       }
       const categoryBack = document.querySelector<HTMLElement>('.tt-section-view .tt-back-btn');
       if (categoryBack && categoryBack.offsetParent !== null) { categoryBack.click(); return; }
+      const chapterReaderBack = document.querySelector<HTMLElement>('.tt-chapter-reader .tt-reader-back-btn');
+      if (chapterReaderBack && chapterReaderBack.offsetParent !== null) { chapterReaderBack.click(); return; }
       if (document.querySelector('.tt-preview')) {
-        const previewBack = document.querySelector<HTMLElement>('.tt-topbar .tt-back-btn');
+        const previewBack = document.querySelector<HTMLElement>('.tt-topbar .tt-back-btn, .qts-nav .nav-back-circle-btn');
         if (previewBack && previewBack.offsetParent !== null) { previewBack.click(); return; }
       }
+      const customHeaderBack = document.querySelector<HTMLElement>('.qts-nav .nav-back-circle-btn[data-custom-back]');
+      if (customHeaderBack && customHeaderBack.offsetParent !== null) { customHeaderBack.click(); return; }
 
       // 4. Nếu đang ở các trang con (Tu tập, Pháp thoại, Hướng dẫn, Cá nhân, Admin, v.v.) và có thể lùi
       if (window.location.pathname !== '/') {
@@ -130,7 +176,7 @@ export async function initializeNativeBackButton(): Promise<void> {
     }
 
     if (nativePlatform() === 'ios') {
-      initializeIosBackGesture(() => handleBack(window.history.length > 1));
+      initializeIosBackGesture(() => handleBack(canNavigateBack()));
     } else {
       const { App } = await import('@capacitor/app');
       await App.addListener('backButton', ({ canGoBack }) => handleBack(canGoBack, () => {

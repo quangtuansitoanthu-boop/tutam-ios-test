@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createRosaryWave, planRosaryAudioChunks, rosaryChunkProgress, rosaryCountAtPosition, validateRosaryRhythm, ROSARY_SAMPLE_RATE, ROSARY_MAX_AUDIO_BYTES, ROSARY_TARGET_COUNTS } from '../../../src/lib/domain/practice/rosary-rhythm';
+import { createRosaryWave, planRosaryAudioChunks, rosaryChunkProgress, rosaryCountAtPosition, validateRosaryRhythm, ROSARY_INTERVALS, ROSARY_SAMPLE_RATE, ROSARY_MAX_AUDIO_BYTES, ROSARY_TARGET_COUNTS } from '../../../src/lib/domain/practice/rosary-rhythm';
+import { rosaryAutoCopy } from '../../../src/lib/i18n/rosary-auto-copy';
 
 describe('finite rosary audio cadence', () => {
   it('counts only played media positions, clamps completion and rejects unavailable timings', () => {
@@ -43,5 +45,25 @@ describe('finite rosary audio cadence', () => {
     for (const tick of [1, 2, 3]) expect(sample(tick * ROSARY_SAMPLE_RATE)).toBe(1234);
     for (const bell of [4, 6.5, 9]) expect(Math.abs(sample(Math.round((bell + .01) * ROSARY_SAMPLE_RATE)))).toBeGreaterThan(0);
     expect(wave.size).toBe(44 + 12 * ROSARY_SAMPLE_RATE * 2);
+  });
+
+  it('supports the 20 beats/min beginner interval (3000ms) and keeps RosaryScreen synced', () => {
+    expect(ROSARY_INTERVALS).toEqual([3000, 2000, 1500, 1000, 750]);
+    expect(rosaryAutoCopy.vi.tempos).toHaveLength(ROSARY_INTERVALS.length);
+    expect(rosaryAutoCopy.en.tempos).toHaveLength(ROSARY_INTERVALS.length);
+    expect(rosaryAutoCopy.vi.tempos[0]).toBe('Nhập môn · 20 nhịp/phút');
+    expect(rosaryAutoCopy.en.tempos[0]).toBe('Beginner · 20 beats/min');
+
+    for (const target of ROSARY_TARGET_COUNTS) {
+      validateRosaryRhythm(target, 3000);
+      for (const chunk of planRosaryAudioChunks(target, 3000)) {
+        const wave = createRosaryWave(new Int16Array([1234]), chunk.beats, 3000, chunk);
+        expect(wave.size).toBeLessThan(ROSARY_MAX_AUDIO_BYTES);
+      }
+    }
+
+    const screen = readFileSync('src/lib/components/practice/rosary/RosaryScreen.svelte', 'utf8');
+    expect(screen).toContain('ROSARY_INTERVALS.map');
+    expect(screen).toMatch(/\.tt-rosary__meta\s*\{[^}]*border-radius:/u);
   });
 });

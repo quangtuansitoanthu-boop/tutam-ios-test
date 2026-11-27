@@ -6,6 +6,7 @@ import type {
   ReadingProgressWrite,
 } from '$lib/domain/reading/activity';
 import { fetchNativeJsonMutation } from './native-api';
+import { isPermanentOutboxRejection, quarantineOutboxOperation, readOutboxRejections, removeOutboxRejection } from './outbox-rejections';
 import {
   ANONYMOUS_STORAGE_PRINCIPAL,
   copyLegacyKeysToAnonymousNamespace,
@@ -27,6 +28,7 @@ export const READING_ANONYMOUS_ADOPTION_DECISION_KEY = 'quangtu_reading_anonymou
 export const READING_ACTIVITY_OUTBOX_CAPACITY_ERROR = 'reading_activity_outbox_capacity_exceeded';
 const MAX_READING_ACTIVITY_OUTBOX_OPERATIONS = 1_000;
 const READING_MUTATION_VERSION_KEY = 'quangtu_reading_mutation_version_v1';
+const REJECTED_OPERATIONS_KEY = 'quangtu_reading_activity_rejections_v1';
 
 const READING_PRINCIPAL_KEYS = [
   READING_ACTIVITY_OUTBOX_KEY,
@@ -935,6 +937,20 @@ export function createReadingActivityClient(
                   continue;
                 }
               }
+              if (isPermanentOutboxRejection(response.status)) {
+                quarantineOutboxOperation(scopedStorage(capturedPrincipal), REJECTED_OPERATIONS_KEY,
+                  operation, response.status, now().toISOString());
+                // Chỉ bỏ dependency đã bị từ chối; ý định mới và cache cục bộ vẫn còn.
+                const latest = read(capturedPrincipal);
+                const item = latest.find(entry => entry.id === operation.id);
+                if (item?.predecessor && sameOperation(item.predecessor, operation)) {
+                  delete item.predecessor;
+                  write(latest, capturedPrincipal);
+                  continue;
+                }
+                if (item && sameOperation(item, operation)) write(latest.filter(entry => entry !== item), capturedPrincipal);
+                break;
+              }
               throw new Error(`reading_activity_${response.status}`);
             }
             const body = await response.json().catch(() => null) as OperationResponse | null;
@@ -943,6 +959,11 @@ export function createReadingActivityClient(
             applied += 1;
           }
         }
+      } catch (error) {
+        // Cancellation can now reject before native returns its receipt. Keep
+        // the old principal's dispatched outbox intact and ignore stale errors.
+        if (generation !== capturedGeneration || principalId() !== capturedPrincipal) return applied;
+        throw error;
       } finally {
         if (inFlight === controller) inFlight = null;
         if (activeDrain === drain) activeDrain = null;
@@ -953,6 +974,20 @@ export function createReadingActivityClient(
 
     pending(principal = principalId()): ReadonlyArray<ReadingOperation> {
       return read(principal);
+    },
+
+    rejected(principal = principalId()) {
+      return readOutboxRejections<ReadingCommand>(scopedStorage(principal), REJECTED_OPERATIONS_KEY);
+    },
+
+    retryRejected(id: string): boolean {
+      const scoped = scopedStorage();
+      const entry = readOutboxRejections<ReadingCommand>(scoped, REJECTED_OPERATIONS_KEY)
+        .find(item => item.operation.id === id);
+      if (!entry || read().some(item => item.id === id)) return false;
+      enqueue(entry.operation);
+      removeOutboxRejection(scoped, REJECTED_OPERATIONS_KEY, entry.operation);
+      return true;
     },
 
     setSession(next: ReadingActivitySession): void {

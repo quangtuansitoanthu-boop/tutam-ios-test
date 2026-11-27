@@ -116,6 +116,21 @@ describe('practice audio', () => {
     vi.unstubAllGlobals();
   });
 
+  it('changes a paused meditation track without starting web or native audio before resume', async () => {
+    const options = { remainingMs: 60_000, title: 'Thiền', onNativeState: vi.fn(), onInterrupted: vi.fn(), autoplay: false };
+    const controller = createPracticeAudioController();
+    try {
+      expect(await controller.setMeditationTrack(MEDITATION_TRACK_OPTIONS[0].track, options)).toBe(true);
+      expect(MockAudio.instances[0].play).not.toHaveBeenCalled();
+      expect(controller.getState().meditationActive).toBe(false);
+      nativePlayback.enabled = true;
+      nativePlayback.begin.mockResolvedValue({ pause: vi.fn(), play: vi.fn(async () => {}), stop: vi.fn(), refresh: vi.fn(async () => {}) });
+      expect(await controller.setMeditationTrack(MEDITATION_TRACK_OPTIONS[1].track, options)).toBe(true);
+      expect(nativePlayback.begin.mock.calls[0][5]).toMatchObject({ autoplay: false });
+      expect(controller.getState().meditationActive).toBe(false);
+    } finally { controller.destroy(); }
+  });
+
   it('keeps native meditation paused when a deferred resume resolves after pause without revoking the lease callbacks', async () => {
     nativePlayback.enabled = true;
     let finishPlay!: () => void;
@@ -368,6 +383,18 @@ describe('practice audio', () => {
     expect(start.indexOf('refreshAudioState();', generationFence)).toBeGreaterThan(generationFence);
     expect(start.indexOf('wakeLock?.request()', generationFence)).toBeGreaterThan(generationFence);
     expect(start.indexOf('startMeditationTickers();', generationFence)).toBeGreaterThan(generationFence);
+  });
+
+  it('fences a late music change and transfers the session clock to native without autoplaying a paused session (source evidence)', () => {
+    const page = readFileSync('src/routes/tu-tap/+page.svelte', 'utf8');
+    const callback = page.split('onMusicTrackChange={async (track) => {')[1]?.split('onAmbientSoundChange=')[0] ?? '';
+    expect(callback).toContain("autoplay: currentSession.phase !== 'paused'");
+    const afterAwait = callback.split('          });')[1] ?? '';
+    expect(afterAwait).toContain('meditationEvidenceHandle !== evidenceHandle || !meditationSession');
+    expect(afterAwait).toContain('if (!meditationSession && meditationEvidenceHandle === null) audio?.stopAll();');
+    expect(afterAwait).toContain('if (meditationSetup.musicTrack !== track) return;');
+    expect(afterAwait).toContain('if (audio?.hasNativeMeditation()) stopMeditationTickers();');
+    expect(afterAwait).toContain("else if (['preparing', 'active'].includes(meditationSession.phase)) startMeditationTickers();");
   });
 
   it('allows selecting and switching meditation tracks, and toggles off on reselecting same track', async () => {

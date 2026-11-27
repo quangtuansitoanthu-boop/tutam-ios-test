@@ -30,7 +30,7 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
-    func launchGuest() -> XCUIApplication {
+    func launchGuest(retryBlankWebView: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -38,7 +38,28 @@ class NativeGuestUITestCase: XCTestCase {
         app.launchArguments = ["-tutam-qa-events", "1", "-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
         app.launch()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30), "Native WKWebView must load")
-        XCTAssertTrue(app.links["Cá nhân"].firstMatch.waitForExistence(timeout: 30), "Native app must finish rendering its navigation")
+        if retryBlankWebView {
+            let startupPrompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
+                format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
+            )).firstMatch
+            let visible = NSPredicate { _, _ in app.links["Cá nhân"].firstMatch.exists || startupPrompt.exists }
+            let ready = XCTNSPredicateExpectation(predicate: visible, object: NSObject())
+            if XCTWaiter.wait(for: [ready], timeout: 120) != .completed {
+                evidence("audio-setup-before-relaunch", app: app)
+                XCTAssertFalse(app.webViews.firstMatch.buttons.firstMatch.exists,
+                               "A rendered page with unexpected controls must remain visible for diagnosis")
+                app.terminate()
+                app.launch()
+                let retried = XCTNSPredicateExpectation(predicate: visible, object: NSObject())
+                XCTAssertEqual(XCTWaiter.wait(for: [retried], timeout: 120), .completed,
+                               "The simulator WebView must reach startup UI before testing playback")
+            }
+        }
+        waitForStartupCoverToClear(app)
+        deferStartupNotificationPrompt(app, timeout: 15)
+        let personalTab = app.links["Cá nhân"].firstMatch
+        if !personalTab.waitForExistence(timeout: 20) { deferStartupNotificationPrompt(app) }
+        XCTAssertTrue(personalTab.waitForExistence(timeout: 10), "Native app must finish rendering its navigation")
         return app
     }
 
@@ -49,13 +70,78 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
-    func allowExpectedNotificationPermission(_ app: XCUIApplication) {
+    func waitForStartupCoverToClear(_ app: XCUIApplication) {
+        let web = app.webViews.firstMatch
+        let status = web.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Ứng dụng Tu tập Phật pháp")).firstMatch
+        let loading = web.staticTexts.matching(NSPredicate(format: "label IN %@", ["Đang tải ứng dụng...", "Loading app..."] as NSArray)).firstMatch
+        let prompt = web.otherElements.matching(NSPredicate(format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray)).firstMatch
+        let personal = app.links["Cá nhân"].firstMatch
+        waitUntil("The actual loading artwork must clear before touching the rendered app", timeout: 60) {
+            app.state == .runningForeground && (personal.exists || prompt.exists) && !status.exists && !loading.exists
+        }
+    }
+
+    @MainActor
+    func deferStartupNotificationPrompt(_ app: XCUIApplication, timeout: TimeInterval = 0) {
+        let prompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
+            format: "label IN %@",
+            ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
+        )).firstMatch
+        guard prompt.exists || (timeout > 0 && prompt.waitForExistence(timeout: timeout)) else { return }
+        let later = prompt.buttons.matching(NSPredicate(
+            format: "label IN %@", ["Để sau", "Maybe later"] as NSArray
+        )).firstMatch
+        XCTAssertTrue(later.waitForExistence(timeout: 5) && later.isHittable,
+                      "The app's startup notification dialog must allow users to continue")
+        var previousFrame: CGRect?
+        waitUntil("The Later button must settle inside the foreground notification dialog") {
+            let frame = later.frame
+            let ready = app.state == .runningForeground && self.insideViewport(later, app: app)
+                && prompt.frame.contains(frame) && previousFrame == frame
+            previousFrame = frame
+            return ready
+        }
+        later.tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !prompt.exists }, object: NSObject())
+        if XCTWaiter.wait(for: [dismissed], timeout: 3) == .timedOut && prompt.exists && later.isHittable {
+            // WebKit can cancel the first touch before it generates a click.
+            evidence("startup-notification-still-visible", app: app)
+            later.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+        waitUntil("The app's notification dialog must close after choosing later") { !prompt.exists }
+    }
+
+    @MainActor
+    func openNativeLink(_ url: URL, app: XCUIApplication) {
+        XCUIDevice.shared.system.open(url)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let prompt = springboard.alerts.firstMatch
+        let open = prompt.buttons.matching(NSPredicate(format: "label IN %@", ["Open", "Mở"] as NSArray)).firstMatch
+        if open.waitForExistence(timeout: 6) {
+            let appName = NSPredicate(format: "label CONTAINS[cd] %@", "Tu tập")
+            XCTAssertTrue(prompt.label.localizedCaseInsensitiveContains("Tu tập")
+                          || prompt.staticTexts.matching(appName).firstMatch.exists,
+                          "The Open action must belong to the system confirmation for Tu tập")
+            XCTAssertTrue(open.isHittable)
+            open.tap()
+            waitUntil("The system confirmation for Tu tập must close after choosing Open") { !prompt.exists }
+        }
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "The system must deliver the URL to Tu tập")
+    }
+
+    @MainActor
+    func allowExpectedNotificationPermission(_ app: XCUIApplication, required: Bool = true) {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let expected = NSPredicate(format: "label CONTAINS[cd] %@ AND (label CONTAINS[cd] %@ OR label CONTAINS[cd] %@)", "Tu tập", "notification", "thông báo")
         let system = springboard.alerts.matching(expected).firstMatch
         let local = app.alerts.matching(expected).firstMatch
         // Không cố định owner sau lần chờ đầu: iOS có thể xuất alert SpringBoard trễ hơn cây AX app.
-        waitUntil("Fresh install must expose this app's actual notification authorization alert", timeout: 30) { system.exists || local.exists }
+        if required {
+            waitUntil("Fresh install must expose this app's actual notification authorization alert", timeout: 30) { system.exists || local.exists }
+        } else {
+            let offered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in system.exists || local.exists }, object: NSObject())
+            guard XCTWaiter.wait(for: [offered], timeout: 6) == .completed else { return }
+        }
         let alert = system.exists ? system : local
         let words = ([alert.label] + alert.staticTexts.allElementsBoundByIndex.map { $0.label }).joined(separator: " ").lowercased()
         XCTAssertTrue(words.contains("tu tập") && (words.contains("notification") || words.contains("thông báo")), "Only this app's notification permission may be granted")
@@ -191,6 +277,7 @@ class NativeGuestUITestCase: XCTestCase {
 
     @MainActor
     func navigate(_ label: String, app: XCUIApplication, captureNavigationEvidence: Bool = true) {
+        deferStartupNotificationPrompt(app)
         dismissPracticeSyncNotice(app)
         let navigation = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Điều hướng nhanh", "Quick navigation")).firstMatch
         XCTAssertTrue(navigation.waitForExistence(timeout: 20), "Bottom tab tap must belong to the actual navigation group")
@@ -223,7 +310,8 @@ class NativeGuestUITestCase: XCTestCase {
         switch label {
         case "Cá nhân": marker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Cài đặt ứng dụng ")).firstMatch
         case "Kinh sách": marker = app.staticTexts["Kho Kinh Sách"].firstMatch
-        case "Tu tập": marker = app.staticTexts["Chế Độ Tu Tập"].firstMatch
+        case "Pháp thoại": marker = app.searchFields["Tìm kiếm album..."].firstMatch
+        case "Tu tập": marker = app.otherElements["Không gian Tu Tập"].firstMatch
         default:
             XCTFail("Missing destination contract for tested navigation tab \(label)")
             return
@@ -423,25 +511,27 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         XCTAssertFalse(app.staticTexts["Không thể tải ảnh. Vui lòng thử lại."].firstMatch.exists)
         tap(saveImage, app: app)
 
-        // Nhận diện owner Files thật; iOS 27 không đặt nút Hủy trong navigation bar của thư mục.
+        // iOS 26 exposes an off-sheet “Hủy” at the same screen position as the Files More button.
         let pickerNavigation = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].firstMatch
         let pickerSave = pickerNavigation.buttons.matching(NSPredicate(format: "label IN %@", ["Lưu", "Save"] as NSArray)).firstMatch
         XCTAssertTrue(pickerSave.waitForExistence(timeout: 20), "PNG export must present the native Files destination picker instead of a blob navigation")
         XCTAssertTrue(pickerNavigation.exists, "The save action must belong to the native Files navigation")
         XCTAssertFalse(saveImage.isEnabled, "The export promise must remain pending while the native picker owns the file")
         evidence("quote-image-native-files-picker", app: app)
-        let cancel = app.buttons.matching(NSPredicate(format: "label IN %@", ["Hủy", "Cancel"] as NSArray)).firstMatch
+        let cancelLabels = NSPredicate(format: "label IN %@", ["Hủy", "Cancel"] as NSArray)
+        let cancel = pickerNavigation.buttons.matching(cancelLabels).firstMatch
         if cancel.exists && cancel.isHittable {
             cancel.tap()
         } else {
-            // Vuốt đóng sheet native cũng phải hoàn tất callback hủy, không chạm nhãn Other bị che.
-            XCTAssertTrue(pickerNavigation.isHittable)
-            let dragStart = pickerNavigation.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
-            let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
-            dragStart.press(forDuration: 0.1, thenDragTo: dragEnd)
+            let sheet = app.otherElements["Browse View (Picker)"].firstMatch
+            XCTAssertTrue(sheet.exists, "The Files sheet must be available for interactive dismissal")
+            let handle = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+            let bottom = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.94))
+            handle.press(forDuration: 0.1, thenDragTo: bottom)
         }
+        waitUntil("The native Files destination must dismiss when canceled") { !pickerNavigation.exists }
         waitUntil("Cancel must return to the existing quote dialog and settle its export state") {
-            !pickerSave.exists && title.exists && saveImage.exists && saveImage.isEnabled
+            title.exists && saveImage.exists && saveImage.isEnabled
         }
         reveal(saveImage, app: app)
         XCTAssertTrue(insideViewport(saveImage, app: app), "Cancel must leave the quote image action reachable")
@@ -514,7 +604,8 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         setMotion(false, app: app)
         evidence("motion-off", app: app)
         // Một deep link ấm và một deep link lạnh kiểm chứng chính contract native, không dùng cho mọi bước điều hướng.
-        app.open(URL(string: "vn.quangtu.tutam:///tu-tap?action=rosary")!)
+        openNativeLink(URL(string: "vn.quangtu.tutam:///tu-tap?action=rosary")!, app: app)
+        deferStartupNotificationPrompt(app, timeout: 7)
         let startDialog = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Bắt Đầu Lần Hạt?")).firstMatch
         XCTAssertTrue(startDialog.waitForExistence(timeout: 20), "Warm rosary deep link must expose its actual confirmation dialog")
         let start = startDialog.buttons["Bắt đầu 🙏"].firstMatch
@@ -538,7 +629,8 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         openAppearance(app)
         XCTAssertEqual(checked(app.switches["Hiệu ứng chuyển động"].firstMatch), false)
         app.terminate()
-        app.open(URL(string: "vn.quangtu.tutam:///ca-nhan?tab=settings")!)
+        openNativeLink(URL(string: "vn.quangtu.tutam:///ca-nhan?tab=settings")!, app: app)
+        deferStartupNotificationPrompt(app, timeout: 7)
         XCTAssertTrue(app.switches["Bật thông báo nhắc nhở tu tập"].firstMatch.waitForExistence(timeout: 30))
         openAppearance(app)
         XCTAssertEqual(checked(app.switches["Hiệu ứng chuyển động"].firstMatch), false, "Motion setting must survive native cold deep link")
@@ -581,13 +673,51 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
     }
 }
 
+final class NativeNotificationTypingTests: NativeGuestUITestCase {
+    @MainActor
+    func testNotificationPromptWaitsUntilUserFinishesTypingAfterResume() {
+        let app = launchGuest()
+        navigate("Kinh sách", app: app)
+        let search = librarySearch(app)
+        search.tap()
+        search.typeText("kinh")
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 10))
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        let prompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
+            format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
+        )).firstMatch
+        XCTAssertFalse(prompt.waitForExistence(timeout: 3), "An automatic reminder must leave ongoing typing uninterrupted")
+        search.typeText(" sach")
+        XCTAssertEqual(search.value as? String, "kinh sach")
+        evidence("notification-resume-with-real-keyboard", app: app)
+
+        let filter = app.buttons["Lọc"].firstMatch
+        XCTAssertTrue(filter.waitForExistence(timeout: 10) && filter.isHittable)
+        filter.press(forDuration: 0.15)
+        if keyboard.exists && !prompt.exists {
+            let done = app.toolbars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray)).firstMatch
+            XCTAssertTrue(done.waitForExistence(timeout: 5) && done.isHittable)
+            done.tap()
+        }
+        XCTAssertTrue(prompt.waitForExistence(timeout: 15), "After editing ends the pending notification dialog must appear")
+        deferStartupNotificationPrompt(app)
+        let categories = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Lọc theo danh mục")).firstMatch
+        XCTAssertTrue(categories.waitForExistence(timeout: 10), "The held Filter tap must open the category control")
+        XCTAssertEqual(search.value as? String, "kinh sach")
+    }
+}
+
 final class NativeExtendedGuestTests: NativeGuestUITestCase {
     @MainActor
     func testNativeScriptureCopyingReferenceAndGhost() {
         let app = launchGuest()
         evidence("copy-before-native-url-open", app: app)
-        app.open(URL(string: "vn.quangtu.tutam:///tu-tap/chep-kinh")!)
+        openNativeLink(URL(string: "vn.quangtu.tutam:///tu-tap/chep-kinh")!, app: app)
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 45), "Native WKWebView must load after opening scripture copying URL")
+        deferStartupNotificationPrompt(app, timeout: 7)
         evidence("copy-after-native-url-open", app: app)
         let bookChoiceSwitch = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Kinh Địa Tạng Bồ Tát Bổn Nguyện")).firstMatch
         let bookChoiceButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Kinh Địa Tạng Bồ Tát Bổn Nguyện")).firstMatch
@@ -615,7 +745,10 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         XCTAssertEqual(referenceContainsUniqueWord(reference, label: "GIỚI"), false, "The later word must start outside the reference viewport")
         evidence("copy-ghost-keyboard-before-typing", app: app)
 
-        editor.typeText("TINH KHAU NGHIEP CHON NGON Tu ri tu ri, ma ha tu ri tu tu ri, ta ba ha (3 lan). TINH TAM NGHIEP CHAN NGON An ta pha ba pha, truat da ta pha, dat ma ta pha, ba pha truat do ham (3 lan). TINH PHAP GIOI")
+        editor.typeText("TI")
+        editor.typeText(XCUIKeyboardKey.delete.rawValue)
+        editor.typeText("INH KHAU NGHIEP CHON NGON\n")
+        editor.typeText("Tu ri tu ri, ma ha tu ri tu tu ri, ta ba ha. TINH TAM NGHIEP CHAN NGON An ta pha ba pha, truat da ta pha, dat ma ta pha, ba pha truat do ham. TINH PHAP GIOI")
         let typed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         typed.name = "copy-ghost-keyboard-immediately-after-typing"
         typed.lifetime = .keepAlways
@@ -648,8 +781,12 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         plainEditor.lifetime = .keepAlways
         add(plainEditor)
         let settledEditor = app.textViews["Tự gõ bản chép của bạn"].firstMatch
-        waitUntil("The editor must retain the typed text after dismissing the keyboard", timeout: 20) {
-            (settledEditor.value as? String)?.range(of: "GIOI", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        waitUntil("The editor must retain the corrected Vietnamese heading and follow the reference across lines", timeout: 20) {
+            guard let text = settledEditor.value as? String else { return false }
+            let words = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            return words.contains("TỊNH KHẨU NGHIỆP CHƠN NGÔN")
+                && words.contains("GIỚI")
+                && !words.contains("(3 lần)")
         }
         evidence("copy-ghost-text-retained-after-keyboard", app: app)
     }
@@ -675,6 +812,30 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
     private func selectPracticePaper(_ label: String, app: XCUIApplication) {
         let toolbar = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Tùy chỉnh chế độ tu tập")).firstMatch
         XCTAssertTrue(toolbar.waitForExistence(timeout: 15), "Practice must expose its actual customization toolbar")
+        let display = toolbar.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Tùy chỉnh")).firstMatch
+        if display.exists {
+            // On phones the swatches live in the display sheet. The trigger may extend past the toolbar's right edge.
+            let viewport = app.frame
+            let target = display.frame.intersection(toolbar.frame).intersection(viewport)
+            guard target.width >= 44 && target.height >= 44 && display.isHittable else {
+                XCTFail("The practice display settings trigger must be reachable in the toolbar")
+                return
+            }
+            app.coordinate(withNormalizedOffset: CGVector(dx: (target.midX - viewport.minX) / viewport.width,
+                dy: (target.midY - viewport.minY) / viewport.height)).tap()
+            let sheet = app.otherElements.matching(NSPredicate(
+                format: "label BEGINSWITH %@ AND (label ENDSWITH %@ OR label ENDSWITH %@)",
+                "Tùy chỉnh hiển thị & hành trì", "hộp thoại web", "web dialog"
+            )).firstMatch
+            XCTAssertTrue(sheet.waitForExistence(timeout: 10), "The practice display settings sheet must open")
+            let toggle = sheet.switches[label].firstMatch
+            let paper = toggle.exists ? toggle : sheet.buttons[label].firstMatch
+            tap(paper, app: app)
+            waitUntil("The named practice paper must be selected in the settings sheet") { self.checked(paper) == true }
+            tap(sheet.buttons["Đóng bảng chọn"].firstMatch, app: app)
+            waitUntil("Closing display settings must return to the active practice") { !sheet.exists && toolbar.exists }
+            return
+        }
         let initialPaper = labelledToggle(label, app: app)
         // WebKit may clamp offscreen-left AX frames to the toolbar's left edge.
         // Use that geometry only to prioritize a direction, then search both ways.
@@ -774,7 +935,8 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         openSettings(app)
         openAppearance(app)
         tap(labelledToggle("Tối", app: app), app: app)
-        app.open(URL(string: "vn.quangtu.tutam:///tu-tap?article=tt_1780910773084&chap=3")!)
+        openNativeLink(URL(string: "vn.quangtu.tutam:///tu-tap?article=tt_1780910773084&chap=3")!, app: app)
+        deferStartupNotificationPrompt(app, timeout: 7)
         let practice = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Vào chế độ tu tập")).firstMatch
         tap(practice, app: app)
         tap(app.buttons["Bắt đầu 🙏"].firstMatch, app: app)
@@ -785,24 +947,48 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         evidence("practice-white-shared-theme-header-toolbar-footer", app: app)
         selectPracticePaper("Tự động", app: app)
         evidence("practice-auto-shared-theme", app: app)
-        let collapseControls = app.buttons["Thu gọn công cụ tu tập"].firstMatch
-        tap(collapseControls, app: app)
-        let increment = app.buttons["+1"].firstMatch
-        let decrement = app.buttons["-1"].firstMatch
-        let openControls = app.buttons["Mở công cụ tu tập"].firstMatch
+        let controls = app.otherElements.matching(NSPredicate(format: "label == %@", "Bảng điều khiển tu tập")).firstMatch
+        let collapseControls = controls.buttons["Thu gọn công cụ tu tập"].firstMatch
+        let increment = controls.buttons["+1"].firstMatch
+        let decrement = controls.buttons["-1"].firstMatch
+        let openControls = controls.buttons["Mở công cụ tu tập"].firstMatch
+        func tapFloatingControl(_ button: XCUIElement, collapsed: Bool = false) {
+            var previousFrame: CGRect?
+            waitUntil("The chosen floating control must settle in its visible panel before tapping") {
+                guard controls.exists && button.exists && button.isHittable else { return false }
+                let frame = button.frame
+                let panel = controls.frame
+                guard frame.width >= 44 && frame.height >= 44 && app.frame.contains(frame)
+                        && panel.insetBy(dx: -1, dy: -1).contains(frame) else { return false }
+                if collapsed && controls.buttons.count != 1 { return false }
+                let settled = previousFrame == frame
+                previousFrame = frame
+                return settled
+            }
+            let target = button.frame
+            let viewport = app.frame
+            app.coordinate(withNormalizedOffset: CGVector(dx: (target.midX - viewport.minX) / viewport.width,
+                dy: (target.midY - viewport.minY) / viewport.height)).tap()
+        }
+        tapFloatingControl(collapseControls)
         waitUntil("Collapsed practice controls must disappear from accessibility") {
             !increment.exists && !decrement.exists && openControls.exists
         }
         XCTAssertTrue(insideViewport(openControls, app: app) && openControls.isHittable, "Collapsed practice controls must retain a reachable opener")
-        openControls.tap()
+        // The accessibility group may extend above the actual 46 pt opener in WebKit.
+        let aboveOpener = openControls.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+            .withOffset(CGVector(dx: 0, dy: -12))
+        aboveOpener.tap()
+        XCTAssertTrue(openControls.exists && !increment.exists, "A tap on the reading surface above the opener must leave the panel collapsed")
+        evidence("practice-controls-collapsed-before-reopen", app: app)
+        tapFloatingControl(openControls, collapsed: true)
         XCTAssertTrue(increment.waitForExistence(timeout: 15))
-        let controls = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Bảng điều khiển tu tập")).firstMatch
         XCTAssertTrue(controls.staticTexts["0"].firstMatch.exists, "Fresh practice counter must start at zero")
-        tap(increment, app: app)
+        tapFloatingControl(increment)
         waitUntil("One increment must increase the real practice counter to exactly one") { controls.staticTexts["1"].firstMatch.exists }
-        tap(decrement, app: app)
+        tapFloatingControl(decrement)
         waitUntil("One decrement must restore the real practice counter to zero") { controls.staticTexts["0"].firstMatch.exists }
-        tap(collapseControls, app: app)
+        tapFloatingControl(collapseControls)
         waitUntil("Reclosed practice controls must remain absent from accessibility") {
             !increment.exists && !decrement.exists && openControls.exists
         }
@@ -875,6 +1061,7 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         evidence("settings-purple-six-choice-grid", app: app)
         app.terminate()
         app.launch()
+        deferStartupNotificationPrompt(app, timeout: 7)
         openSettings(app, captureNavigationEvidence: false)
         openAppearance(app)
         XCTAssertEqual(checked(labelledToggle("Tím nhạt", app: app)), true, "The selected app palette must survive a native relaunch")
@@ -896,6 +1083,7 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         evidence("meditation-paused", app: app)
         XCUIDevice.shared.press(.home)
         app.activate()
+        deferStartupNotificationPrompt(app, timeout: 7)
         XCTAssertTrue(resume.waitForExistence(timeout: 15), "Explicit pause must remain after native background/foreground")
         tap(resume, app: app)
         XCTAssertTrue(app.buttons["Tạm dừng"].firstMatch.waitForExistence(timeout: 10))
@@ -922,7 +1110,8 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         tap(sound, app: app)
         let send = app.buttons["🔔 Gửi thử thông báo mẫu"].firstMatch
         tap(send, app: app)
-        allowExpectedNotificationPermission(app)
+        // Cả suite dùng cùng bản cài; ca gửi thử trước đó có thể đã xin quyền thành công.
+        allowExpectedNotificationPermission(app, required: false)
         XCTAssertTrue(send.waitForExistence(timeout: 20), "Native test scheduling must finish before opening personal reminders")
     }
 
@@ -942,6 +1131,8 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     private func relaunchPersonal(_ app: XCUIApplication, captureNavigationEvidence: Bool = true) {
         app.terminate()
         app.launch()
+        waitForStartupCoverToClear(app)
+        deferStartupNotificationPrompt(app, timeout: 7)
         XCTAssertTrue(existsOrWait(app.links["Cá nhân"].firstMatch, timeout: 30))
         openSettings(app, captureNavigationEvidence: captureNavigationEvidence)
         openPersonal(app)
@@ -1107,25 +1298,14 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     }
 
     @MainActor
-    private func replaceName(_ text: String, app: XCUIApplication, editing: Bool = false) {
+    private func replaceName(_ text: String, app: XCUIApplication) {
         let field = app.textFields["Tên ngày lễ *"].firstMatch
-        if editing {
-            // WK AX's inferred tap point can land outside the input after scrolling.
-            revealContentControl(field, app: app)
-            let bounds = field.frame
-            let viewport = app.frame
-            guard bounds.width > 0 && bounds.height > 0 && viewport.contains(bounds) && field.isHittable else {
-                evidence("invalid-personal-title-first-gesture-geometry", app: app)
-                XCTFail("The real title field must be visible before its single edit tap")
-                return
-            }
-            app.coordinate(withNormalizedOffset: CGVector(dx: (bounds.midX - viewport.minX) / viewport.width,
-                dy: (bounds.midY - viewport.minY) / viewport.height)).tap()
-        } else {
-            tap(field, app: app)
-        }
+        // WebKit can report the input as hittable while it is behind the fixed header.
+        revealContentControl(field, app: app)
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(existsOrWait(app.keyboards.firstMatch, timeout: 10),
+                      "Tapping the visible title field must open the native keyboard before typing")
         if let existing = field.value as? String, !existing.isEmpty, existing != (field.placeholderValue ?? "") {
-            XCTAssertTrue(existsOrWait(app.keyboards.firstMatch, timeout: 10), "Editing an existing title requires the actual keyboard")
             let bounds = field.frame
             let viewport = app.frame
             let keyboard = app.keyboards.firstMatch.frame
@@ -1275,16 +1455,49 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     @MainActor
     private func deleteEvent(_ title: String, cancelFirst: Bool = false, app: XCUIApplication) {
         editEvent(title, app: app)
-        tap(app.buttons["Xóa ngày lễ"].firstMatch, app: app)
-        XCTAssertTrue(existsOrWait(app.staticTexts["Xóa lịch cá nhân?"].firstMatch, timeout: 10))
-        if cancelFirst {
-            tap(app.buttons["Giữ lại"].firstMatch, app: app)
-            XCTAssertTrue(app.staticTexts[title].firstMatch.exists, "Cancel deletion must retain the named saved event")
-            tap(app.buttons["Xóa ngày lễ"].firstMatch, app: app)
-            XCTAssertTrue(existsOrWait(app.staticTexts["Xóa lịch cá nhân?"].firstMatch, timeout: 10))
+        let delete = app.buttons["Xóa ngày lễ"].firstMatch
+        let dialog = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Xóa lịch cá nhân?,")).firstMatch
+        let namedEvent = dialog.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "“\(title)”")).firstMatch
+        for action in (cancelFirst ? ["Giữ lại", "Xóa lịch"] : ["Xóa lịch"]) {
+            revealContentControl(delete, app: app)
+            delete.tap()
+            XCTAssertTrue(namedEvent.waitForExistence(timeout: 10), "The confirmation must name the event being changed")
+            let button = dialog.buttons[action].firstMatch
+            XCTAssertTrue(button.isHittable)
+            button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            let closed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !dialog.exists }, object: NSObject())
+            if XCTWaiter.wait(for: [closed], timeout: 3) == .timedOut && namedEvent.exists && button.isHittable {
+                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+            waitPersonalUntil("The named delete confirmation must close after choosing \(action)") { !dialog.exists }
+            if action == "Giữ lại" {
+                XCTAssertTrue(app.staticTexts[title].firstMatch.exists, "Cancel deletion must retain the named saved event")
+            }
         }
-        tap(app.buttons["Xóa lịch"].firstMatch, app: app)
         waitPersonalUntil("Confirmed deletion must remove only the named QA event") { !app.staticTexts[title].firstMatch.exists }
+    }
+
+    @MainActor
+    func testPersonalLunarPickerWithMotionDisabled() {
+        let app = launchGuest()
+        openSettings(app, captureNavigationEvidence: false)
+        openAppearance(app)
+        guard let originalMotion = checked(app.switches["Hiệu ứng chuyển động"].firstMatch) else {
+            XCTFail("Actual motion switch must expose its initial state")
+            return
+        }
+        setMotion(false, app: app)
+        openPersonal(app)
+        let lunar = "QA bảng chọn ngày âm"
+        addEvent(lunar, solar: false, day: 15, month: 7, app: app)
+        editEvent(lunar, app: app)
+        XCTAssertEqual(namedControl("Ngày Âm lịch:", app: app).value as? String, "15")
+        XCTAssertEqual(namedControl("Tháng Âm lịch:", app: app).value as? String, "Tháng 7")
+        evidence("personal-lunar-picker-motion-disabled", app: app)
+        collapseEditor(app)
+        deleteEvent(lunar, app: app)
+        openAppearance(app)
+        setMotion(originalMotion, app: app)
     }
 
     @MainActor
@@ -1298,7 +1511,7 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         addEvent(lunar, solar: false, day: 15, month: 7, app: app)
         addEvent(solar, solar: true, day: 7, month: 11, app: app)
         editEvent(solar, app: app)
-        replaceName(edited, app: app, editing: true)
+        replaceName(edited, app: app)
         saveEvent(edited, app: app)
         relaunchPersonal(app, captureNavigationEvidence: false)
         editEvent(lunar, app: app)
@@ -1329,7 +1542,11 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         tap(app.buttons["Hủy"].firstMatch, app: app)
         waitPersonalUntil("Cancel timing changes must restore the saved setting") { self.checked(before) == true }
         deleteEvent(edited, cancelFirst: true, app: app)
-        XCTAssertTrue(app.staticTexts[lunar].firstMatch.exists, "Deleting solar event must preserve the other lunar event")
+        relaunchPersonal(app, captureNavigationEvidence: false)
+        editEvent(lunar, app: app)
+        XCTAssertEqual(namedControl("Ngày Âm lịch:", app: app).value as? String, "15")
+        XCTAssertEqual(namedControl("Tháng Âm lịch:", app: app).value as? String, "Tháng 7")
+        XCTAssertFalse(app.staticTexts[edited].firstMatch.exists, "The solar event must stay deleted after relaunch")
         deleteEvent(lunar, app: app)
         relaunchPersonal(app, captureNavigationEvidence: false)
         XCTAssertFalse(app.staticTexts[edited].firstMatch.exists)
@@ -1405,6 +1622,7 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         }
         evidence("personal-reminder-system-received", app: springboard)
         app.activate()
+        deferStartupNotificationPrompt(app, timeout: 7)
         openSettings(app)
         openPersonal(app)
         deleteEvent(name, app: app)
@@ -1489,5 +1707,61 @@ final class NativeSimulatorSnapshotTests: NativeGuestUITestCase {
         tap(recipe, app: app)
         XCTAssertTrue(app.staticTexts["Nguyên liệu"].firstMatch.waitForExistence(timeout: 15))
         evidence("vegetarian-offline-recipe", app: app)
+    }
+}
+
+final class NativeTalkPlayerTests: NativeGuestUITestCase {
+    @MainActor
+    func testSameAlbumPlaybackRestoresDismissedMiniPlayer() {
+        let app = launchGuest(retryBlankWebView: true)
+        navigate("Pháp thoại", app: app)
+        let album = "GẬY KIM CANG HÉT - TẬP 1"
+        let search = app.searchFields["Tìm kiếm album..."].firstMatch
+        tap(search, app: app)
+        search.typeText(album + "\n")
+        let playAlbum = app.buttons["Phát album " + album].firstMatch
+        XCTAssertTrue(playAlbum.waitForExistence(timeout: 15))
+        evidence("talk-mini-player-catalog", app: app)
+        let expand = app.buttons["Mở rộng trình phát Pháp Thoại"].firstMatch
+        let pause = app.buttons["Tạm dừng"].firstMatch
+
+        func checkPlaying() {
+            waitUntil("An explicit play command must show the floating player and its pause control", timeout: 25) {
+                self.insideViewport(expand, app: app) && self.insideViewport(pause, app: app)
+            }
+        }
+
+        func swipePlayerAway() {
+            let start = expand.coordinate(withNormalizedOffset: CGVector(dx: 0.20, dy: 0.50))
+            let end = start.withOffset(CGVector(dx: app.frame.width * 0.52, dy: 0))
+            start.press(forDuration: 0.08, thenDragTo: end)
+            waitUntil("Swiping the mini-player away must hide its controls") { !expand.exists }
+        }
+
+        tap(playAlbum, app: app)
+        checkPlaying()
+        let position = app.sliders["Vị trí phát"].firstMatch
+        waitUntil("The offline native transport must actually advance", timeout: 30) {
+            guard let value = position.value as? String else { return false }
+            let numeric = value.replacingOccurrences(of: "%", with: "").replacingOccurrences(of: ",", with: ".")
+            return (Double(numeric.trimmingCharacters(in: .whitespaces)) ?? 0) > 0
+        }
+        evidence("talk-mini-player-first-play", app: app)
+        swipePlayerAway()
+        tap(playAlbum, app: app)
+        checkPlaying()
+        evidence("talk-mini-player-same-album", app: app)
+        swipePlayerAway()
+
+        tap(app.buttons["Mở album " + album].firstMatch, app: app)
+        let playAll = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Phát tất cả")).firstMatch
+        XCTAssertTrue(playAll.waitForExistence(timeout: 15))
+        evidence("talk-mini-player-album-detail", app: app)
+        tap(playAll, app: app)
+        checkPlaying()
+        pause.tap()
+        let resume = app.buttons["Phát"].firstMatch
+        XCTAssertTrue(resume.waitForExistence(timeout: 15) && resume.isHittable)
+        evidence("talk-mini-player-restored-and-paused", app: app)
     }
 }

@@ -6,25 +6,32 @@ function applyRoleChange(previousRole: string, nextRole: string) {
   const source = readFileSync('src/routes/phap-thoai/+page.svelte', 'utf8');
   const body = /const applyCollectionSession = \(\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1];
   if (!body) throw new Error('Missing actual collection session handler');
-  const close = vi.fn(), transition = vi.fn(() => false);
-  new Function('sessionStore', 'previousCatalogRole', 'collectionRequests', 'handleSelectAlbum', body)(
-    { value: { authenticated: true, user: { id: 'same-account', role: nextRole } } }, previousRole, { transition }, close,
+  const close = vi.fn(), transition = vi.fn(() => false), refresh = vi.fn();
+  const offline = new Function('sessionStore', 'previousCatalogRole', 'collectionRequests', 'handleSelectAlbum',
+    'offlineSnapshot', 'refreshClientCollections', `(() => {${body}\n})(); return offlineSnapshot;`)(
+    { value: { authenticated: true, user: { id: 'same-account', role: nextRole } } }, previousRole, { transition }, close, {}, refresh,
   );
-  return { close, transition };
+  return { close, transition, offline, refresh };
 }
 
 it('closes a selected album when the same account loses its privileged role', () => {
   const result = applyRoleChange('admin', 'user');
   expect(result.close).toHaveBeenCalledWith(null);
   expect(result.transition).toHaveBeenCalledOnce();
+  expect(result.offline).toBeNull();
+  expect(result.refresh).toHaveBeenCalledOnce();
 });
 
 it('keeps a selected album during same-account token refresh without a role change', () => {
-  expect(applyRoleChange('admin', 'admin').close).not.toHaveBeenCalled();
+  const result = applyRoleChange('admin', 'admin');
+  expect(result.close).not.toHaveBeenCalled();
+  expect(result.refresh).not.toHaveBeenCalled();
 });
 
 it('keeps a public dialog when the same account gains a privileged role', () => {
-  expect(applyRoleChange('user', 'admin').close).not.toHaveBeenCalled();
+  const result = applyRoleChange('user', 'admin');
+  expect(result.close).not.toHaveBeenCalled();
+  expect(result.refresh).toHaveBeenCalledOnce();
 });
 
 function applyOpenedAlbumSession(options: {
@@ -44,14 +51,14 @@ function applyOpenedAlbumSession(options: {
     'sessionStore', 'previousCatalogRole', 'collectionRequests', 'handleSelectAlbum',
     'window', 'recoveredInitialAlbum', 'initialAlbumTarget', 'pushedAlbumHistory',
     'selectedAlbumId', 'checkedInitialUrl', 'collectionGeneration', 'collectionBusyKeys',
-    'collectionStatus', 'refreshClientCollections', 'albums',
+    'collectionStatus', 'refreshClientCollections', 'albums', 'offlineSnapshot',
     `${body}\nreturn selectedAlbumId;`,
   )(
     { value: { authenticated: Boolean(options.nextId), user: options.nextId ? { id: options.nextId, role: options.nextRole } : null } },
     options.previousRole, createAudioLibraryRequestLifecycle(options.previousId), close,
     { location: { href: `https://fixture.invalid/phap-thoai?album=${options.target ?? 'public-album'}` } },
     false, null, true, options.selectedId === undefined ? 'public-album' : options.selectedId,
-    true, 0, [], '', refresh, [{ id: 'public-album', visibility: options.visibility ?? 'public' }],
+    true, 0, [], '', refresh, [{ id: 'public-album', visibility: options.visibility ?? 'public' }], {},
   );
   return { close, refresh, selection };
 }

@@ -155,19 +155,27 @@ public class PracticeWidgetProvider extends AppWidgetProvider {
         return context.getString(R.string.practice_widget_completion, data.optInt("completedCount"), data.optInt("totalCount"));
     }
 
-    private static Bitmap artwork(Context context, int index) {
+    private static final Bitmap[] ARTWORK = new Bitmap[FRAMES.length];
+    private static synchronized Bitmap artwork(Context context, int index) {
+        if (ARTWORK[index] != null) return ARTWORK[index];
         try (java.io.InputStream input = context.getAssets().open("public/images/icons/sac-moc-anh-kim-v1.webp")) {
             Bitmap atlas = BitmapFactory.decodeStream(input);
             if (atlas == null) return null;
-            int[] frame = FRAMES[index];
-            Bitmap result = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(result);
-            float scale = Math.min(96f / frame[2], 96f / frame[3]);
-            float width = frame[2] * scale, height = frame[3] * scale;
-            canvas.drawBitmap(atlas, new Rect(Math.round(frame[0] * atlas.getWidth() / 1254f), Math.round(frame[1] * atlas.getHeight() / 1254f), Math.round((frame[0] + frame[2]) * atlas.getWidth() / 1254f), Math.round((frame[1] + frame[3]) * atlas.getHeight() / 1254f)),
-                new RectF((96-width)/2,(96-height)/2,(96+width)/2,(96+height)/2),new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG));
-            atlas.recycle();
-            return result;
+            try {
+                // Decode once; retain only the four 96px icons shared by every size/instance.
+                for (int i = 0; i < FRAMES.length; i++) {
+                    if (ARTWORK[i] != null) continue;
+                    int[] frame = FRAMES[i];
+                    Bitmap result = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888);
+                    Canvas canvas = new Canvas(result);
+                    float scale = Math.min(96f / frame[2], 96f / frame[3]);
+                    float width = frame[2] * scale, height = frame[3] * scale;
+                    canvas.drawBitmap(atlas, new Rect(Math.round(frame[0] * atlas.getWidth() / 1254f), Math.round(frame[1] * atlas.getHeight() / 1254f), Math.round((frame[0] + frame[2]) * atlas.getWidth() / 1254f), Math.round((frame[1] + frame[3]) * atlas.getHeight() / 1254f)),
+                        new RectF((96-width)/2,(96-height)/2,(96+width)/2,(96+height)/2),new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG));
+                    ARTWORK[i] = result;
+                }
+                return ARTWORK[index];
+            } finally { atlas.recycle(); }
         } catch (Exception ignored) { return null; }
     }
 
@@ -282,6 +290,7 @@ public class PracticeWidgetProvider extends AppWidgetProvider {
     }
     @Override public void onAppWidgetOptionsChanged(Context context, AppWidgetManager manager, int id, Bundle options) { update(context,manager,id); }
     @Override public void onReceive(Context context, Intent intent) {
+        if (intent == null) return;
         super.onReceive(context,intent);
         String action = intent.getAction();
         if (Intent.ACTION_DATE_CHANGED.equals(action) || Intent.ACTION_TIME_CHANGED.equals(action)

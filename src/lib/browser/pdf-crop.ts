@@ -121,11 +121,12 @@ export async function detectPdfCropBox(
 
   let cropBox: PdfCropBox | null = null;
   let timeout: ReturnType<typeof setTimeout> | null = null;
+  let canvas: HTMLCanvasElement | null = null;
   try {
     const viewport = page.getViewport({ scale: 0.35 });
     const width = Math.max(1, Math.ceil(viewport.width));
     const height = Math.max(1, Math.ceil(viewport.height));
-    const canvas = document.createElement('canvas');
+    canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext('2d', { willReadFrequently: true });
@@ -149,6 +150,7 @@ export async function detectPdfCropBox(
     cropBox = null;
   } finally {
     if (timeout) clearTimeout(timeout);
+    if (canvas) { canvas.width = 0; canvas.height = 0; }
   }
 
   cache.set(pageNumber, cropBox);

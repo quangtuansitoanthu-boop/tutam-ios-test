@@ -30,6 +30,34 @@ const {
 } = await import('$lib/browser/audio-downloads');
 
 describe('offline album downloads', () => {
+  it('does not request authorization when an offline album transfer was already cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const authorize = vi.fn();
+    const fetcher = vi.fn();
+    await expect(downloadAlbumForOffline({ id: 'cancelled-start', title: 'Album', desc: '', tracks: [{ title: 'One', url: '/one.mp3' }] },
+      { signal: controller.signal, authorize, fetcher })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(authorize).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('retains a track whose write finished after cancellation without marking the album complete', async () => {
+    const album = { id: 'cancelled-last-track', title: 'Album', desc: '', tracks: [{ title: 'One', url: '/one.mp3' }] };
+    const controller = new AbortController();
+    putOfflineTrack.mockImplementationOnce(async () => { controller.abort(); });
+    const authorize = vi.fn();
+    const fetcher = vi.fn().mockResolvedValue(new Response('audio'));
+    await expect(downloadAlbumForOffline(album, { signal: controller.signal, authorize, fetcher }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    expect(putOfflineTrack).toHaveBeenCalledOnce();
+    expect(putOfflineAlbum).not.toHaveBeenCalled();
+
+    getOfflineTrack.mockResolvedValue({ blob: new Blob(['audio']) });
+    await downloadAlbumForOffline(album, { authorize, fetcher });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(putOfflineAlbum).toHaveBeenCalledOnce();
+  });
+
   it('does not export a cached track if cancelled while its local read is pending', async () => {
     const controller = new AbortController();
     getOfflineTrack.mockImplementationOnce(async () => {
@@ -280,7 +308,7 @@ describe('offline album downloads', () => {
     expect(archiveAlbumZipUrl('')).toBeNull();
   });
 
-  it.each([
+  it.each<{ body: string; headers: HeadersInit; status: number }>([
     { body: '<html>offline</html>', headers: { 'content-type': 'text/html' }, status: 200 },
     { body: '<!doctype html><title>offline</title>', headers: { 'content-type': 'application/octet-stream' }, status: 200 },
     { body: '', headers: { 'content-type': 'video/mp4' }, status: 200 },
@@ -289,19 +317,19 @@ describe('offline album downloads', () => {
     { body: 'abc', headers: { 'content-length': '8' }, status: 200 },
   ])('keeps invalid media out of offline storage ($status, $body)', async ({ body, headers, status }) => {
     const album = { id: 'offline-invalid', title: 'Album', desc: '', tracks: [{ title: 'Track', url: '/t.mp4' }] };
-    const fetcher = vi.fn(async () => new Response(body, { headers: headers as HeadersInit, status }));
+    const fetcher = vi.fn(async () => new Response(body, { headers, status }));
     await expect(downloadAlbumForOffline(album, { fetcher, authorize: async () => {} })).rejects.toThrow();
     expect(putOfflineTrack).not.toHaveBeenCalled();
     expect(putOfflineAlbum).not.toHaveBeenCalled();
   });
 
-  it.each([
+  it.each<{ headers: HeadersInit; status: number }>([
     { status: 206, headers: { 'content-range': 'bytes 0-2/3', 'content-type': 'application/octet-stream' } },
     { status: 200, headers: { 'content-encoding': 'gzip', 'content-length': '22' } },
   ])('keeps complete HTTP $status media available with $headers', async ({ headers, status }) => {
     const album = { id: 'offline-complete', title: 'Album', desc: '', tracks: [{ title: 'Track', url: '/t.mp4' }] };
     await downloadAlbumForOffline(album, {
-      fetcher: async () => new Response(new Uint8Array([1, 2, 3]), { headers: headers as HeadersInit, status }),
+      fetcher: async () => new Response(new Uint8Array([1, 2, 3]), { headers, status }),
       authorize: async () => {},
     });
     expect(putOfflineTrack).toHaveBeenCalledOnce();
@@ -428,6 +456,32 @@ describe('offline album downloads', () => {
       total: 1,
       bytesDownloaded: offlineBlob.size,
     }));
+  });
+
+  it.each([
+    { cached: false, type: 'video/mp4', url: '/api/audio/drive/video-one', extension: 'mp4' },
+    { cached: true, type: 'video/mp4', url: '/api/audio/drive/video-one', extension: 'mp4' },
+    { cached: true, type: 'audio/mp4', url: '/api/audio/drive/audio-one', extension: 'm4a' },
+    { cached: false, type: 'application/octet-stream', url: 'https://media.example/film.mp4?v=2', extension: 'mp4' },
+  ])('exports $type with its real extension when cached=$cached', async ({ cached, type, url, extension }) => {
+    const link = { download: '', click: vi.fn() };
+    vi.stubGlobal('window', { location: { origin: 'https://example.test' } });
+    vi.stubGlobal('document', { createElement: () => link });
+    const objectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');
+    vi.useFakeTimers();
+    try {
+      const blob = new Blob(['media'], { type });
+      if (cached) getOfflineTrack.mockResolvedValue({ url, blob });
+      const fetcher = vi.fn(async () => new Response(blob));
+      await downloadSingleTrackFile({ title: 'Bài giảng', url }, { authorize: async () => {}, fetcher });
+      expect(link.download).toBe(`Bài giảng.${extension}`);
+      expect(link.click).toHaveBeenCalledOnce();
+      expect(fetcher).toHaveBeenCalledTimes(cached ? 0 : 1);
+    } finally {
+      vi.useRealTimers();
+      objectUrl.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('streams track from network with progress when not offline', async () => {

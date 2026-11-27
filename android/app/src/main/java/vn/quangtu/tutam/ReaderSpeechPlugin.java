@@ -136,7 +136,7 @@ public class ReaderSpeechPlugin extends Plugin {
         if (voices == null) return null;
         // Stream/Comparator cần API 24; vòng lặp giữ cùng thứ tự ưu tiên trên API 23.
         for (Voice voice : voices) {
-            if (!voice.getLocale().getLanguage().equals(language.getLanguage())
+            if (voice == null || voice.getLocale() == null || !voice.getLocale().getLanguage().equals(language.getLanguage())
                 || voice.isNetworkConnectionRequired()
                 || (voice.getFeatures() != null && voice.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED))) continue;
             int priority = (voice.getLocale().equals(language) ? 0 : 2) + (voice.equals(current) ? 0 : 1);
@@ -165,11 +165,13 @@ public class ReaderSpeechPlugin extends Plugin {
                 call.reject("Voice data is not installed for this language", "MISSING_VOICE"); return;
             }
             // Ưu tiên giọng đã cài để không phụ thuộc mạng hoặc tải dữ liệu ngầm khi đọc.
-            if (engine.getVoices() != null) {
+            try {
                 Voice offline = selectOfflineVoice(engine.getVoices(), language, engine.getVoice());
                 if (offline != null && engine.setVoice(offline) == TextToSpeech.ERROR) {
                     call.reject("Offline voice unavailable", "MISSING_VOICE"); return;
                 }
+            } catch (RuntimeException unavailable) {
+                call.reject("Offline voice unavailable", "MISSING_VOICE"); return;
             }
             // Giữ giọng mặc định của bộ đọc theo ngôn ngữ, không giả lập giới tính bằng cao độ.
             engine.setSpeechRate(Math.max(0.3f, Math.min(2f, call.getFloat("rate", 1f))));
@@ -201,11 +203,15 @@ public class ReaderSpeechPlugin extends Plugin {
 
     @PluginMethod
     public void openSettings(PluginCall call) { main.post(() -> {
+        final android.app.Activity activity = getBridge() == null ? null : getActivity();
+        if (destroyed || activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            call.reject("Cannot open speech settings", "SETTINGS_UNAVAILABLE"); return;
+        }
         try {
-            getActivity().startActivity(new Intent("com.android.settings.TTS_SETTINGS"));
+            activity.startActivity(new Intent("com.android.settings.TTS_SETTINGS"));
             call.resolve();
         } catch (Exception unavailable) {
-            try { getActivity().startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); call.resolve(); }
+            try { activity.startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); call.resolve(); }
             catch (Exception error) { call.reject("Cannot open speech settings", "SETTINGS_UNAVAILABLE"); }
         }
     }); }

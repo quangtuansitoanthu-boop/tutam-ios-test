@@ -248,7 +248,7 @@ describe('practice content rendering security', () => {
 
   it('ranks sutras consistently in both Vietnamese and English', () => {
     // Vietnamese articles
-    const viDiaTang = { id: 'tt_1780910773084', title: 'KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN', tags: ['kinh địa tạng'] };
+    const viDiaTang = { id: 'tt_1780910773084', title: 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN', tags: ['kinh địa tạng'] };
     const viKimCang = { id: 'tt_1781359043077', title: 'KINH KIM CANG BÁT NHÃ BA LA MẬT', tags: ['kinh kim cang'] };
     const viPhapHoa = { id: 'book_1787189827026_8b568f64', title: 'KINH DIỆU PHÁP LIÊN HOA', tags: ['kinh pháp hoa'] };
     const viLangNghiem = { id: 'book_1788482371938_34f43522', title: 'KINH THỦ LĂNG NGHIÊM', tags: ['lăng nghiêm'] };

@@ -7,6 +7,37 @@ import { practiceDayWindows } from '../../src/lib/server/domain/practice-day-win
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('audit remediation safety', () => {
+  it.each([true, false])('keeps native iOS background fixed until the final owner releases (outer first: %s)', outerFirst => {
+    const dom = new JSDOM('<!doctype html><html><body style="position:relative!important;top:3px;width:80%;overscroll-behavior:contain"></body></html>');
+    vi.stubGlobal('document', dom.window.document);
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('Capacitor', { getPlatform: () => 'ios', isNativePlatform: () => true });
+    Object.defineProperty(dom.window, 'scrollX', { value: 7 });
+    Object.defineProperty(dom.window, 'scrollY', { value: 321 });
+    const scrollTo = vi.spyOn(dom.window, 'scrollTo').mockImplementation(() => {});
+    const style = dom.window.document.body.style;
+    const setProperty = vi.spyOn(style, 'setProperty');
+    const properties = ['position', 'top', 'left', 'right', 'width', 'overscroll-behavior'];
+    const before = properties.map(property => [style.getPropertyValue(property), style.getPropertyPriority(property)]);
+    const outer = acquireScrollLock();
+    const inner = acquireScrollLock();
+    try {
+      expect(style.position).toBe('fixed');
+      expect(style.top).toBe('-321px');
+      expect(style.width).toBe('100%');
+      expect(setProperty).toHaveBeenCalledWith('overscroll-behavior', 'none', 'important');
+      (outerFirst ? outer : inner)();
+      expect(style.position).toBe('fixed');
+      expect(scrollTo).not.toHaveBeenCalled();
+      (outerFirst ? inner : outer)();
+      properties.forEach((property, index) => {
+        expect([style.getPropertyValue(property), style.getPropertyPriority(property)]).toEqual(before[index]);
+      });
+      expect(scrollTo).toHaveBeenCalledOnce();
+      expect(scrollTo).toHaveBeenCalledWith({ left: 7, top: 321, behavior: 'instant' });
+    } finally { outer(); inner(); dom.window.close(); }
+  });
+
   it.each([true, false])('locks explicit HTML scrolling and restores both first snapshots (outer first: %s)', outerFirst => {
     const dom = new JSDOM('<!doctype html><html style="overflow-y:auto!important;overflow-x:clip;color:red"><body style="overflow:scroll!important;padding:7px"></body></html>');
     vi.stubGlobal('document', dom.window.document);

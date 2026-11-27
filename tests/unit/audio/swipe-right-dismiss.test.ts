@@ -25,10 +25,10 @@ function setup() {
 describe('audio banner right swipe', () => {
   it('follows a right swipe, dismisses after the threshold and suppresses the generated click', () => {
     const { banner, dismiss, pointer } = setup();
-    pointer('pointerdown', 20);
-    pointer('pointermove', 130, 5);
+    pointer('pointerdown', 40);
+    pointer('pointermove', 150, 5);
     expect(banner.style.translate).toBe('110px 0');
-    pointer('pointerup', 130, 5);
+    pointer('pointerup', 150, 5);
     expect(dismiss).toHaveBeenCalledOnce();
     const click = new Event('click', { cancelable: true });
     banner.dispatchEvent(click);
@@ -36,29 +36,41 @@ describe('audio banner right swipe', () => {
   });
   it.each([[40, 0], [-100, 0], [10, 110]])('keeps the banner for a short, leftward or vertical gesture (%s, %s)', (horizontal, vertical) => {
     const { dismiss, pointer } = setup();
-    pointer('pointerdown', 0);
-    pointer('pointermove', horizontal, vertical);
-    pointer('pointerup', horizontal, vertical);
+    pointer('pointerdown', 40);
+    pointer('pointermove', 40 + horizontal, vertical);
+    pointer('pointerup', 40 + horizontal, vertical);
     expect(dismiss).not.toHaveBeenCalled();
   });
   it('does not steal a seek slider gesture', () => {
     const { dismiss, pointer } = setup();
-    pointer('pointerdown', 0, 0, { closest: () => ({}) });
+    pointer('pointerdown', 40, 0, { closest: () => ({}) });
     pointer('pointermove', 200);
     pointer('pointerup', 200);
     expect(dismiss).not.toHaveBeenCalled();
   });
   it('resets cancellation and removes listeners on destruction', () => {
     const { banner, dismiss, action, pointer } = setup();
-    pointer('pointerdown', 0);
+    pointer('pointerdown', 40);
     pointer('pointermove', 120);
     pointer('pointercancel', 120);
     expect(banner.style.translate).toBe('');
     expect(dismiss).not.toHaveBeenCalled();
     action.destroy();
-    pointer('pointerdown', 0);
+    pointer('pointerdown', 40);
     pointer('pointermove', 200);
     pointer('pointerup', 200);
     expect(dismiss).not.toHaveBeenCalled();
+  });
+  it.each([0, 12, 23])('leaves a swipe starting at screen edge %spx to native Back', (start) => {
+    const { banner, dismiss, pointer, action } = setup();
+    pointer('pointerdown', start);
+    pointer('pointermove', start + 180);
+    pointer('pointerup', start + 180);
+    expect(dismiss).not.toHaveBeenCalled();
+    expect(banner.style.translate).toBe('');
+    const click = new Event('click', { cancelable: true });
+    banner.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(false);
+    action.destroy();
   });
 });

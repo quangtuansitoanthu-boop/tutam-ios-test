@@ -216,6 +216,10 @@
   });
 
   onMount(() => {
+    const showPlayer = () => {
+      audioBannerHidden = false;
+      miniBarMinimized = false;
+    };
     const outsidePointer = (event: PointerEvent) => {
       if (speedSheetOpen && !mobileSpeedWrap?.contains(event.target as Node)) closeSpeedMenu();
       if (
@@ -233,9 +237,11 @@
         else if (mobileExpanded) mobileExpanded = false;
       }
     };
+    window.addEventListener('quangtu:show-audio-player', showPlayer);
     document.addEventListener('pointerdown', outsidePointer);
     document.addEventListener('keydown', escape);
     return () => {
+      window.removeEventListener('quangtu:show-audio-player', showPlayer);
       document.removeEventListener('pointerdown', outsidePointer);
       document.removeEventListener('keydown', escape);
       if (expandHintTimer) {
@@ -298,7 +304,8 @@
   };
 
   const setVolume = async (event: Event) => {
-    (await getAudioPlayer()).setVolume(Number((event.currentTarget as HTMLInputElement).value));
+    const volume = Number((event.currentTarget as HTMLInputElement).value);
+    (await getAudioPlayer()).setVolume(volume);
   };
 
   const selectSpeed = async (speed: number) => {
@@ -1307,8 +1314,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 38px;
-    height: 38px;
+    width: var(--touch-target-size);
+    height: var(--touch-target-size);
+    min-width: var(--touch-target-size);
+    min-height: var(--touch-target-size);
     border-radius: 50%;
     border: 1.5px solid color-mix(in srgb, var(--gold) 48%, var(--border));
     background: color-mix(in srgb, var(--gold) 10%, var(--card));
@@ -1849,15 +1858,15 @@
   .pt-mp-error-toast {
     position: fixed;
     z-index: 9999;
-    bottom: 90px;
+    bottom: calc(max(var(--bottom-nav-clearance,0px),var(--audio-player-top,0px)) + var(--radius-control));
     left: 50%;
     max-width: calc(100vw - 32px);
     overflow: hidden;
     margin: 0;
     padding: 9px 18px;
     border-radius: 20px;
-    background: var(--brown-dark);
-    color: #fff;
+    background: var(--text);
+    color: var(--bg);
     font-size:var(--font-size-body);
     font-weight: 600;
     opacity: 0;
@@ -1875,6 +1884,7 @@
 
   :global([data-theme="dark"]) .pt-mp-error-toast {
     background: var(--gold);
+    color: var(--on-gold);
   }
 
   /* ==========================================================================
@@ -1972,37 +1982,48 @@
 
   .pt-fp-header-tabs {
     display: flex;
+    align-items: center;
     background: var(--bg2, var(--bg));
     padding: 3px;
-    border-radius: 20px;
-    gap: 4px;
-    flex-shrink: 0;
-    max-width: calc(100% - 96px);
+    border-radius: 22px;
+    gap: 2px;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: calc(100% - 104px);
+    overflow: hidden;
   }
 
   .pt-fp-tab {
     min-height: 44px;
-    padding: 6px 12px;
+    min-width: 0;
+    padding: 6px 10px;
     border: 0;
-    border-radius: 16px;
+    border-radius: 18px;
     background: none;
-    color: var(--muted);
+    color: var(--text2);
     font-family: inherit;
-    font-size:var(--font-size-label);
+    font-size: var(--font-size-label);
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.2s ease;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
   }
 
   .pt-fp-tab.active {
-    background: var(--white);
-    color: var(--gold);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    background: linear-gradient(145deg, var(--gold2) 0%, var(--gold) 60%, #b5832c 100%);
+    color: var(--on-gold);
+    font-weight: 800;
+    box-shadow:
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.6),
+      inset 0 -2px 0 rgba(90, 56, 8, 0.24),
+      0 4px 10px -2px color-mix(in srgb, var(--gold) 42%, transparent);
   }
 
   :global([data-theme="dark"]) .pt-fp-tab.active {
-    background: #2b2318;
+    background: linear-gradient(145deg, var(--gold2) 0%, var(--gold) 60%, #b5832c 100%);
+    color: var(--on-gold);
   }
 
   .pt-fp-content {
@@ -2381,8 +2402,9 @@
   }
 
   .pt-fp-track-item.active {
-    background: rgba(200, 150, 62, 0.12);
-    border: 1px solid rgba(200, 150, 62, 0.3);
+    background: var(--gold-light);
+    border: 1.5px solid var(--gold);
+    box-shadow: var(--shadow-sm);
   }
 
   .pt-fp-track-num {
@@ -2418,12 +2440,14 @@
   }
 
   .pt-fp-track-item.active .pt-fp-track-title {
-    color: var(--gold);
+    color: var(--text);
+    font-weight: 700;
   }
 
   .pt-fp-track-status {
-    font-size:var(--font-size-meta);
-    color: var(--gold);
+    font-size: var(--font-size-meta);
+    font-weight: 700;
+    color: var(--brown);
     margin-top: 2px;
   }
 
@@ -2549,4 +2573,6 @@
   @media(min-width:769px){.pt-mp-restore-float{bottom:var(--radius-feature);right:var(--radius-feature)}}
   .pt-mp-restore-float button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
   @media(prefers-reduced-motion:reduce){.pt-mp-restore-float,.pt-mp-restore-float .pt-mp-spin-ring,.pt-restore-disc.playing .pt-restore-art{animation:none}.pt-restore-ctrl-btn,.pt-restore-main-touch{transition:none}}
+  :global(:root[data-native-app='true']) .pt-mini-player{bottom:var(--bottom-nav-clearance);padding-bottom:0}
+  :global(:root[data-native-app='true']) .pt-mp-restore-float{bottom:calc(var(--bottom-nav-clearance) + var(--radius-control))}
 </style>

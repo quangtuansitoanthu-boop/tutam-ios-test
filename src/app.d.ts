@@ -28,6 +28,8 @@ declare global {
   namespace App {
     interface PageState {
       articleId?: string | null;
+      homeDivination?: true;
+      dreamDetail?: string;
     }
 
     interface Locals {

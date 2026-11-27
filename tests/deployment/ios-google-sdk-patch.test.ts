@@ -8,6 +8,7 @@ import { patchIosGoogleSdk } from '../../scripts/lib/ios-google-sdk-patch.mjs';
 const legacySwift = `
 import GoogleSignIn
 public class GoogleAuth: CAPPlugin {
+    var googleSignIn: GIDSignIn!;
     func loadSignInClient(customClientId: String, customScopes: [String]) {
         googleSignIn = GIDSignIn.sharedInstance;
         let serverClientId = getServerClientIdValue();
@@ -21,6 +22,7 @@ public class GoogleAuth: CAPPlugin {
                 self.resolveSignInCallWith(user: user!)
             }
         } else {
+                let presentingVc = self.bridge!.viewController!;
                 self.googleSignIn.signIn(with: self.googleSignInConfiguration, presenting: presentingVc, hint: nil, additionalScopes: self.additionalScopes) { user, error in
                     if let error = error {
                         self.signInCall?.reject(error.localizedDescription, "\\(error._code)");
@@ -31,6 +33,10 @@ public class GoogleAuth: CAPPlugin {
         }
     }
     func refresh(_ call: CAPPluginCall) {
+            if self.googleSignIn.currentUser == nil {
+                call.reject("User not logged in.");
+                return
+            }
             self.googleSignIn.currentUser!.authentication.do { (authentication, error) in
                 guard let authentication = authentication else {
                     call.reject(error?.localizedDescription ?? "Something went wrong.");
@@ -44,6 +50,7 @@ public class GoogleAuth: CAPPlugin {
                 call.resolve(authenticationData);
             }
     }
+    func signOut(_ call: CAPPluginCall) { self.googleSignIn.signOut(); }
     func resolveSignInCallWith(user: GIDGoogleUser) {
         var userData: [String: Any] = [
             "authentication": [
@@ -99,23 +106,58 @@ it('migrates iOS SDK APIs together while retaining JS identity, config, callback
   expect(patchIosGoogleSdk(root)).toBe(true);
   const swift = fs.readFileSync(swiftFile, 'utf8');
   expect(fs.readFileSync(podFile, 'utf8')).toBe(legacyPod.replace("'~> 6.2.4'", "'7.1.0'"));
-  expect(swift).toContain('googleSignIn.configuration = googleSignInConfiguration');
-  expect(swift).toContain('signIn(withPresenting: presentingVc, hint: nil, additionalScopes: self.additionalScopes) { result, error in');
+  expect(swift).toContain('googleSignIn?.configuration = googleSignInConfiguration');
+  expect(swift).toContain('googleSignIn.signIn(withPresenting: presentingVc, hint: nil, additionalScopes: self.additionalScopes) { result, error in');
   expect(swift).toContain('self.resolveSignInCallWith(user: result.user, serverAuthCode: result.serverAuthCode)');
-  expect(swift).toContain('self.resolveSignInCallWith(user: user!)\n');
+  expect(swift).toContain('self.resolveSignInCallWith(user: user)\n');
   expect(swift).toContain('refreshTokensIfNeeded { (user, error) in');
   expect(swift).not.toMatch(/user\.authentication|authentication\.do|signIn\(with:/u);
   for (const field of ['accessToken', 'idToken', 'refreshToken']) expect(swift).toContain(`user.${field}${field === 'idToken' ? '?' : ''}.tokenString`);
   for (const unchanged of [
     'clientID: customClientId, serverClientID: serverClientId',
     '["email", "profile", "openid"]', 'getString("iosClientId")', 'getString("serverClientId")',
-    'Notification.Name.capacitorOpenURL.rawValue', 'googleSignIn.handle(url)',
+    'Notification.Name.capacitorOpenURL.rawValue', 'googleSignIn?.handle(url)',
     '"authentication": [', '"email": user.profile?.email', '"familyName": user.profile?.familyName',
     '"givenName": user.profile?.givenName', '"id": user.userID', '"name": user.profile?.name',
     'userData["imageUrl"] = imageUrl', 'signInCall?.resolve(userData)',
   ]) expect(swift).toContain(unchanged);
   expect(fs.readFileSync(androidFile)).toEqual(androidBefore);
   expect(fs.readFileSync(path.join(root, 'package.json'))).toEqual(packageBefore);
+});
+
+it('guards uninitialized clients, missing restore users, presenters and expired sessions', () => {
+  patchIosGoogleSdk(root);
+  const swift = fs.readFileSync(swiftFile, 'utf8');
+  expect(swift).toContain('var googleSignIn: GIDSignIn?;');
+  expect(swift).toContain('guard let googleSignIn = self.googleSignIn else');
+  expect(swift).toContain('guard let user = user else');
+  expect(swift).toContain('guard let presentingVc = self.bridge?.viewController else');
+  expect(swift).toContain('guard let currentUser = googleSignIn.currentUser else');
+  expect(swift).toContain('currentUser.refreshTokensIfNeeded');
+  expect(swift).toContain('self.googleSignIn?.signOut()');
+  expect(swift.match(/user!|bridge!|viewController!|currentUser!|self\.googleSignIn\.(?:hasPreviousSignIn|restorePreviousSignIn|currentUser|signIn|signOut)/gu)).toBeNull();
+});
+
+it('accepts the installed SDK7 adapter and keeps its callback and profile payload after adding guards', () => {
+  const packageDirectory = path.resolve('node_modules/@codetrix-studio/capacitor-google-auth');
+  fs.copyFileSync(path.join(packageDirectory, 'ios/Plugin/Plugin.swift'), swiftFile);
+  fs.copyFileSync(path.join(packageDirectory, 'CodetrixStudioCapacitorGoogleAuth.podspec'), podFile);
+  patchIosGoogleSdk(root);
+  const swift = fs.readFileSync(swiftFile, 'utf8');
+  expect(swift).toContain('guard let presentingVc = self.bridge?.viewController else');
+  expect(swift).toContain('googleSignIn?.handle(url)');
+  expect(swift).toContain('"serverAuthCode": (serverAuthCode as Any?) ?? NSNull()');
+  expect(swift).toContain('"idToken": (user.idToken?.tokenString as Any?) ?? NSNull()');
+  expect(patchIosGoogleSdk(root)).toBe(false);
+});
+
+it('rejects an unknown safety guard layout before modifying either native file', () => {
+  fs.writeFileSync(swiftFile, legacySwift.replace('self.bridge!.viewController!', 'customPresenter()'));
+  const swift = fs.readFileSync(swiftFile);
+  const pod = fs.readFileSync(podFile);
+  expect(() => patchIosGoogleSdk(root)).toThrow(/Unsupported GoogleAuth iOS safety guard source/u);
+  expect(fs.readFileSync(swiftFile)).toEqual(swift);
+  expect(fs.readFileSync(podFile)).toEqual(pod);
 });
 
 it('is repeatable without changing an already migrated adapter', () => {

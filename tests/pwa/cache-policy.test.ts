@@ -129,20 +129,26 @@ describe('SvelteKit service worker cache policy', () => {
     expect(requestedKeys).toContainEqual({ key: bKey, principalId: 'user-b' });
   });
 
-  it('caches immutable assets and public shells but never replaces them with private or opaque responses', async () => {
+  it.each([
+    '/huong-dan',
+    '/tu-tap/quan-am-linh-xam',
+    '/tu-tap/moc-luan-chiem-sat',
+    '/tu-tap/nhip-sinh-hoc',
+    '/tu-tap/giai-mong',
+  ])('prepares %s for offline use and never replaces its public shell with private data', async (documentPath) => {
     let offline = false;
     const fetchLog: string[] = [];
     const runtime = await loadSvelteKitServiceWorker({
       fetchImpl: async (request) => {
         const pathname = new URL(request.url).pathname;
         fetchLog.push(pathname);
-        if (pathname === '/huong-dan') {
+        if (pathname === documentPath) {
           if (request.credentials === 'omit') {
-            return responseForPath(pathname, { body: 'public-shell:/huong-dan' });
+            return responseForPath(pathname, { body: `public-shell:${documentPath}` });
           }
           if (offline) throw new Error(`offline:${pathname}`);
           return responseForPath(pathname, {
-            body: 'private-navigation:/huong-dan',
+            body: `private-navigation:${documentPath}`,
             headers: {
               'cache-control': 'private, no-store',
               'set-cookie': 'session=secret',
@@ -173,26 +179,26 @@ describe('SvelteKit service worker cache policy', () => {
     expect(await asset?.text()).toBe('network:/_app/immutable/chunks/app.js');
     expect(runtime.cachesApi.has('quangtu-sveltekit-2026-07-31', '/_app/immutable/chunks/app.js')).toBe(true);
 
-    const doc = await runtime.dispatchFetch('/huong-dan', {
+    const doc = await runtime.dispatchFetch(documentPath, {
       mode: 'navigate',
       headers: { accept: 'text/html' },
     });
-    expect(await doc?.text()).toBe('private-navigation:/huong-dan');
-    expect(runtime.cachesApi.has('quangtu-sveltekit-2026-07-31', '/huong-dan')).toBe(true);
+    expect(await doc?.text()).toBe(`private-navigation:${documentPath}`);
+    expect(runtime.cachesApi.has('quangtu-sveltekit-2026-07-31', documentPath)).toBe(true);
 
     const opaque = await runtime.dispatchFetch('/_app/immutable/chunks/opaque.js');
     expect(opaque?.type).toBe('opaque');
     expect(runtime.cachesApi.has('quangtu-sveltekit-2026-07-31', '/_app/immutable/chunks/opaque.js')).toBe(false);
 
     offline = true;
-    const cachedDocument = await runtime.dispatchFetch('/huong-dan', {
+    const cachedDocument = await runtime.dispatchFetch(documentPath, {
       mode: 'navigate',
       headers: { accept: 'text/html' },
     });
-    expect(await cachedDocument?.text()).toBe('public-shell:/huong-dan');
+    expect(await cachedDocument?.text()).toBe(`public-shell:${documentPath}`);
     expect(fetchLog).toEqual(expect.arrayContaining([
       '/_app/immutable/chunks/app.js',
-      '/huong-dan',
+      documentPath,
       '/_app/immutable/chunks/opaque.js',
     ]));
   });

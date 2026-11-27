@@ -22,8 +22,14 @@ const plugin = registerPlugin<{
   clearPersonal(): Promise<void>;
   testNotification(options: { title: string; body: string; sound: boolean; vibrate: boolean }): Promise<{ shown: boolean }>;
 }>('DurableReminders');
-export const replaceDurableReminderPlan = (plan: DurableReminderPlan) => plugin.replacePlan({ plan });
-export const clearDurablePersonalReminders = () => plugin.clearPersonal();
+export async function replaceDurableReminderPlan(plan: DurableReminderPlan) {
+  if (nativePlatform() !== 'android') return { ruleCount: 0, alarmMode: 'off' as const };
+  return plugin.replacePlan({ plan });
+}
+export async function clearDurablePersonalReminders(): Promise<void> {
+  if (nativePlatform() !== 'android') return;
+  await plugin.clearPersonal();
+}
 
 export async function sendDurableTestNotification(options: { title: string; body: string; sound: boolean; vibrate: boolean }): Promise<{ shown: boolean }> {
   if (nativePlatform() !== 'android') return { shown: false };

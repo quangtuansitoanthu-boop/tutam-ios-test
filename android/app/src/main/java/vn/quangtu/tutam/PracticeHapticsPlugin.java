@@ -13,8 +13,11 @@ public class PracticeHapticsPlugin extends Plugin {
     @PluginMethod
     public void rosaryBead(PluginCall call) {
         boolean completedCycle = call.getBoolean("completedCycle", false);
-        getActivity().runOnUiThread(() -> {
-            WebView webView = getBridge().getWebView();
+        final android.app.Activity activity = getBridge() == null ? null : getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) { call.resolve(); return; }
+        activity.runOnUiThread(() -> {
+            if (activity.isFinishing() || activity.isDestroyed()) { call.resolve(); return; }
+            WebView webView = getBridge() == null ? null : getBridge().getWebView();
             if (webView != null && webView.hasWindowFocus()) {
                 int feedback = completedCycle
                     ? (Build.VERSION.SDK_INT >= 30 ? HapticFeedbackConstants.CONFIRM : HapticFeedbackConstants.LONG_PRESS)

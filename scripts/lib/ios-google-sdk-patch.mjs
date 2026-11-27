@@ -37,6 +37,32 @@ const migrations = [
   ['"serverAuthCode": user.serverAuthCode ?? NSNull(),', '"serverAuthCode": (serverAuthCode as Any?) ?? NSNull(),'],
 ];
 
+const safetyMigrations = [
+  ['var googleSignIn: GIDSignIn!;', 'var googleSignIn: GIDSignIn?;'],
+  ['googleSignIn.configuration = googleSignInConfiguration', 'googleSignIn?.configuration = googleSignInConfiguration'],
+  [
+    'if self.googleSignIn.hasPreviousSignIn() && !self.forceAuthCode {',
+    'guard let googleSignIn = self.googleSignIn else {\n                call.reject("Google sign-in is not initialized", "GOOGLE_AUTH_NOT_INITIALIZED");\n                return;\n            }\n            if googleSignIn.hasPreviousSignIn() && !self.forceAuthCode {',
+  ],
+  ['self.googleSignIn.restorePreviousSignIn()', 'googleSignIn.restorePreviousSignIn()'],
+  [
+    '                self.resolveSignInCallWith(user: user!)',
+    '                guard let user = user else {\n                    self.signInCall?.reject("Google sign-in returned no user");\n                    return;\n                }\n                self.resolveSignInCallWith(user: user)',
+  ],
+  [
+    'let presentingVc = self.bridge!.viewController!;',
+    'guard let presentingVc = self.bridge?.viewController else {\n                    self.signInCall?.reject("Google sign-in presenter is unavailable");\n                    return;\n                }',
+  ],
+  ['self.googleSignIn.signIn(withPresenting:', 'googleSignIn.signIn(withPresenting:'],
+  [
+    'if self.googleSignIn.currentUser == nil {',
+    'guard let googleSignIn = self.googleSignIn else {\n                call.reject("Google sign-in is not initialized", "GOOGLE_AUTH_NOT_INITIALIZED");\n                return;\n            }\n            guard let currentUser = googleSignIn.currentUser else {',
+  ],
+  ['self.googleSignIn.currentUser!.refreshTokensIfNeeded', 'currentUser.refreshTokensIfNeeded'],
+  ['self.googleSignIn.signOut()', 'self.googleSignIn?.signOut()'],
+  ['googleSignIn.handle(url)', 'googleSignIn?.handle(url)'],
+];
+
 export function patchIosGoogleSdk(packageDirectory = path.resolve('node_modules/@codetrix-studio/capacitor-google-auth')) {
   const metadata = JSON.parse(fs.readFileSync(path.join(packageDirectory, 'package.json'), 'utf8'));
   if (metadata.name !== '@codetrix-studio/capacitor-google-auth' || metadata.version !== '3.4.0-rc.4') {
@@ -48,15 +74,21 @@ export function patchIosGoogleSdk(packageDirectory = path.resolve('node_modules/
   const swift = source.replaceAll('\r\n', '\n');
   const pod = fs.readFileSync(podFile, 'utf8');
   const occurrences = (text, fragment) => text.split(fragment).length - 1;
+  // Chuẩn hóa bản đã vá để xác minh được cả SDK6, SDK7 cũ và bản vá an toàn mới.
+  let sdkSwift = swift;
+  for (const [before, after] of safetyMigrations) {
+    if (!sdkSwift.includes(before)) sdkSwift = sdkSwift.replace(after, before);
+    else if (sdkSwift.replace(before, '').includes(after)) throw new Error('Unsupported GoogleAuth iOS safety guard source');
+  }
 
   // SDK 7.1 đóng gói privacy manifest; bridge 6.x phải đổi API cùng lần nâng SDK.
   // Xác minh cả hai file trước khi ghi để không để lại nửa bản vá khi source lạ.
-  const migrated = migrations.every(([, after]) => swift.includes(after));
-  const legacyCalls = migrations.slice(1).some(([before]) => swift.includes(before));
+  const migrated = migrations.every(([, after]) => sdkSwift.includes(after));
+  const legacyCalls = migrations.slice(1).some(([before]) => sdkSwift.includes(before));
   const currentSdk = occurrences(pod, currentDependency) === 1 && !pod.includes(legacyDependency) && migrated && !legacyCalls;
   if (!currentSdk && (occurrences(pod, legacyDependency) !== 1 || pod.includes(currentDependency) ||
-      migrations.some(([before]) => occurrences(swift, before) !== 1) ||
-      swift.includes('googleSignIn.configuration = googleSignInConfiguration'))) {
+      migrations.some(([before]) => occurrences(sdkSwift, before) !== 1) ||
+      sdkSwift.includes('googleSignIn.configuration = googleSignInConfiguration'))) {
     throw new Error('Unsupported GoogleAuth iOS native source; expected the SDK 6 bridge or its complete SDK 7.1 patch');
   }
   // initialize được gọi lại khi đăng nhập/đăng xuất; chỉ thay observer URL của chính plugin.
@@ -64,10 +96,14 @@ export function patchIosGoogleSdk(packageDirectory = path.resolve('node_modules/
       (swift.includes(removeUrlObserver) && (occurrences(swift, removeUrlObserver) !== 1 || !swift.includes(replaceUrlObserver)))) {
     throw new Error('Unsupported GoogleAuth iOS URL observer source');
   }
-  if (currentSdk && swift.includes(replaceUrlObserver)) return false;
-  let updatedSwift = swift;
+  let updatedSwift = sdkSwift;
   if (!currentSdk) for (const [before, after] of migrations) updatedSwift = updatedSwift.replace(before, after);
+  if (safetyMigrations.some(([before]) => occurrences(updatedSwift, before) !== 1)) {
+    throw new Error('Unsupported GoogleAuth iOS safety guard source');
+  }
+  for (const [before, after] of safetyMigrations) updatedSwift = updatedSwift.replace(before, after);
   if (!updatedSwift.includes(replaceUrlObserver)) updatedSwift = updatedSwift.replace(addUrlObserver, replaceUrlObserver);
+  if (currentSdk && updatedSwift === swift) return false;
   if (source.includes('\r\n')) updatedSwift = updatedSwift.replaceAll('\n', '\r\n');
   const temporarySwift = `${swiftFile}.tutam-sdk7.tmp`;
   const temporaryPod = `${podFile}.tutam-sdk7.tmp`;

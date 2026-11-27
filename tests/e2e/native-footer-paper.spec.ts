@@ -1,5 +1,19 @@
-import { expect, test, type Page } from '@playwright/test';
-import { settleClient as settleWebClient } from './runtime-helpers';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { deferStartupNotification, settleClient as settleWebClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => { await deferStartupNotification(page); });
+
+async function verifyReadingToolbar(page: Page, reader: Locator, background: string): Promise<void> {
+  await reader.getByRole('button', { name: 'Đóng công cụ', exact: true }).click();
+  const toggle = reader.getByRole('button', { name: 'Công cụ', exact: true });
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveCSS('background-color', background);
+  await page.setViewportSize({ width: 1024, height: 814 });
+  const toolbar = reader.locator('.reader-toolbar');
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar).toHaveCSS('background-color', background);
+  await page.setViewportSize({ width: 375, height: 814 });
+}
 
 // Apply the native CSS fixture after the web document's bootstrap has settled.
 async function settleClient(page: Page): Promise<void> {
@@ -48,20 +62,20 @@ for (const [paper, theme, background, ink] of [
     await expect(footer).toHaveCSS('background-color', background);
     await expect(footer.locator('.qts-bottom-nav__item').first()).toHaveCSS('color', ink);
     await expect(footer.locator('[aria-current="page"]')).toHaveCSS('color', ink);
-    const palettes = await footer.evaluate((element, dark) => {
-      const active = element.querySelector('[aria-current="page"]')!;
-      const icon = active.querySelector('.qts-bottom-nav__icon')!;
+    const active = footer.locator('[aria-current="page"]');
+    const palette = await active.evaluate((active, dark) => {
       const style = getComputedStyle(active);
       const probe = document.createElement('span');
       probe.style.color = style.getPropertyValue(dark ? '--tab-color-dark' : '--tab-color');
       probe.style.backgroundColor = style.getPropertyValue(dark ? '--tab-bg-dark' : '--tab-bg');
       active.append(probe);
       const expected = getComputedStyle(probe);
-      const result = { icon: getComputedStyle(icon).color, pill: getComputedStyle(icon).backgroundColor, expectedIcon: expected.color, expectedPill: expected.backgroundColor };
+      const result = { icon: expected.color, pill: expected.backgroundColor };
       probe.remove(); return result;
     }, paper === 'dark');
-    expect(palettes.icon).toBe(palettes.expectedIcon);
-    expect(palettes.pill).toBe(palettes.expectedPill);
+    const icon = active.locator('.qts-bottom-nav__icon');
+    await expect(icon).toHaveCSS('color', palette.icon);
+    await expect(icon).toHaveCSS('background-color', palette.pill);
     await page.locator('[data-footer-paper-fixture]').evaluate(element => element.remove());
     await expect(footer).toHaveCSS('background-color', before.background);
     await expect(footer.locator('[aria-current="page"]')).toHaveCSS('color', before.active);
@@ -99,16 +113,32 @@ for (const [theme, swatch, paper, background, ink] of [
     await page.locator('.tt-reader-practice-btn').click();
     await page.locator('.practice-confirm__primary').click();
     const session = page.locator('.tt-practice');
-    await session.locator('.ttp-bg-swatch').nth(swatch + 1).click();
+    const settings = session.getByRole('button', { name: 'Tùy chỉnh', exact: true });
+    await settings.click();
+    const dialog = page.getByRole('dialog').filter({ has: page.locator('.ttp-sheet-settings') });
+    const selected = dialog.locator('.ttp-bg-swatch').nth(swatch + 1);
+    await selected.click();
+    await expect(selected).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
     await expect(session).toHaveAttribute('data-bg', paper);
     for (const selector of ['.ttp-header', '.ttp-reader-bar']) {
       await expect(session.locator(selector)).toHaveCSS('background-color', background);
     }
     await expect(session.locator('.ttp-header-title')).toHaveCSS('color', ink);
-    await expect(session.locator('.ttp-rbar-label').first()).toHaveCSS('color', ink);
-    await expect(session.locator('.ttp-reader-bar select').first()).toHaveCSS('color', ink);
+    await expect(settings).toBeVisible();
+    // The mobile settings action uses the paper's on-gold foreground.
+    const settingsInk = paper === 'cream' || paper === 'dark' ? 'rgb(36, 24, 12)' : 'rgb(255, 255, 255)';
+    await expect(settings).toHaveCSS('color', settingsInk);
     await expect(page.locator('.qts-bottom-nav')).toHaveCSS('background-color', background);
     await expect(page.locator('html')).toHaveAttribute('data-theme', paper === 'dark' ? 'dark' : 'light');
+    await page.setViewportSize({ width: 1024, height: 814 });
+    const desktopLabel = session.locator('.ttp-rbar-label').first();
+    const desktopSpeed = session.locator('.ttp-reader-bar select').first();
+    await expect(desktopLabel).toBeVisible();
+    await expect(desktopLabel).toHaveCSS('color', ink);
+    await expect(desktopSpeed).toBeVisible();
+    await expect(desktopSpeed).toHaveCSS('color', ink);
   });
 }
 
@@ -133,18 +163,18 @@ for (const [paper, theme, background] of [
     const swatch = preview.locator(`.reader-toolbar .swatch.${paper}`);
     if (!await swatch.isVisible()) await preview.getByRole('button', { name: 'Công cụ', exact: true }).click();
     await swatch.click();
+    await expect(swatch).toHaveAttribute('aria-pressed', 'true');
     await expect(preview).toHaveAttribute('data-read-bg', paper);
     await expect(preview.locator('.reader-scroll')).toHaveCSS('background-color', background);
-    for (const selector of ['.tt-reader-top-bar', '.chapter-nav', '.reader-toolbar']) {
+    for (const selector of ['.tt-reader-top-bar', '.chapter-nav']) {
       await expect(preview.locator(selector)).toHaveCSS('background-color', background);
     }
+    await verifyReadingToolbar(page, preview, background);
     await expect(page.locator('.qts-bottom-nav')).toHaveCSS('background-color', background);
     await expect(page.locator('html')).toHaveAttribute('data-theme', paper === 'dark' ? 'dark' : 'light');
-    const closeTools = preview.getByRole('button', { name: 'Đóng công cụ', exact: true });
-    if (await closeTools.isVisible()) await closeTools.click();
     await preview.locator('.tt-reader-back-btn').click();
     await expect(preview).toHaveAttribute('data-read-bg', paper);
-    await expect(page.locator('.tt-topbar')).toHaveCSS('background-color', background);
+    await expect(page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true })).toHaveCSS('background-color', background);
     if (paper === 'white' || paper === 'gray' || paper === 'purple') {
       await expect(preview.locator('.tt-preview__toc')).toHaveCSS('background-color', background);
     }
@@ -172,10 +202,11 @@ for (const [theme, paper, color] of [
     const purple = reader.locator(`.reader-toolbar .swatch.${paper}`);
     if (!await purple.isVisible()) await reader.getByRole('button', { name: 'Công cụ', exact: true }).click();
     await purple.click();
+    await expect(purple).toHaveAttribute('aria-pressed', 'true');
     await expect(reader).toHaveClass(new RegExp(`bg-${paper}`));
     await expect(reader).toHaveCSS('background-color', color);
     await expect(reader.locator('.reader-top-bar')).toHaveCSS('background-color', color);
-    await expect(reader.locator('.reader-toolbar')).toHaveCSS('background-color', color);
+    await verifyReadingToolbar(page, reader, color);
     await expect(page.locator('.qts-bottom-nav')).toHaveCSS('background-color', color);
     expect(await page.evaluate(() => [localStorage.getItem('tutam_read_bg'), localStorage.getItem('tutam_read_bg_dark')])).toEqual([paper, paper]);
     await page.reload(); await settleClient(page);

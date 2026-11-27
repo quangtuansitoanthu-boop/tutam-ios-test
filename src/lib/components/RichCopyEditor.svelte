@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { flushSync, onMount, untrack } from 'svelte';
   import { measureCopyPages, renderCopyRuns, renderGhostRuns, renderTracedCopyRuns } from '$lib/browser/copying-layout';
   import type { TypedRun } from '$lib/domain/practice/copying-typed-format';
-  import { alignGhostRuns, canonicalizeGhostPrefix, nextExpectedGhostWord, reconcileGhostInput } from '$lib/domain/practice/copying-ghost-format';
+  import { alignGhostRuns, canonicalizeGhostPrefix, nextExpectedGhostWord, reconcileGhostInput, reconcileGhostTyping, type GhostTypingState } from '$lib/domain/practice/copying-ghost-format';
   import { richCopyText, richCopySelection, setRichCopySelection } from '$lib/browser/copying-rich-text';
   let { value, runs, label, placeholder, invalid, maxlength, font, size = 20, scale = 1, allowPaste = false, readonly = false, ghostRuns = [], canonicalGhostRuns = [], showGhost = false, traceCanonical = true, mismatch = false, editingContext = '', onlayout, onreferencepaste, onvalue, onbeforeinput, ondisallow, oncaret, oncomposing, onmismatch }:
     { value: string; runs: TypedRun[]; label: string; placeholder: string; invalid: boolean; maxlength: number; font: string; size?: number; scale?: number; allowPaste?: boolean; readonly?: boolean;
@@ -20,16 +20,17 @@
   let pendingSelection: [number, number] | null = null;
   let rememberedSelection: [number, number] | null = null;
   let renderedRuns = '';
+  let traceTyping: GhostTypingState | undefined;
+  let nativeEditRevision = $state(0);
   let renderedGhostRuns = '';
   const canonicalGhostSource = $derived(canonicalGhostRuns.length > 0 ? canonicalGhostRuns : ghostRuns);
   const canonicalGhost = $derived(showGhost && canonicalGhostSource.length > 0 ? canonicalGhostSource.map(r => r.text).join('') : '');
-  const canonicalMatched = $derived(Boolean(showGhost && traceCanonical && canonicalGhost && canonicalizeGhostPrefix(canonicalGhost, value).matched));
   const alignedGhost = $derived(
     !showGhost
       ? null
-      : !composing && canonicalMatched
-        ? canonicalGhostSource
-        : alignGhostRuns(canonicalGhostSource, value)
+      : canonicalGhostRuns.length > 0
+        ? ghostRuns
+        : canonicalGhost.startsWith(value) ? canonicalGhostSource : alignGhostRuns(canonicalGhostSource, value)
   );
   function focused() {
     if (element && !selecting) {
@@ -48,6 +49,7 @@
     if (context === previousEditingContext) return;
     previousEditingContext = context;
     undoStack = []; redoStack = []; beforeEdit = null; lastCommitted = undefined; compositionReference = '';
+    traceTyping = undefined;
     pendingSelection = null; rememberedSelection = null;
     if (compositionCommitTimer !== undefined) {
       clearTimeout(compositionCommitTimer); compositionCommitTimer = undefined;
@@ -69,6 +71,7 @@
     const from = redo ? redoStack : undoStack, to = redo ? undoStack : redoStack;
     const saved = from.pop();
     if (!saved) return;
+    traceTyping = undefined;
     to.push(snapshot()); pendingSelection = saved.selection; lastCommitted = saved.value;
     onvalue(saved.value, redo ? 'historyRedo' : 'historyUndo');
   }
@@ -130,11 +133,12 @@
     });
   });
   $effect(() => {
+    void nativeEditRevision;
     const target = element, content = value, formatted = runs, reference = alignedGhost ?? ghostRuns;
     const tracing = showGhost && canonicalGhost && alignedGhost !== null;
     if (!target || composing || selecting) return;
     untrack(() => {
-      if (content !== lastCommitted) { undoStack = []; redoStack = []; lastCommitted = content; }
+      if (content !== lastCommitted) { undoStack = []; redoStack = []; lastCommitted = content; traceTyping = undefined; }
       const selection = pendingSelection ?? (document.activeElement === target ? richCopySelection(target) : null);
       pendingSelection = null;
       const signature = JSON.stringify(tracing ? reference : formatted) + ':' + content.length + ':' + Boolean(tracing);
@@ -157,7 +161,11 @@
     if (!element) return;
     const pointerDown = () => { selecting = true; };
     const pointerUp = () => { if (selecting) { selecting = false; oncaret(); } };
+    const selectionChanged = () => {
+      if (element === document.activeElement && element && richCopySelection(element)) oncaret();
+    };
     element.addEventListener('pointerdown', pointerDown);
+    document.addEventListener('selectionchange', selectionChanged);
     window.addEventListener('pointerup', pointerUp);
     window.addEventListener('pointercancel', pointerUp);
     window.addEventListener('blur', pointerUp);
@@ -173,6 +181,7 @@
       if (compositionCommitTimer !== undefined) clearTimeout(compositionCommitTimer);
       if (composing) { composing = false; oncomposing(false); }
       element?.removeEventListener('pointerdown', pointerDown);
+      document.removeEventListener('selectionchange', selectionChanged);
       window.removeEventListener('pointerup', pointerUp);
       window.removeEventListener('pointercancel', pointerUp);
       window.removeEventListener('blur', pointerUp);
@@ -185,12 +194,17 @@
     compositionCommitTimer = undefined;
     composing = false;
     changed(new Event('compositionend'));
+    // Lượt IME mới phải nhận DOM/caret đã rollback, không kế thừa chữ vừa bị từ chối.
+    flushSync();
     compositionReference = '';
     oncomposing(false);
   }
   function changed(event: Event) {
     if (!element) return;
-    let next = richCopyText(element);
+    if (composing) traceTyping = undefined;
+    const nativeText = richCopyText(element);
+    let next = nativeText;
+    let rejectedWord: string | undefined;
     const previous = beforeEdit?.value;
     const atEnd = !beforeEdit || beforeEdit.selection.every(offset => offset >= Math.min(previous?.length ?? 0, next.length));
     if (compositionReference && previous !== undefined && next.startsWith(previous) && !compositionReference.startsWith(compositionKey(next))) {
@@ -202,24 +216,27 @@
         if (!composing) pendingSelection = [next.length, next.length];
       }
     }
-    if (!composing && showGhost && traceCanonical && canonicalGhost && previous !== undefined && atEnd) {
+    const opensNote = previous !== undefined && next.startsWith(previous) && /^[(（]/u.test(next.slice(previous.length));
+    if (!composing && showGhost && (traceCanonical || compositionReference) && canonicalGhost && previous !== undefined && atEnd && !opensNote) {
       const prefix = canonicalizeGhostPrefix(canonicalGhost, previous);
       if (prefix.matched) {
         const prevNfc = previous.normalize('NFC');
         const nextNfc = next.normalize('NFC');
         if (nextNfc.startsWith(prevNfc) && nextNfc.length > prevNfc.length) {
-          const res = reconcileGhostInput(canonicalGhost, prefix.text, { incoming: nextNfc.slice(prevNfc.length) });
+          const res = reconcileGhostTyping(canonicalGhost, prefix.text, { incoming: nextNfc.slice(prevNfc.length) }, traceTyping);
+          traceTyping = res.state;
           if (res.mismatch) {
             next = prefix.text;
             renderedRuns = '';
             pendingSelection = [next.length, next.length];
-            onmismatch?.(res.expectedWord ?? '');
+            rejectedWord = res.expectedWord ?? '';
           } else {
             next = res.text;
             renderedRuns = '';
             pendingSelection = [next.length, next.length];
           }
         } else if (nextNfc !== prevNfc) {
+          traceTyping = undefined;
           // Handles mobile IME re-composition, case changes, NFD/NFC shifts,
           // or rapid consecutive words before DOM flush.
           const full = canonicalizeGhostPrefix(canonicalGhost, nextNfc);
@@ -231,7 +248,7 @@
             next = prefix.text;
             renderedRuns = '';
             pendingSelection = [next.length, next.length];
-            onmismatch?.(nextExpectedGhostWord(canonicalGhost, prefix.text.length));
+            rejectedWord = nextExpectedGhostWord(canonicalGhost, prefix.text.length);
           }
         }
       }
@@ -239,16 +256,21 @@
     if (!composing && next.length > maxlength) {
       next = next.slice(0, maxlength);
     }
-    commit(next, (event as InputEvent).inputType ?? ''); oncaret();
+    // A rejected native edit may leave the state unchanged while the DOM and caret changed.
+    if (!composing && nativeText !== next && next === value) nativeEditRevision++;
+    commit(next, (event as InputEvent).inputType ?? '');
+    if (rejectedWord !== undefined) onmismatch?.(rejectedWord);
+    oncaret();
   }
   function startComposition() {
     flushPendingComposition();
+    traceTyping = undefined;
     const effectiveValue = lastCommitted ?? value;
     const currentSelection = pendingSelection ?? (element ? richCopySelection(element) : null);
     beforeEdit = { value: effectiveValue, selection: currentSelection ?? [effectiveValue.length, effectiveValue.length] };
     const domLen = element ? richCopyText(element).length : effectiveValue.length;
     const atEnd = beforeEdit.selection.every(offset => offset >= Math.min(effectiveValue.length, domLen));
-    compositionReference = showGhost && atEnd && canonicalizeGhostPrefix(canonicalGhost, effectiveValue).matched ? compositionKey(canonicalGhost) : '';
+    compositionReference = showGhost && traceCanonical && atEnd && canonicalizeGhostPrefix(canonicalGhost, effectiveValue).matched ? compositionKey(canonicalGhost) : '';
     composing = true; oncomposing(true);
   }
   function endComposition(event: CompositionEvent) {
@@ -264,7 +286,7 @@
   function before(event: InputEvent) {
     onbeforeinput(event);
     if (event.defaultPrevented || !element) return;
-    if (compositionCommitTimer !== undefined && (event.inputType === 'insertParagraph' || event.inputType === 'insertLineBreak' || event.inputType === 'deleteContentBackward')) {
+    if (compositionCommitTimer !== undefined && !event.isComposing && event.inputType !== 'insertCompositionText' && event.inputType !== 'insertFromComposition') {
       flushPendingComposition();
     }
     if (composing || event.isComposing) return;
@@ -274,6 +296,7 @@
     const currentValue = lastCommitted ?? value;
     const selection = pendingSelection ?? richCopySelection(element);
     beforeEdit = { value: currentValue, selection: selection ?? [currentValue.length, currentValue.length] };
+    if (!event.cancelable) return;
     const prefix = showGhost && traceCanonical && canonicalGhost ? canonicalizeGhostPrefix(canonicalGhost, currentValue) : { text: currentValue, matched: false };
     // Only trace at the end of an unchanged canonical prefix. Existing drafts
     // and edits within the text retain the browser's normal selection behavior.
@@ -283,6 +306,7 @@
     const tracing = showGhost && traceCanonical && canonicalGhost && prefix.matched && atEnd;
     if (tracing && event.data !== '(' && event.data !== '（') {
       if (event.inputType === 'deleteContentBackward') {
+        traceTyping = undefined;
         event.preventDefault();
         const res = reconcileGhostInput(canonicalGhost, prefix.text, { isBackspace: true });
         pendingSelection = [res.text.length, res.text.length];
@@ -295,10 +319,11 @@
       }
       if (event.inputType === 'insertParagraph' || event.inputType === 'insertLineBreak' || event.inputType === 'insertText') {
         event.preventDefault();
-        const res = reconcileGhostInput(canonicalGhost, prefix.text, {
+        const res = reconcileGhostTyping(canonicalGhost, prefix.text, {
           incoming: event.data ?? '\n',
           inputType: event.inputType,
-        });
+        }, traceTyping);
+        traceTyping = res.state;
         if (res.mismatch) {
           onmismatch?.(res.expectedWord ?? '');
           return;
@@ -310,8 +335,8 @@
     }
     if (event.inputType === 'insertParagraph' || event.inputType === 'insertLineBreak') {
       event.preventDefault();
-      const [start, end] = richCopySelection(element) ?? [value.length, value.length];
-      const next = value.slice(0, start) + '\n' + value.slice(end);
+      const [start, end] = selection ?? [currentValue.length, currentValue.length];
+      const next = currentValue.slice(0, start) + '\n' + currentValue.slice(end);
       if (next.length > maxlength) return;
       pendingSelection = [start + 1, start + 1];
       commit(next, event.inputType);
@@ -325,6 +350,7 @@
     const pasted = (event.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
     if (onreferencepaste && await onreferencepaste(pasted)) return;
     if (!element || composing || readonly) return;
+    traceTyping = undefined;
     const [start, end] = richCopySelection(element) ?? [value.length, value.length];
     const plain = pasted.slice(0, Math.max(0, maxlength - value.length + end - start));
     pendingSelection = [start + plain.length, start + plain.length];

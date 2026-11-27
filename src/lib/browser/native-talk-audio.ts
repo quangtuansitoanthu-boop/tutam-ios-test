@@ -31,6 +31,7 @@ export interface NativeTalkPlugin {
   peek(): Promise<Partial<NativeAudioState>>;
   cacheStatus(options: { key: string }): Promise<{ bytes: number }>;
   cacheChunk(options: { key: string; offset: number; data: string; last: boolean }): Promise<void>;
+  evictCache(options: { keys: string[] }): Promise<void>;
   backgroundStatus(): Promise<{ restricted: boolean; batteryOptimized: boolean }>;
   openBackgroundSettings(): Promise<void>;
   addListener(event: 'state', listener: (state: NativeAudioState) => void): Promise<PluginListenerHandle>;
@@ -48,6 +49,30 @@ export function nativeTalkUrl(url: string): string {
 
 /** Copy in bounded chunks: never pass an entire lecture as base64 through the bridge. */
 const cacheWrites = new Map<string, Promise<void>>();
+export async function evictNativeTalkCache(urls: readonly string[], isCurrent: () => boolean = () => true,
+  plugin: Pick<NativeTalkPlugin, 'evictCache'> = nativeTalkPlugin): Promise<void> {
+  if (plugin === nativeTalkPlugin && !hasNativeTalkAudio()) return;
+  const keys = [...new Set(urls.map(nativeTalkUrl))];
+  if (!keys.length) return;
+  const revision = nativeAudioPrincipalRevision();
+  const assertCurrent = () => {
+    if (revision !== nativeAudioPrincipalRevision() || !isCurrent()) throw new DOMException('Native audio principal changed', 'AbortError');
+  };
+  const previous = keys.map(key => cacheWrites.get(key));
+  const work = Promise.all(previous.map(pending => pending?.catch(() => undefined))).then(async () => {
+    assertCurrent(); await waitForNativeAudioPrincipal(); assertCurrent();
+    try { await plugin.evictCache({ keys }); }
+    catch (error) {
+      // Bridge cũ chưa có lệnh này; giữ tương thích thay vì làm hỏng thao tác xóa IDB đã có.
+      if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'UNIMPLEMENTED')) throw error;
+    }
+    assertCurrent();
+  });
+  for (const key of keys) cacheWrites.set(key, work);
+  try { await work; }
+  finally { for (const key of keys) if (cacheWrites.get(key) === work) cacheWrites.delete(key); }
+}
+
 export async function cacheNativeTalk(url: string, blob: Blob, plugin: Pick<NativeTalkPlugin, 'cacheStatus' | 'cacheChunk'> = nativeTalkPlugin, isCurrent: () => boolean = () => true, options: { replace?: boolean } = {}): Promise<void> {
   const key = nativeTalkUrl(url);
   const revision = nativeAudioPrincipalRevision();
@@ -86,6 +111,7 @@ export class NativeTalkAudio extends EventTarget {
   error: { code: number; message: string } | null = null;
   private position = 0;
   private pendingSeek?: { position: number };
+  private pendingRepeat?: symbol;
   private rate = 1;
   private loudness = 1;
   private silent = false;
@@ -177,6 +203,7 @@ export class NativeTalkAudio extends EventTarget {
       if (confirmedSeek) this.fire('timeupdate');
       return;
     }
+    const previous = this.latestState;
     this.latestState = state;
     const trackChanged = state.trackIndex !== this.trackIndex;
     if (trackChanged) this.pendingSeek = undefined;
@@ -199,6 +226,9 @@ export class NativeTalkAudio extends EventTarget {
     if (!wasPaused && this.paused) this.fire('pause');
     if (!wasPlaying && state.playing) this.fire('playing');
     if (!this.paused && !state.playing) this.fire('waiting');
+    if (!this.pendingRepeat && previous && state.repeat !== undefined && state.repeat !== previous.repeat) {
+      this.dispatchEvent(new CustomEvent('nativerepeat', { detail: state.repeat }));
+    }
     this.dispatchEvent(new CustomEvent('nativesleep', { detail: state }));
     this.fire('timeupdate');
     if (state.error && state.error !== this.error?.message) this.report(state.error);
@@ -255,7 +285,22 @@ export class NativeTalkAudio extends EventTarget {
   async pause() {
     if (this.queueId) await this.command(() => this.plugin.pause()).catch(cause => this.report(cause));
   }
-  setRepeat(repeat: number) { if (this.queueId) this.send(() => this.plugin.options({ repeat })); }
+  setRepeat(repeat: number) {
+    const queue = this.queueId;
+    if (!queue) return;
+    const request = this.pendingRepeat = Symbol();
+    void this.command(() => this.plugin.options({ repeat }), undefined, () => this.queueId === queue)
+      .catch(cause => { if (this.pendingRepeat === request && this.queueId === queue) this.report(cause); })
+      .finally(() => {
+        if (this.pendingRepeat !== request) return;
+        this.pendingRepeat = undefined;
+        // A newer widget event can arrive before the response to the last app tap.
+        const actual = this.latestState?.repeat;
+        if (!this.disposed && this.queueId === queue && actual !== undefined && actual !== repeat) {
+          this.dispatchEvent(new CustomEvent('nativerepeat', { detail: actual }));
+        }
+      });
+  }
   setSleep(remainingMs: number, atEnd: boolean) { if (this.queueId) this.send(() => this.plugin.sleep({ remainingMs, atEnd })); }
   removeAttribute(name: string) {
     if (name !== 'src') return;

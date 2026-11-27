@@ -35,19 +35,29 @@ describe('homepage offline PDF fallback', () => {
     expect(await readPdfOfflineState(webOnly, read)).toBe(native ? null : webOnly);
     expect(read).toHaveBeenCalledTimes(native ? 0 : 1);
   });
-  it.each([429, 500, 503])('keeps the native public bundled library available during HTTP %s without restoring downloaded records', async status => {
+  it.each([429, 500, 503])('keeps native public books and the active principal downloads during HTTP %s', async status => {
     fallbackMocks.native.mockReturnValue(true);
     fallbackMocks.bundled.mockImplementation(async () => [
       { id: 'bundled', tieu_de: 'Sách trên thiết bị', danh_muc: 'SÁCH KHUYẾN THIỆN', trang_thai: 'Hoàn thành' },
       { id: 'draft', tieu_de: 'Bản nháp', danh_muc: 'SÁCH KHUYẾN THIỆN', trang_thai: 'Bản nháp' },
     ]);
     const fetcher = vi.fn<typeof fetch>(async () => new Response('', { status }));
-    const readDownloads = vi.fn(async () => [download('reader-a')]);
+    const readDownloads = vi.fn(async () => [download('reader-a'), download('other-reader', 'foreign')]);
     const result = await fetchHomepageWithOfflinePdfs(fetcher, 'admin', 'reader-a', undefined, readDownloads);
     expect(result.offline).toBe(true);
-    expect(result.articles.map(article => article.id)).toEqual(['bundled']);
-    expect(readDownloads).not.toHaveBeenCalled();
+    expect(result.articles.map(article => article.id).sort()).toEqual(['bundled', 'saved-pdf']);
+    expect(readDownloads).toHaveBeenCalledExactlyOnceWith('reader-a');
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains the active principal downloads after a native request timeout', async () => {
+    fallbackMocks.native.mockReturnValue(true);
+    fallbackMocks.bundled.mockResolvedValue([]);
+    const readDownloads = vi.fn(async () => [download('reader-a'), download('other-reader', 'foreign')]);
+    const result = await fetchHomepageWithOfflinePdfs(async () => { throw new DOMException('Timed out', 'TimeoutError'); },
+      'member', 'reader-a', undefined, readDownloads);
+    expect(result.articles.map(article => article.id)).toEqual(['saved-pdf']);
+    expect(readDownloads).toHaveBeenCalledExactlyOnceWith('reader-a');
   });
 
   it.each(['html', 'invalid-json', 'body-timeout'])('recovers the native bundled catalog after %s', async failure => {

@@ -6,6 +6,7 @@ import AudioAdminEditor from '../../../src/lib/components/audio/AudioAdminEditor
 describe('audio admin editor parity', () => {
   const editor = readFileSync('src/lib/components/audio/AudioAdminEditor.svelte', 'utf8');
   const helpers = readFileSync('src/lib/components/audio/audio-admin-editor-helpers.ts', 'utf8');
+  const upload = readFileSync('src/lib/browser/media-upload.ts', 'utf8');
 
   it('compiles and renders the editor contract', () => {
     const { body } = render(AudioAdminEditor, { props: { role: 'admin', albums: [] } });
@@ -48,9 +49,13 @@ describe('audio admin editor parity', () => {
   });
 
   it('uploads artwork through the hardened media API and preserves crop position', () => {
-    expect(helpers).toContain("fetchWithSessionRefresh('/api/media'");
-    expect(helpers).toContain("'x-content-sha256': base64Url(digest)");
-    expect(helpers).toContain("'x-media-prefix': 'covers'");
+    expect(helpers).toContain("import { uploadMediaFile } from '$lib/browser/media-upload'");
+    expect(helpers).toContain("await uploadMediaFile(file, 'covers', csrfToken)");
+    expect(upload).toContain("fetchWithSessionRefresh('/api/media'");
+    expect(upload).toContain("'x-content-sha256': hash");
+    expect(upload).toContain("'x-media-prefix': prefix");
+    expect(upload).toContain("'x-csrf-token': csrfToken");
+    expect(upload).toContain("'idempotency-key': createBrowserId()");
     expect(editor).toContain('onpointermove={moveArtwork}');
     expect(editor).toContain('onkeydown={moveArtworkByKeyboard}');
     expect(editor).toContain('serializeAudioArtwork(targetForm.artwork, targetForm.artworkPosition)');

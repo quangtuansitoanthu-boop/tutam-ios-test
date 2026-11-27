@@ -37,7 +37,8 @@
   } from '$lib/stores/session.svelte';
   import { setThemeContext } from '$lib/stores/theme.svelte';
   import { setLocaleContext } from '$lib/stores/locale.svelte';
-  import { isNativeApp } from '$lib/browser/native-platform';
+  import { isNativeApp, nativePlatform } from '$lib/browser/native-platform';
+  import { dismissStartupCover, syncNativeStartupLocale } from '$lib/browser/native-startup-screen';
   import { initializeUiMotion } from '$lib/browser/ui-motion';
   import { initializeUiFontScale } from '$lib/browser/ui-font-scale';
   import { initializeInteractionPerformance } from '$lib/browser/interaction-performance';
@@ -112,6 +113,7 @@
   let pwaUpdateApplying = $state(false);
   let phapBaoModalOpen = $state(false);
   let nativeUpdateBlocksPermission = $state(false);
+  let startupReady = $state(false);
   let pwaRegistration: PwaRegistrationHandle | null = null;
   const currentPath = $derived(page.url.pathname || '/');
   const hasArticleState = $derived(Object.prototype.hasOwnProperty.call(page.state ?? {}, 'articleId'));
@@ -150,17 +152,10 @@
 
   onMount(() => watchVeganWeekPreload());
 
+  onMount(() => dismissStartupCover(() => { startupReady = true; }));
+
   onMount(() => {
     mounted = true;
-    // Dismiss after the first app paint; no network request or artificial startup delay.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      void import('$lib/browser/native-startup-screen').then(module => module.finishNativeStartup()).catch(() => {});
-      const startup = document.getElementById('app-startup');
-      if (startup) {
-        startup.classList.add('startup-ready');
-        window.setTimeout(() => startup.remove(), 240);
-      }
-    }));
     const native = isNativeApp();
     const disposePerformance = initializeInteractionPerformance(native);
     const disposeUiMotion = initializeUiMotion();
@@ -326,7 +321,10 @@
       if (disposed) return;
       // Special alarm access is requested from reminder controls, never on app launch.
       void initUrlFallback().catch(() => undefined);
-      if (!native) {
+      if (native) {
+        // Retire legacy shell workers while preserving native offline caches.
+        void registerPwa().catch(() => undefined);
+      } else {
         void registerPwa({
           onUpdateReady: () => {
             if (!disposed) pwaUpdateAvailable = true;
@@ -349,7 +347,13 @@
       resumePracticeSync();
     };
     const openPhapBao = () => { phapBaoModalOpen = true; };
+    const syncStartupLocale = () => {
+      if (!native || nativePlatform() !== 'android') return;
+      void syncNativeStartupLocale(locale.current);
+    };
+    syncStartupLocale();
     const handleLocaleChanged = () => {
+      syncStartupLocale();
       void queryClient.invalidateQueries({ queryKey: ['articles'] });
     };
     window.addEventListener('quangtu:locale-changed', handleLocaleChanged);
@@ -416,8 +420,8 @@
 <svelte:head>
   <title>{LEGACY_MASTER_LAYOUT_CONTRACT.documentTitle}</title>
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/assets/branding/tu-tap-logo.png" type="image/png" />
-  <link rel="apple-touch-icon" href="/assets/branding/tu-tap-logo.png" />
+  <link rel="icon" sizes="48x48" href="/assets/branding/temple-favicon.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/assets/branding/temple-maskable-512.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -453,6 +457,7 @@
     <AppDialogHost />
     {#if mounted && isNativeApp()}
       <NativeUpdatePrompt
+        {startupReady}
         home={page.url.protocol !== 'a:' && currentPath === '/' && !page.url.search && !isReadingArticle}
         blocked={notificationPromptVisible}
         onPermissionBlockChange={(blocked) => { nativeUpdateBlocksPermission = blocked; }}
@@ -477,6 +482,7 @@
     {/await}
   {/if}
   <NotificationPromptModal
+    {startupReady}
     session={sessionStore.value}
     blocked={nativeUpdateBlocksPermission}
     onActiveChange={(active) => { notificationPromptBlocking = active; notificationPromptVisible = active; }}
@@ -524,6 +530,7 @@
     width: 100%;
   }
   .pwa-update-banner {
+    box-sizing: border-box;
     position: fixed;
     z-index: 9999;
     bottom: max(80px, calc(env(safe-area-inset-bottom, 0px) + 64px), calc(var(--audio-player-top, 0px) + var(--radius-sm)));
@@ -546,7 +553,8 @@
     white-space: nowrap;
   }
   .pwa-update-banner button {
-    min-height: 30px;
+    min-width: var(--touch-target-size);
+    min-height: var(--touch-target-size);
     padding: 4px 14px;
     cursor: pointer;
     border: 0;
@@ -557,9 +565,10 @@
     font-size: 13px;
     font-weight: 800;
   }
+  .pwa-update-banner > span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   .pwa-update-banner button:disabled { cursor: wait; opacity: .82; }
   .pwa-update-banner button.dismiss {
-    width: 30px;
+    width: var(--touch-target-size);
     padding: 0;
     background: rgba(255, 255, 255, .16);
     color: #fff;

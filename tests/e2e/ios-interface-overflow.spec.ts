@@ -29,7 +29,7 @@ test('vegan tabs stay below the practice header when scrolling', async ({ page }
   const calendarLink = page.locator('a.tt-mode-card--vegan');
   await expect(calendarLink).toContainText('Lịch ăn chay đủ dinh dưỡng');
   await calendarLink.click();
-  const header = page.locator('.qts-route-topbar');
+  const header = page.locator('nav.qts-nav');
   const tabs = page.locator('.vegan nav');
   const title = page.locator('.vegan h1');
   await expect(title).toHaveText('Lịch ăn chay đủ dinh dưỡng');
@@ -85,7 +85,7 @@ test('vegan search stays aligned when typing and returning to practice', async (
   await expect.poll(() => page.locator('.vegan .dish').count()).toBeLessThan(menuCount);
   await expect(page.locator('.vegan .dish').first()).toBeVisible();
   expect(await checkViewport()).toEqual({ scale: 1, offsetLeft: 0, overflow: false });
-  await page.locator('.qts-route-topbar').getByRole('button', { name: 'Quay lại', exact: true }).click();
+  await page.locator('nav.qts-nav').getByRole('button', { name: 'Quay lại', exact: true }).click();
   await expect(page).toHaveURL(/\/tu-tap\/?$/);
   await expect(search).toHaveCount(0);
   expect(await checkViewport()).toEqual({ scale: 1, offsetLeft: 0, overflow: false });

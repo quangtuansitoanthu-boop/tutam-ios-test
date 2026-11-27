@@ -26,6 +26,8 @@ describe('Buddhist calendar widget timeline', () => {
     expect(english.locale).toBe('en');
     expect(english.days[0].solarDate).toContain('Friday');
     expect(english.days[0].lunarMonthYear).toContain('Month');
+    expect(english.days[0].lunarMonthYear).toContain('Horse');
+    expect(english.days[0].lunarMonthYear).not.toContain('Bính Ngọ');
     expect(buildBuddhistCalendarTimeline(date, 1).locale).toBe('vi');
   });
   const personal: PersonalLunarEvent = { id: 'family', title: 'Giỗ gia đình', note: 'Tưởng niệm', type: 'gia-dinh',

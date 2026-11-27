@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import PracticeReminderCard from '../../../src/lib/components/practice/reminder/PracticeReminderCard.svelte';
+import NotificationPromptModal from '../../../src/lib/components/notifications/NotificationPromptModal.svelte';
 
 const mocks = vi.hoisted(() => ({ platform: 'ios' as 'ios' | 'android' | 'web', masterEnabled: true, check: vi.fn(), request: vi.fn(), sync: vi.fn(), save: vi.fn() }));
 vi.mock('$lib/stores/locale.svelte', async () => {
@@ -37,6 +38,7 @@ function start(section = '') {
   flushSync(); return state;
 }
 beforeEach(() => {
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {}); // jsdom has no viewport scrolling.
   localStorage.clear(); mocks.platform = 'ios'; mocks.masterEnabled = true;
   mocks.check.mockReset().mockResolvedValue('prompt'); mocks.request.mockReset().mockResolvedValue('granted');
   mocks.sync.mockReset().mockResolvedValue({ success: true, scheduledCount: 2 }); mocks.save.mockReset().mockReturnValue(true);
@@ -49,6 +51,29 @@ afterEach(async () => {
 it('does not ask just because the closed settings card mounted', async () => {
   start(); await settle(); expect(mocks.check).toHaveBeenCalled();
   expect(mocks.request).not.toHaveBeenCalled(); expect(mocks.sync).not.toHaveBeenCalled();
+});
+it('keeps the startup permission prompt behind an active album and rechecks on foreground after it closes', async () => {
+  const album = document.createElement('div');
+  album.setAttribute('role', 'dialog');
+  album.setAttribute('aria-modal', 'true');
+  document.body.append(album);
+  // jsdom không tính bố cục, nên mô phỏng vùng hiển thị của album đang mở.
+  const rect = album.getBoundingClientRect();
+  vi.spyOn(album, 'getClientRects').mockReturnValue(Object.assign([rect], { item: () => rect }));
+  const active = vi.fn();
+  const prompt = mount(NotificationPromptModal, { target: document.body, props: { onActiveChange: active } });
+  try {
+    flushSync();
+    await vi.waitFor(() => expect(active).toHaveBeenCalled(), { timeout: 5000 });
+    expect(active).toHaveBeenLastCalledWith(false);
+    expect(document.querySelector('.notification-modal-card')).toBeNull();
+
+    album.hidden = true;
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.waitFor(() => expect(document.querySelector('.notification-modal-card')).not.toBeNull());
+    expect(active).toHaveBeenLastCalledWith(true);
+    expect(mocks.request).not.toHaveBeenCalled();
+  } finally { await unmount(prompt); }
 });
 it.each(['lunar', 'personal', 'daily'])('asks iOS just in time for %s and schedules only after grant', async section => {
   const state = start(); await settle(); expect(mocks.request).not.toHaveBeenCalled();

@@ -63,6 +63,7 @@ describe('practice FAB controller & scroll pass-through', () => {
 
   afterEach(() => {
     (globalThis as { window?: unknown }).window = prevWindow;
+    vi.unstubAllGlobals();
   });
 
   it('ignores pointerdown outside .ttr-toggle-btn so scripture scrolling is never captured', () => {
@@ -139,5 +140,47 @@ describe('practice FAB controller & scroll pass-through', () => {
   it('clears right and bottom offsets in inline style so saved fabPosition is never stretched or reset', () => {
     const src = readFileSync('src/lib/components/practice/reader/PracticeFloatingControls.svelte', 'utf8');
     expect(src).toContain('right:auto;bottom:auto;transform:none;');
+  });
+
+  it('clamps saved positions below the resolved safe inset and above the audio player', () => {
+    const probe = { style: { cssText: '' }, setAttribute: vi.fn(), remove: vi.fn() };
+    const root = { append: vi.fn() };
+    const nav = { getBoundingClientRect: () => ({ top: 750, height: 62 }) };
+    const doc = { documentElement: root, createElement: () => probe, querySelector: () => nav };
+    const fab = Object.assign(makeMockElement(), { ownerDocument: doc });
+    vi.stubGlobal('getComputedStyle', (node: unknown) => node === probe
+      ? { paddingTop: '32px' }
+      : { getPropertyValue: (name: string) => name === '--audio-player-top' ? '210px' : 'max(0px, 32px)' });
+
+    const ctrl = createPracticeFabController(fab as unknown as HTMLElement, vi.fn(), null);
+    expect(ctrl.apply({ x: -50, y: -50 })).toEqual({ x: 8, y: 40 });
+    expect(ctrl.apply({ x: 900, y: 900 })).toEqual({ x: 321, y: 548 });
+    ctrl.destroy();
+    expect(probe.remove).toHaveBeenCalledOnce();
+  });
+
+  it('refits an already parked FAB when the audio owner changes its reserved space', () => {
+    let audioClearance = 0;
+    let rootChanged: (() => void) | undefined;
+    const disconnect = vi.fn();
+    vi.stubGlobal('MutationObserver', class {
+      constructor(callback: () => void) { rootChanged = callback; }
+      observe() {}
+      disconnect = disconnect;
+    });
+    const probe = { style: { cssText: '' }, setAttribute: vi.fn(), remove: vi.fn() };
+    const root = { append: vi.fn() };
+    const fab = Object.assign(makeMockElement(), {
+      ownerDocument: { documentElement: root, createElement: () => probe, querySelector: () => null },
+    });
+    vi.stubGlobal('getComputedStyle', (node: unknown) => node === probe
+      ? { paddingTop: '32px' }
+      : { getPropertyValue: (name: string) => name === '--audio-player-top' ? `${audioClearance}px` : '32px' });
+    const ctrl = createPracticeFabController(fab as unknown as HTMLElement, vi.fn(), null);
+    audioClearance = 462;
+    rootChanged?.();
+    expect(fab.style.translate).toBe('0px -104px');
+    ctrl.destroy();
+    expect(disconnect).toHaveBeenCalledOnce();
   });
 });

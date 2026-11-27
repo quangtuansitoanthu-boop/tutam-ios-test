@@ -411,8 +411,8 @@ struct BuddhistCalendarWidget: Widget {
         StaticConfiguration(kind: BuddhistCalendarStore.widgetKind, provider: BuddhistCalendarProvider()) { entry in
             BuddhistCalendarView(entry: entry)
         }
-        .configurationDisplayName("Lịch Phật Giáo")
-        .description("Lịch âm, ngày Thập Trai, ngày vía và Thọ Khang Bảo Giám.")
+        .configurationDisplayName(WidgetLocaleStore.text("Lịch Phật Giáo", "Buddhist Calendar"))
+        .description(WidgetLocaleStore.text("Lịch âm, ngày Thập Trai, ngày vía và Thọ Khang Bảo Giám.", "Lunar dates, fasting days, Buddhist holy days and Shou Kang Bao Jian."))
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

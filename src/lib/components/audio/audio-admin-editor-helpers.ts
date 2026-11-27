@@ -1,6 +1,4 @@
-import { createBrowserId } from '$lib/browser/random-id';
-import { fetchWithSessionRefresh } from '$lib/browser/session-csrf';
-import { encodeMediaFileNameHeader } from '$lib/browser/media-upload';
+import { uploadMediaFile } from '$lib/browser/media-upload';
 
 export interface ObjectPosition {
   x: number;
@@ -73,26 +71,8 @@ export function reorderItems<T>(items: readonly T[], sourceIndex: number, target
   return next;
 }
 
-function base64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
-}
-
 export async function uploadAudioArtwork(file: File, csrfToken: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
-  const response = await fetchWithSessionRefresh('/api/media', {
-    method: 'POST',
-    headers: {
-      'content-type': file.type,
-      'idempotency-key': createBrowserId(),
-      'x-content-sha256': base64Url(digest),
-      'x-csrf-token': csrfToken,
-      'x-file-name': encodeMediaFileNameHeader(file.name),
-      'x-media-prefix': 'covers',
-    },
-    body: file,
-  });
+  const response = await uploadMediaFile(file, 'covers', csrfToken);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(payload?.error?.message || payload?.message || 'Không thể tải ảnh bìa.');

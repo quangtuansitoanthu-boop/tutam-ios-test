@@ -1,5 +1,15 @@
 export const IMMUTABLE_ASSET_PREFIX = '/_app/immutable/';
-export const OFFLINE_DOCUMENT_ROUTES = new Set(['/', '/huong-dan', '/phap-thoai', '/tu-tap', '/tu-tap/an-chay']);
+export const OFFLINE_DOCUMENT_ROUTES = new Set([
+  '/',
+  '/huong-dan',
+  '/phap-thoai',
+  '/tu-tap',
+  '/tu-tap/an-chay',
+  '/tu-tap/quan-am-linh-xam',
+  '/tu-tap/moc-luan-chiem-sat',
+  '/tu-tap/nhip-sinh-hoc',
+  '/tu-tap/giai-mong',
+]);
 export const OFFLINE_PDF_RESOLVER_PREFIX = '/__offline/pdf/';
 
 export function offlinePdfResolverPath(key: string): string {

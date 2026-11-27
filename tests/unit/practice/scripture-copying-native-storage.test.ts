@@ -45,6 +45,24 @@ it('reads existing native files and falls back from a torn newer slot without ch
   expect(disk.files.size).toBe(2);
 });
 
+it.each(['stat', 'read'] as const)('blocks stale draft reads and writes while a native slot has a transient %s failure', async operation => {
+  const old = draft('old', 'Bản chép cũ');
+  const latest = draft('old', 'Bản chép mới nhất');
+  await seed(keyA, old, 1);
+  await seed(keyA, latest, 2);
+  const before = new Map(disk.files);
+  const base = await digest(keyA);
+  disk.readFailure = (path, kind) => path.includes(base) && path.endsWith('.0.json') && kind === operation;
+  const storage = await load();
+  await expect(storage.createCopyStore().read(keyA)).rejects.toThrow('verification_unavailable');
+  await expect(storage.createCopyStore().write(keyA, draft('old', 'Không ghi đè'), old)).rejects.toThrow('verification_unavailable');
+  expect(disk.files).toEqual(before);
+  disk.readFailure = () => false;
+  expect(await storage.createCopyStore().read(keyA)).toEqual(latest);
+  vi.resetModules();
+  expect(await (await load()).createCopyStore().read(keyA)).toEqual(latest);
+});
+
 it('rejects a torn commit before publishing any chapter or manifest changes', async () => {
   await seed(keyA, draft());
   const before = new Map(disk.files);

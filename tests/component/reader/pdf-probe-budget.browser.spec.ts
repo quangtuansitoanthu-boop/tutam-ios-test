@@ -2,14 +2,15 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Harness from './pdf-probe-budget-harness.svelte';
 
-const mocks = vi.hoisted(() => ({ stored: false, getDocument: vi.fn(), probe: vi.fn(), version: vi.fn() }));
+const mocks = vi.hoisted(() => ({ stored: false, getDocument: vi.fn(), probe: vi.fn(), version: vi.fn(), bytes: vi.fn(), worker: {}, gestures: vi.fn(() => vi.fn()) }));
 vi.mock('$lib/components/comments/CommentsPanel.svelte', () => ({ default: () => ({}) }));
 vi.mock('$lib/components/reader/ReaderToolsPanel.svelte', () => ({ default: () => ({}) }));
 vi.mock('$lib/components/reader/MostViewedArticles.svelte', () => ({ default: () => ({}) }));
 vi.mock('$lib/components/reader/PdfAnnotations.svelte', () => ({ default: () => ({}) }));
-vi.mock('$lib/browser/pdfjs-loader', () => ({ loadPdfjs: async () => ({ GlobalWorkerOptions: {}, getDocument: mocks.getDocument }), getPdfjsWorker: () => undefined }));
+vi.mock('$lib/browser/pdfjs-loader', () => ({ loadPdfjs: async () => ({ GlobalWorkerOptions: {}, getDocument: mocks.getDocument }), getPdfjsWorker: () => mocks.worker }));
+vi.mock('$lib/browser/network-deadline', () => ({ fetchBoundedBytes: mocks.bytes }));
 vi.mock('$lib/browser/session-csrf', () => ({ getBrowserSession: async () => ({ authenticated: false, user: null }) }));
-vi.mock('$lib/browser/pdf-gesture-controller', () => ({ installPdfGestures: () => () => {} }));
+vi.mock('$lib/browser/pdf-gesture-controller', () => ({ installPdfGestures: mocks.gestures }));
 vi.mock('$lib/browser/reading-activity-client', () => ({
   createReadingActivityClient: () => ({ setSession() {}, flush: async () => {}, cachedProgress: () => [], getProgress: async () => null }),
   createThrottledReadingProgressWriter: () => ({ schedule() {}, flush() {}, cancel() {} }), isReadingActivityCapacityError: () => false,
@@ -29,6 +30,8 @@ beforeEach(() => {
   localStorage.clear(); mocks.stored = false;
   mocks.probe.mockReset().mockResolvedValue(1000);
   mocks.version.mockReset().mockResolvedValue(null);
+  mocks.bytes.mockReset().mockRejectedValue(new TypeError('Network unavailable'));
+  mocks.gestures.mockClear();
   mocks.getDocument.mockReset().mockImplementation(() => ({ promise: new Promise(() => {}), destroy: async () => {} }));
   vi.stubGlobal('indexedDB', {});
   vi.stubGlobal('crypto', { subtle: {} });
@@ -68,4 +71,65 @@ it('aborts a pending document size probe when the reader unmounts', async () => 
   expect(signal.aborted).toBe(false);
   await unmount(component); component = undefined;
   expect(signal.aborted).toBe(true);
+});
+
+async function chooseOnline() {
+  await vi.waitFor(() => expect([...document.querySelectorAll('button')].some(button => button.textContent?.includes('Đọc online'))).toBe(true));
+  [...document.querySelectorAll('button')].find(button => button.textContent?.includes('Đọc online'))!.click(); flushSync();
+}
+
+it.each(['button', 'online'])('loads a new attempt after offline failure via %s', async retry => {
+  const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+  component = mount(Harness, { target: document.body }); flushSync();
+  await vi.waitFor(() => expect(document.querySelector('.pdf-offline-card')).not.toBeNull());
+  online.mockReturnValue(true);
+  if (retry === 'online') window.dispatchEvent(new Event('online'));
+  else document.querySelector<HTMLButtonElement>('.btn-retry')!.click();
+  flushSync();
+  await chooseOnline();
+  await vi.waitFor(() => expect(mocks.getDocument).toHaveBeenCalledTimes(1));
+  expect(mocks.gestures).toHaveBeenCalledTimes(2);
+  expect(mocks.gestures.mock.results[0].value).toHaveBeenCalledTimes(1);
+});
+
+it('destroys the failed task and uses a new generation for the error Retry button', async () => {
+  const destroy = vi.fn(async () => {});
+  mocks.getDocument.mockImplementationOnce(() => ({ promise: Promise.reject(new Error('Range failed')), destroy }));
+  component = mount(Harness, { target: document.body }); flushSync();
+  await chooseOnline();
+  await vi.waitFor(() => expect(document.querySelector('.pdf-error-retry-btn')).not.toBeNull());
+  document.querySelector<HTMLButtonElement>('.pdf-error-retry-btn')!.click(); flushSync();
+  await chooseOnline();
+  await vi.waitFor(() => expect(mocks.getDocument).toHaveBeenCalledTimes(2));
+  expect(destroy).toHaveBeenCalledTimes(1);
+});
+
+it('owns and destroys the fallback loading task while reusing the shared worker and assets', async () => {
+  const primaryDestroy = vi.fn(async () => {});
+  const fallbackDestroy = vi.fn(async () => {});
+  mocks.bytes.mockResolvedValue(new TextEncoder().encode('%PDF-test').buffer);
+  mocks.getDocument.mockImplementationOnce(() => ({ promise: Promise.reject(new Error('Range failed')), destroy: primaryDestroy }))
+    .mockImplementationOnce(() => ({ promise: new Promise(() => {}), destroy: fallbackDestroy }));
+  component = mount(Harness, { target: document.body }); flushSync();
+  await chooseOnline();
+  await vi.waitFor(() => expect(mocks.getDocument).toHaveBeenCalledTimes(2));
+  for (const [options] of mocks.getDocument.mock.calls) expect(options).toMatchObject({
+    worker: mocks.worker, cMapUrl: '/vendor/pdfjs/cmaps/', wasmUrl: '/vendor/pdfjs/wasm/', standardFontDataUrl: '/vendor/pdfjs/standard_fonts/',
+  });
+  expect(primaryDestroy).toHaveBeenCalledTimes(1);
+  await unmount(component); component = undefined;
+  expect(fallbackDestroy).toHaveBeenCalledTimes(1);
+});
+
+it('does not create a fallback loading task when its full fetch finishes after unmount', async () => {
+  let complete!: (bytes: ArrayBuffer) => void;
+  mocks.bytes.mockImplementation(() => new Promise<ArrayBuffer>(resolve => { complete = resolve; }));
+  mocks.getDocument.mockImplementationOnce(() => ({ promise: Promise.reject(new Error('Range failed')), destroy: vi.fn(async () => {}) }));
+  component = mount(Harness, { target: document.body }); flushSync();
+  await chooseOnline();
+  await vi.waitFor(() => expect(mocks.bytes).toHaveBeenCalledTimes(1));
+  await unmount(component); component = undefined;
+  complete(new TextEncoder().encode('%PDF-test').buffer);
+  await Promise.resolve(); await Promise.resolve();
+  expect(mocks.getDocument).toHaveBeenCalledTimes(1);
 });

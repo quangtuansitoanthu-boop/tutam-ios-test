@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   findNonWhitePixelBounds,
+  detectPdfCropBox,
   normalizePdfPaperPixels,
   pixelBoundsToPdfCropBox,
 } from '../../../src/lib/browser/pdf-crop';
@@ -21,6 +22,24 @@ function setPixel(pixels: Uint8ClampedArray, width: number, x: number, y: number
 }
 
 describe('PDF automatic margin crop', () => {
+  it.each(['complete', 'failure', 'timeout'])('releases the crop canvas after %s', async outcome => {
+    const canvas = { width: 0, height: 0, getContext: () => ({
+      fillRect() {}, getImageData: () => ({ data: whitePixels(10, 10) }),
+    }) };
+    const cancel = vi.fn();
+    vi.stubGlobal('document', { createElement: () => canvas });
+    try {
+      await detectPdfCropBox({
+        view: [0, 0, 100, 100], getViewport: () => ({ width: 10, height: 10 }),
+        render: () => ({ cancel, promise: outcome === 'timeout' ? new Promise(() => {})
+          : outcome === 'failure' ? Promise.reject(new Error('Render failed')) : Promise.resolve() }),
+      }, 1, new Map(), 5);
+      expect(canvas.width).toBe(0);
+      expect(canvas.height).toBe(0);
+      expect(cancel).toHaveBeenCalledTimes(outcome === 'timeout' ? 1 : 0);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('finds content while ignoring near-white page margins', () => {
     const pixels = whitePixels(10, 10);
     setPixel(pixels, 10, 3, 2, 20);

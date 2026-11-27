@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { downloadVeganWeek, latestVeganWeek, needsVeganWeekUpdate, readVeganWeek, watchVeganWeekPreload } from '../../src/lib/browser/vegan-week';
-import { isVeganWeek, REGIONAL_VEGAN_FIRST_WEEK, VEGAN_RECIPE_REVISION, type VeganWeek } from '../../src/lib/contracts/vegan-week';
+import { isVeganWeek, REGIONAL_VEGAN_FIRST_WEEK, VEGAN_RECIPE_REVISION, veganMealPlan, type VeganWeek } from '../../src/lib/contracts/vegan-week';
 import { prepareVeganWeek } from '../../src/jobs/vegan-week';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -18,6 +18,26 @@ function cache(pack?: VeganWeek) {
 }
 
 describe('vegan week cache cleanup', () => {
+  it('retains the published 190-dish v5 menu offline and expands it with the packaged catalog', async () => {
+    const week = '2026-11-30';
+    const current = prepareVeganWeek(week, 5);
+    const recipes = current.recipes.slice(0, 190);
+    const days = Array.from({ length: 7 }, (_, day) => recipes.slice(day * 9, day * 9 + 9).map(item => item.id));
+    const legacy = { ...current, recipes, days, rotationRevision: 1, recipeRevision: 1 };
+    cache(legacy);
+    vi.stubGlobal('location', {});
+    const fetch = vi.fn().mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(Response.json(prepareVeganWeek(REGIONAL_VEGAN_FIRST_WEEK, 5)));
+    vi.stubGlobal('fetch', fetch);
+    expect(readVeganWeek(week)).toEqual(legacy);
+    expect(veganMealPlan(legacy, 'south').map(day => day.flat().map(item => item.id))).toEqual(days);
+    await expect(downloadVeganWeek(week)).resolves.toEqual(legacy);
+    const upgraded = await downloadVeganWeek(week);
+    expect(upgraded.recipes).toHaveLength(250);
+    expect(veganMealPlan(upgraded, 'south')).toEqual(veganMealPlan(current, 'south'));
+    expect(readVeganWeek(week)).toEqual(upgraded);
+    expect(fetch.mock.calls.every(([url]) => String(url).startsWith('/vegan/weeks/'))).toBe(true);
+  });
   it('accepts legacy menus and validates an optional recipe revision only on v5', () => {
     const week = '2026-11-23';
     const current = prepareVeganWeek(week, 5);
@@ -132,7 +152,7 @@ describe('vegan week cache cleanup', () => {
     await expect(downloadVeganWeek(week)).rejects.toThrow('offline');
     expect(readVeganWeek(week)?.recipes).toHaveLength(100);
     await downloadVeganWeek(week);
-    expect(readVeganWeek(week)?.recipes).toHaveLength(190);
+    expect(readVeganWeek(week)?.recipes).toHaveLength(250);
     expect(needsVeganWeekUpdate(week)).toBe(false);
     await downloadVeganWeek(week);
     expect(fetch).toHaveBeenCalledTimes(3);

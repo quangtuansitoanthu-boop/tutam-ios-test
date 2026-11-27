@@ -8,8 +8,10 @@
   import type { PageSessionDTO } from '$lib/server/auth/types';
   import { SESSION_CHANGE_EVENT } from '$lib/stores/session.svelte';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
+  import { createInterfaceTranslator } from '$lib/i18n/interface';
 
   const localeStore = getLocaleContext();
+  const localizeUi = createInterfaceTranslator();
   const t = $derived(localeStore.t.notifications);
 
   interface Props { initialSession: PageSessionDTO }
@@ -44,7 +46,7 @@
     try {
       client?.keepAnonymousQueueSeparate(offeredUserId);
     } catch {
-      adoptionError = 'Không thể lưu lựa chọn trên thiết bị. Hãy giải phóng dung lượng rồi thử lại.';
+      adoptionError = localizeUi('Không thể lưu lựa chọn trên thiết bị. Hãy giải phóng dung lượng rồi thử lại.');
       return;
     }
     offeredUserId = null;
@@ -59,7 +61,7 @@
       await client.prepareAnonymousAdoption(userId);
     } catch {
       if (currentUserId === userId) {
-        adoptionError = 'Cần kết nối mạng để đối chiếu dữ liệu tài khoản trước khi gộp.';
+        adoptionError = localizeUi('Cần kết nối mạng để đối chiếu dữ liệu tài khoản trước khi gộp.');
         busy = false;
       }
       return;
@@ -70,8 +72,8 @@
     } catch (cause) {
       if (currentUserId === userId) {
         adoptionError = isReadingActivityCapacityError(cause)
-          ? 'Hàng đợi đọc quá lớn để gộp an toàn. Hãy kết nối mạng để đồng bộ tài khoản rồi thử lại.'
-          : 'Thiết bị chưa thể lưu dữ liệu đã gộp. Hãy giải phóng dung lượng rồi thử lại.';
+          ? localizeUi('Hàng đợi đọc quá lớn để gộp an toàn. Hãy kết nối mạng để đồng bộ tài khoản rồi thử lại.')
+          : localizeUi('Thiết bị chưa thể lưu dữ liệu đã gộp. Hãy giải phóng dung lượng rồi thử lại.');
         busy = false;
       }
       return;

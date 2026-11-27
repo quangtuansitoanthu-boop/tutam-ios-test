@@ -59,6 +59,31 @@ it('retains authenticated views without a live nonce and wakes once when the sam
   await Promise.resolve();
   expect(fetchNativeJsonMutation).toHaveBeenCalledTimes(1);
 });
+it('bounds a reconnect flush to ten view writes and cools down event storms without losing backlog', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(fetchNativeJsonMutation).mockResolvedValue(null);
+    vi.mocked(fetchWithSessionRefresh).mockImplementation(async () => Response.json({ so_luot: 1 }));
+    for (let index = 0; index < 25; index++) queuePendingView(`bounded-${index}`);
+    expect(await flushPendingArticleViews()).toBe(10);
+    expect(readPendingViews()).toHaveLength(15);
+    expect(await flushPendingArticleViews()).toBe(0);
+    expect(fetchWithSessionRefresh).toHaveBeenCalledTimes(10);
+    vi.advanceTimersByTime(30_000);
+    expect(await flushPendingArticleViews()).toBe(10);
+    expect(readPendingViews()).toHaveLength(5);
+  } finally { vi.useRealTimers(); }
+});
+
+it('does not acknowledge an offline mock without a numeric server total and cools down retry events', async () => {
+  vi.mocked(fetchNativeJsonMutation).mockResolvedValue(null);
+  vi.mocked(fetchWithSessionRefresh).mockImplementation(async () => Response.json({ ok: true }));
+  queuePendingView('mock-offline');
+  expect(await flushPendingArticleViews()).toBe(0);
+  expect(await flushPendingArticleViews()).toBe(0);
+  expect(readPendingViews()).toHaveLength(1);
+  expect(fetchWithSessionRefresh).toHaveBeenCalledTimes(1);
+});
 afterEach(() => { vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
 it('reuses native totals for three days without requesting a newer aggregate', async () => {
@@ -209,12 +234,14 @@ it('lets a later valid article flush next time without dropping a permanently fa
   expect(fetchWithSessionRefresh).toHaveBeenCalledTimes(1);
   expect(readPendingViews().map(view => view.articleId)).toEqual(['valid-article', 'deleted-article']);
 
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 30_000);
   vi.mocked(fetchWithSessionRefresh).mockResolvedValueOnce(Response.json({ so_luot: 7 }))
     .mockResolvedValueOnce(new Response('', { status: 500 }));
   expect(await flushPendingArticleViews()).toBe(1);
   expect(fetchWithSessionRefresh).toHaveBeenCalledTimes(3);
   expect(fetchWithSessionRefresh).toHaveBeenNthCalledWith(2, '/api/articles/valid-article/views', expect.anything());
   expect(readPendingViews()).toEqual([deleted]);
+  clock.mockRestore();
 });
 
 it('does not retry an uncertain native play on another transport and reuses its UUID', async () => {

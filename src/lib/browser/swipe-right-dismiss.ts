@@ -23,7 +23,8 @@ export function swipeRightDismiss(node: HTMLElement, dismiss: () => void) {
     node.style.removeProperty('opacity');
   };
   const down = (event: PointerEvent) => {
-    if (!event.isPrimary || event.button !== 0 || (event.target as Element | null)?.closest?.('input,select,textarea,a,[role="slider"]')) return;
+    // Mép trái dành cho cử chỉ Back của hệ điều hành.
+    if (!event.isPrimary || event.button !== 0 || event.clientX < 24 || (event.target as Element | null)?.closest?.('input,select,textarea,a,[role="slider"]')) return;
     pointerId = event.pointerId;
     width = Math.max(1, node.getBoundingClientRect().width);
     startX = event.clientX;

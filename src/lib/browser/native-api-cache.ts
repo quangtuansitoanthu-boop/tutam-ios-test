@@ -10,6 +10,7 @@ import { isOnlineOnlyAudioAlbum, isOnlineOnlyBook } from '$lib/domain/online-onl
 import { isIosExcludedContent } from '$lib/domain/ios-content-policy';
 import { isHtmlResponse } from './native-api';
 import { resolveOfflineBundledResponse, readUpdatedBundledContentResponse } from './offline-bundled-resolver';
+import { openOfflineResponseCache, type OfflineResponseCache } from './offline-response-cache';
 
 const PUBLIC_API_CACHE_NAME = 'tutam-api-v2-public';
 const RESTRICTED_IDS_KEY = 'tutam_online_only_ids';
@@ -32,7 +33,6 @@ const CACHEABLE_PATHS = [
   /^\/api\/data\/(?:baiviet|tap_noi_dung|luot_xem)$/u,
   /^\/api\/talks(?:\/[^/]+)?$/u,
   /^\/api\/phap-bao$/u,
-  /^\/api\/practice\/(?:leaderboard|campaigns)$/u,
 ];
 
 let restrictedIds: Set<string> | null = null;
@@ -95,12 +95,11 @@ function publicApiCacheKey(url: URL): string {
   return `${CACHE_ORIGIN}${url.pathname}${url.search}`;
 }
 
-async function openCache(): Promise<Cache | null> {
+async function openCache(): Promise<OfflineResponseCache | null> {
   try {
-    if (typeof caches === 'undefined') return null;
     // Old versions did not filter private content. Never reuse that namespace.
-    if (typeof caches.delete === 'function') void caches.delete('tutam-api-v1').catch(() => false);
-    return await caches.open(PUBLIC_API_CACHE_NAME);
+    if (typeof caches !== 'undefined' && typeof caches.delete === 'function') void caches.delete('tutam-api-v1').catch(() => false);
+    return await openOfflineResponseCache(PUBLIC_API_CACHE_NAME);
   } catch {
     return null;
   }
@@ -111,6 +110,18 @@ function jsonResponse(payload: unknown, extraHeaders: Record<string, string> = {
     status: 200,
     headers: { 'Content-Type': 'application/json; charset=utf-8', ...extraHeaders },
   });
+}
+
+function legacyArticleRow(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  const row = payload as Record<string, unknown>;
+  if (typeof row.tieu_de === 'string' || typeof row.title !== 'string') return payload;
+  return { id: row.id, tieu_de: row.originalTitle ?? row.title, tom_tat: row.originalSummary ?? row.summary ?? '',
+    noi_dung: row.content ?? '', danh_muc: row.category ?? 'KHÁC', tags: Array.isArray(row.tags) ? row.tags.join(',') : '',
+    tac_gia: row.originalAuthor ?? row.author ?? '', anh_url: row.imageUrl ?? '', noi_bat: row.featured ? 1 : 0,
+    ngay_dang: row.publishedAt ?? '', has_muc_luc: row.hasTableOfContents ? 1 : 0, so_tap: row.volumeCount ?? 0,
+    trang_thai: row.status ?? '', pdf_url: row.pdfUrl ?? '', link_ngoai: row.externalUrl ?? '',
+    created_at: row.createdAt, updated_at: row.updatedAt };
 }
 
 /** Explicit book downloads must fail if the complete public payload cannot be saved. */
@@ -168,7 +179,15 @@ export async function readOfflineApiResponse(url: URL): Promise<Response | null>
     const cache = await openCache();
     try {
       const cached = await cache?.match(publicApiCacheKey(url));
-      if (cached) return cached;
+      if (cached) {
+        if (/^\/api\/articles\/[^/]+$/u.test(url.pathname)) {
+          const original: unknown = await cached.clone().json();
+          const row = legacyArticleRow(original);
+          if (isRestrictedRow(row)) return resolveOfflineBundledResponse(`${url.pathname}${url.search}`);
+          if (row !== original) return jsonResponse(row);
+        }
+        return cached;
+      }
     } catch {
       // Rơi xuống bundle.
     }

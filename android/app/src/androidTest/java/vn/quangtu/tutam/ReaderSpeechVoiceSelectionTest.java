@@ -56,4 +56,11 @@ public class ReaderSpeechVoiceSelectionTest {
         assertNull(select(network, network, missing, english));
         assertNull(select(null));
     }
+
+    @Test public void ignoresNullVoicesAndMissingLocales() throws Exception {
+        Voice offline = voice("offline", language, false, Collections.emptySet());
+        Voice missingLocale = voice("no-locale", null, false, Collections.emptySet());
+        assertSame(offline, select(null, null, missingLocale, offline));
+        assertNull(select(null, null, missingLocale));
+    }
 }

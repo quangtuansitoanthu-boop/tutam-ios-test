@@ -4,6 +4,7 @@
   import { fetchWithSessionRefresh, getBrowserSession } from '$lib/browser/session-csrf';
   import { fetchNativeJsonMutation } from '$lib/browser/native-api';
   import { refreshBrowserSession } from '$lib/stores/session.svelte';
+  import { getLocaleContext } from '$lib/stores/locale.svelte';
   interface Props {
     authenticated: boolean;
     url: string;
@@ -17,6 +18,8 @@
     onNotify?: (message: string) => void;
   }
   let { authenticated, url, fileName, label, fetchAsBlob = false, prepareFile, pendingMessage = '', successMessage = '', fallbackMessage = '', onNotify = () => {} }: Props = $props();
+  const locale = getLocaleContext();
+  const isEn = $derived(locale.current === 'en');
   let controller: AbortController | null = null;
   let preparing = $state(false);
   onDestroy(() => controller?.abort());
@@ -37,9 +40,9 @@
       const native = await fetchNativeJsonMutation('/api/downloads/access', init);
       const response = native ?? await fetchWithSessionRefresh('/api/downloads/access', init);
       if (native && response.status === 401) await refreshBrowserSession().catch(() => undefined);
-      if (!response.ok) throw new Error('Phiên đăng nhập không còn hiệu lực.');
+      if (!response.ok) throw new Error(isEn ? 'Your sign-in session is no longer valid.' : 'Phiên đăng nhập không còn hiệu lực.');
       throwIfAborted(request.signal);
-      if (!url && !prepare) throw new Error('Tệp tải xuống chưa sẵn sàng.');
+      if (!url && !prepare) throw new Error(isEn ? 'The download file is not ready yet.' : 'Tệp tải xuống chưa sẵn sàng.');
       const feedbackStartedAt = pendingMessage ? performance.now() : 0;
       if (pendingMessage) onNotify(pendingMessage);
       let downloadUrl = url;
@@ -73,15 +76,15 @@
       const remainingFeedbackTime = feedbackStartedAt ? 220 - (performance.now() - feedbackStartedAt) : 0;
       if (remainingFeedbackTime > 0) await new Promise((resolve) => window.setTimeout(resolve, remainingFeedbackTime));
       if (successMessage) onNotify(successMessage);
-    } catch (cause) { if (!request.signal.aborted) { error = cause instanceof Error ? cause.message : 'Không thể tải xuống.'; onNotify(`❌ ${error}`); } }
+    } catch (cause) { if (!request.signal.aborted) { error = cause instanceof Error ? cause.message : (isEn ? 'Unable to download.' : 'Không thể tải xuống.'); onNotify(`❌ ${error}`); } }
     finally { checking = false; preparing = false; controller = null; }
   }
   onMount(() => { void getBrowserSession().then((browserSession) => browserAuthenticated = browserSession.authenticated).catch(() => {}); });
 </script>
 
-<button class:locked={!sessionAuthenticated} class="download-gate" type="button" aria-label={preparing ? 'Đang đóng gói EPUB...' : checking ? 'Đang kiểm tra...' : label} aria-busy={checking} onclick={(event) => void download(event.currentTarget)} disabled={checking}>
+<button class:locked={!sessionAuthenticated} class="download-gate" type="button" aria-label={preparing ? (isEn ? 'Packaging EPUB...' : 'Đang đóng gói EPUB...') : checking ? (isEn ? 'Checking...' : 'Đang kiểm tra...') : label} aria-busy={checking} onclick={(event) => void download(event.currentTarget)} disabled={checking}>
   <span class="download-icon" aria-hidden="true">⬇️</span>
-  <span class="download-label">{preparing ? 'Đang đóng gói...' : checking ? 'Đang kiểm tra...' : label}</span>
+  <span class="download-label">{preparing ? (isEn ? 'Packaging...' : 'Đang đóng gói...') : checking ? (isEn ? 'Checking...' : 'Đang kiểm tra...') : label}</span>
 </button>
 {#if error}<span class="download-error" role="alert">{error}</span>{/if}
 

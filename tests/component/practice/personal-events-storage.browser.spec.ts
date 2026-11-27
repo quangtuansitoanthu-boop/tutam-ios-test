@@ -241,31 +241,11 @@ it.each([
   expect(unhandled).toEqual([]);
 });
 
-it('keeps the modal personal reminder switch on and reports a failed preference write', async () => {
-  const key = 'tutam_personal_events_notify_enabled';
-  localStorage.setItem(key, '1');
-  const original = Storage.prototype.setItem;
-  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, name, value) {
-    if (name === key) throw new DOMException('Storage is full', 'QuotaExceededError');
-    return original.call(this, name, value);
-  });
+it('omits the redundant modal notification toggle since personal reminders default on and are configured in Settings', async () => {
   open();
-  const changed = vi.fn();
-  window.addEventListener('quangtu:personal-events-notify-toggled', changed);
-  try {
-    const toggle = document.querySelector<HTMLInputElement>('.pem-switch input')!;
-    expect(toggle.checked).toBe(true);
-    toggle.click();
-    await settle();
-    expect(toggle.checked).toBe(true);
-    expect(localStorage.getItem(key)).toBe('1');
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Không thể lưu');
-    expect(changed).not.toHaveBeenCalled();
-    expect(mocks.sync).not.toHaveBeenCalled();
-    expect(unhandled).toEqual([]);
-  } finally {
-    window.removeEventListener('quangtu:personal-events-notify-toggled', changed);
-  }
+  expect(document.querySelector('.pem-switch')).toBeNull();
+  expect(document.querySelector('.pem-notify-toggle-card')).toBeNull();
+  expect(unhandled).toEqual([]);
 });
 
 it('sets up native reminders from an explicit valid save while retaining the saved anniversary', async () => {
@@ -280,6 +260,21 @@ it('sets up native reminders from an explicit valid save while retaining the sav
   expect(document.querySelector<HTMLInputElement>('#pem-input-title')!.value).toBe('');
   expect(document.querySelector('[role="alert"]')).toBeNull();
   expect(unhandled).toEqual([]);
+});
+
+it.each([
+  ['vi', 'Đã thêm ngày lễ cá nhân', 'Ngày lễ đã được lưu trên thiết bị.'],
+  ['en', 'Personal anniversary added', 'The anniversary was saved on this device.'],
+] as const)('shows the localized %s success dialog after the anniversary is saved', async (locale, title, message) => {
+  localStorage.setItem('tutam_locale', locale);
+  mocks.add.mockImplementation(() => {
+    expect(mocks.alert).not.toHaveBeenCalled();
+    return { id: 'new-event' };
+  });
+  open();
+  submitAnniversary();
+  await settle();
+  expect(mocks.alert).toHaveBeenCalledExactlyOnceWith(message, { title, presentation: 'personal-event' });
 });
 
 it.each(['denied', 'scheduler-error'] as const)('retains a saved native anniversary and distinguishes %s from a storage failure', async failure => {
@@ -311,17 +306,18 @@ it('keeps the native master switch off and reports it after saving an anniversar
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('nhắc nhở chung đang tắt');
 });
 
-it('sets up native reminders only when the personal notification switch is explicitly enabled', async () => {
+it('respects the personal notification preference stored from Settings when saving an anniversary', async () => {
   mocks.native = true;
+  mocks.add.mockReturnValue({ id: 'new-event' });
   localStorage.setItem('tutam_personal_events_notify_enabled', '0');
   open();
+  submitAnniversary('Ngày lễ khi tắt thông báo');
+  await settle();
   expect(mocks.sync).not.toHaveBeenCalled();
-  document.querySelector<HTMLInputElement>('.pem-switch input')!.click();
+  localStorage.setItem('tutam_personal_events_notify_enabled', '1');
+  submitAnniversary('Ngày lễ khi bật thông báo');
   await settle();
   expect(mocks.sync).toHaveBeenCalledExactlyOnceWith({ masterEnabled: true }, 'vi');
-  document.querySelector<HTMLInputElement>('.pem-switch input')!.click();
-  await settle();
-  expect(mocks.sync).toHaveBeenCalledOnce();
 });
 
 it.each(['web', 'personal-off', 'invalid', 'storage-error'] as const)('does not set up native reminders for %s', async scenario => {
@@ -374,6 +370,7 @@ it('keeps a new anniversary draft and reports a local storage failure without an
   expect(title.value).toBe('Ngày lễ chưa lưu');
   expect(document.querySelector('[role="alert"]')?.textContent?.trim()).toBeTruthy();
   expect(document.querySelector('.pem-saved-message')).toBeNull();
+  expect(mocks.alert).not.toHaveBeenCalled();
   expect(unhandled).toEqual([]);
 });
 
@@ -509,21 +506,13 @@ it('rechecks the anniversary deletion principal even before the session event is
   } finally { await unmount(view); }
 });
 
-it('retains the home anniversary and reports a failed deletion without an unhandled storage error', async () => {
+it('keeps the home anniversary card clean without inline delete controls (deletion stays in the manager modal)', async () => {
   const view = mount(HomeDailyReminders, { target: document.body, props: { selectedDate: new Date(2026, 10, 7, 12) } });
   try {
     flushSync();
     expect(document.querySelector('.personal-item-title')?.textContent).toContain('Ngày lễ đã lưu');
-    document.querySelector<HTMLButtonElement>('.personal-delete-btn')!.click();
-    flushSync();
-    document.querySelector<HTMLButtonElement>('.anniversary-delete-dialog button.delete')!.click();
-    await settle();
-
-    expect(mocks.remove).toHaveBeenCalledExactlyOnceWith('storage-failure-event');
-    expect(mocks.alert).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Không thể lưu'));
-    expect(document.querySelector('.personal-item-title')?.textContent).toContain('Ngày lễ đã lưu');
-    expect(document.querySelector('.anniversary-delete-dialog')).toBeNull();
+    expect(document.querySelector('.personal-delete-btn')).toBeNull();
+    expect(document.querySelector('.personal-add-more-btn')).not.toBeNull();
     expect(unhandled).toEqual([]);
-    expect(mocks.sync).not.toHaveBeenCalled();
   } finally { await unmount(view); }
 });

@@ -245,9 +245,12 @@ class TuTapBridgeViewController: CAPBridgeViewController {
         recordNativeStartup(.externalLinksReturned)
 #endif
         bridge?.registerPluginInstance(ImageExportPlugin())
-        bridge?.registerPluginInstance(ScreenWakeLockPlugin())
 #if DEBUG
         recordNativeStartup(.imageExportReturned)
+#endif
+        bridge?.registerPluginInstance(ScreenWakeLockPlugin())
+        bridge?.registerPluginInstance(DivinationHistoryPlugin())
+#if DEBUG
         recordNativeStartup(.qaInstallBefore)
         installQAEventsIfRequested()
         recordNativeStartup(.qaInstallAfter)
@@ -255,14 +258,19 @@ class TuTapBridgeViewController: CAPBridgeViewController {
 #endif
     }
 
-#if DEBUG
     override func webViewConfiguration(for instanceConfiguration: InstanceConfiguration) -> WKWebViewConfiguration {
+#if DEBUG
         recordNativeStartup(.configurationBefore)
+#endif
         let configuration = super.webViewConfiguration(for: instanceConfiguration)
+        configuration.ignoresViewportScaleLimits = false
+#if DEBUG
         recordNativeStartup(.configurationAfter)
+#endif
         return configuration
     }
 
+#if DEBUG
     override func viewDidLoad() {
         recordNativeStartup(.viewDidLoadBeforeSuper)
         super.viewDidLoad()
@@ -413,6 +421,9 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
     private var pendingCall: CAPPluginCall?
     private var picker: UIDocumentPickerViewController?
     private var exportDirectory: URL?
+    private var shareCall: CAPPluginCall?
+    private var shareController: UIActivityViewController?
+    private var shareDirectory: URL?
 
     private func findTopViewController(from root: UIViewController?) -> UIViewController? {
         guard let root = root else { return nil }
@@ -435,7 +446,7 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
         }
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { call.reject("Image export closed", "SAVE_FAILED"); return }
-            guard self.pendingCall == nil else { call.reject("Image export is already open", "EXPORT_BUSY"); return }
+            guard self.pendingCall == nil, self.shareCall == nil else { call.reject("Image export is already open", "EXPORT_BUSY"); return }
             guard let presenter = self.findTopViewController(from: self.bridge?.viewController),
                   presenter.viewIfLoaded?.window != nil,
                   !presenter.isBeingDismissed,
@@ -532,6 +543,7 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
         let text = call.getString("text")
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { call.reject("Image export closed", "SHARE_FAILED"); return }
+            guard self.pendingCall == nil, self.shareCall == nil else { call.reject("Image export is already open", "EXPORT_BUSY"); return }
             guard let presenter = self.findTopViewController(from: self.bridge?.viewController),
                   presenter.viewIfLoaded?.window != nil,
                   !presenter.isBeingDismissed,
@@ -539,7 +551,9 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                 call.reject("Cannot open share sheet", "SHARE_FAILED")
                 return
             }
+            self.shareCall = call
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tu-tap-share-" + UUID().uuidString, isDirectory: true)
+            self.shareDirectory = directory
             let file = directory.appendingPathComponent(name)
             self.exportQueue.async { [weak self] in
                 do {
@@ -547,21 +561,22 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                     try data.write(to: file, options: .atomic)
                 } catch {
                     try? FileManager.default.removeItem(at: directory)
-                    DispatchQueue.main.async { call.reject("Cannot prepare PNG image", "SHARE_FAILED", error) }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self, self.shareCall === call else { return }
+                        self.finishShare(shared: nil, error: error)
+                    }
                     return
                 }
                 DispatchQueue.main.async { [weak self] in
-                    guard let self = self else {
+                    guard let self = self, self.shareCall === call else {
                         try? FileManager.default.removeItem(at: directory)
-                        call.reject("Image export closed", "SHARE_FAILED")
                         return
                     }
                     guard let presenter = self.findTopViewController(from: self.bridge?.viewController),
                           presenter.viewIfLoaded?.window != nil,
                           !presenter.isBeingDismissed,
                           UIApplication.shared.applicationState != .background else {
-                        try? FileManager.default.removeItem(at: directory)
-                        call.reject("Cannot open share sheet", "SHARE_FAILED")
+                        self.finishShare(shared: nil)
                         return
                     }
                     var items: [Any] = [file]
@@ -572,19 +587,95 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                         popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
                         popover.permittedArrowDirections = []
                     }
-                    controller.completionWithItemsHandler = { _, completed, _, _ in
-                        try? FileManager.default.removeItem(at: directory)
-                        call.resolve(["shared": completed])
+                    self.shareController = controller
+                    controller.completionWithItemsHandler = { [weak self] _, completed, _, error in
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self = self, self.shareCall === call else { return }
+                            self.finishShare(shared: completed, error: error)
+                        }
                     }
-                    presenter.present(controller, animated: true)
+                    presenter.present(controller, animated: true) { [weak self, weak controller] in
+                        guard let self = self, let controller = controller, self.shareController === controller else { return }
+                        guard controller.presentingViewController != nil else {
+                            self.finishShare(shared: nil)
+                            return
+                        }
+                    }
                 }
             }
         }
     }
 
+    private func finishShare(shared: Bool?, error: Error? = nil) {
+        let call = shareCall
+        shareCall = nil
+        shareController?.completionWithItemsHandler = nil
+        shareController?.presentationController?.delegate = nil
+        shareController = nil
+        if let directory = shareDirectory { try? FileManager.default.removeItem(at: directory) }
+        shareDirectory = nil
+        if let error = error { call?.reject("Cannot share PNG image", "SHARE_FAILED", error) }
+        else if let shared = shared { call?.resolve(["shared": shared]) }
+        else { call?.reject("Cannot open share sheet", "SHARE_FAILED") }
+    }
+
     deinit {
         if let directory = exportDirectory { try? FileManager.default.removeItem(at: directory) }
+        shareController?.completionWithItemsHandler = nil
+        if let directory = shareDirectory { try? FileManager.default.removeItem(at: directory) }
+        shareCall?.reject("Image export closed", "SHARE_FAILED")
         pendingCall?.reject("Image export closed", "SAVE_FAILED")
+    }
+}
+
+@objc(DivinationHistoryPlugin)
+public class DivinationHistoryPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "DivinationHistoryPlugin"
+    public let jsName = "DivinationHistory"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "read", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "write", returnType: CAPPluginReturnPromise)
+    ]
+
+    private func historyFile(_ call: CAPPluginCall) throws -> URL {
+        guard let key = call.getString("key"), !key.isEmpty, key.count <= 160 else {
+            throw CocoaError(.fileWriteInvalidFileName)
+        }
+        let manager = FileManager.default
+        let support = try manager.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                      appropriateFor: nil, create: true)
+        var directory = support.appendingPathComponent("DivinationHistory", isDirectory: true)
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try directory.setResourceValues(values)
+        let name = Data(key.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_")
+        return directory.appendingPathComponent(name + ".json")
+    }
+
+    @objc public func read(_ call: CAPPluginCall) {
+        do {
+            let file = try historyFile(call)
+            let value = try String(contentsOf: file, encoding: .utf8)
+            call.resolve(["value": value])
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            call.resolve(["value": "[]"])
+        } catch {
+            call.reject("Unable to read local divination history")
+        }
+    }
+
+    @objc public func write(_ call: CAPPluginCall) {
+        guard let value = call.getString("value") else {
+            call.reject("Missing divination history")
+            return
+        }
+        do {
+            try Data(value.utf8).write(to: historyFile(call), options: .atomic)
+            call.resolve()
+        } catch {
+            call.reject("Unable to write local divination history")
+        }
     }
 }
 
@@ -631,14 +722,20 @@ public class ExternalLinksPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc public func openStore(_ call: CAPPluginCall) {
         guard call.getString("url") == "https://apps.apple.com/app/id6829182305",
-              let url = URL(string: "itms-apps://apps.apple.com/app/id6829182305") else {
+              let url = URL(string: "itms-apps://apps.apple.com/app/id6829182305"),
+              let fallback = URL(string: "https://apps.apple.com/app/id6829182305") else {
             call.reject("Invalid App Store URL")
             return
         }
         DispatchQueue.main.async {
             UIApplication.shared.open(url, options: [:]) { opened in
                 if opened { call.resolve() }
-                else { call.reject("Unable to open App Store") }
+                else {
+                    UIApplication.shared.open(fallback, options: [:]) { fallbackOpened in
+                        if fallbackOpened { call.resolve() }
+                        else { call.reject("Unable to open App Store") }
+                    }
+                }
             }
         }
     }

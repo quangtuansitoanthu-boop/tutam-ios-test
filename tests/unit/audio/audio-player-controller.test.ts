@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { principalStorageKey } from '$lib/browser/principal-storage';
 import { PRACTICE_SESSION_OUTBOX_KEY } from '$lib/browser/practice-session-outbox';
 import publicTalkStreams from '$lib/data/public-talk-streams.json';
+import { readPlayerSyncPayload } from '$lib/browser/audio-sync';
 
 vi.mock('$lib/browser/offline-audio-database', () => ({
   canAccessAudioAlbum: vi.fn(async () => true),
@@ -129,6 +130,7 @@ describe('AudioPlayerController resume and retry lifecycle', () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    vi.mocked(readPlayerSyncPayload).mockReturnValue({ pt_player_state: null, pt_album_positions: {}, pt_recent_albums: [] });
     keyboardHandler = undefined;
     installBrowserStubs();
   });
@@ -137,6 +139,76 @@ describe('AudioPlayerController resume and retry lifecycle', () => {
     { title: 'First', url: '/first.mp4', media_type: 'video' as const },
     { title: 'Second', url: '/second.mp4', media_type: 'video' as const },
   ] };
+
+  it('keeps a manual seek chosen before metadata instead of restoring the earlier resume point', async () => {
+    const { AudioPlayerController } = await import('$lib/browser/audio-player-controller');
+    const controller = new AudioPlayerController();
+    try {
+      await controller.load(videoAlbum, 0, 60);
+      controller.seek(25);
+      controller.audio.dispatchEvent(new Event('loadedmetadata'));
+      expect(controller.audio.currentTime).toBe(25);
+      expect(controller.snapshot.currentTime).toBe(25);
+    } finally { controller.destroy(); }
+  });
+
+  it('sends no player-sync PUT for unchanged hidden/pagehide events and coalesces a changed payload', async () => {
+    const { AudioPlayerController } = await import('$lib/browser/audio-player-controller');
+    const { readPlayerSyncPayload } = await import('$lib/browser/audio-sync');
+    const session = { authenticated: true, csrfToken: 'csrf', user: { id: 'dirty-user' } };
+    const controller = new AudioPlayerController(session);
+    await controller.ready;
+    const puts = () => vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT');
+    try {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+      await Promise.resolve();
+      expect(puts()).toHaveLength(0);
+      vi.mocked(readPlayerSyncPayload).mockReturnValue({ pt_player_state: null, pt_album_positions: {}, pt_recent_albums: ['changed'] });
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+      await vi.waitFor(() => expect(puts()).toHaveLength(1));
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+      expect(puts()).toHaveLength(1);
+    } finally { controller.destroy(); }
+  });
+
+  it('ignores persistence timestamps but keeps a later position dirty while its previous sync is in flight', async () => {
+    const { AudioPlayerController } = await import('$lib/browser/audio-player-controller');
+    const initial = { albumId: 'changed-position', trackIndex: 0, pos: 20, savedAt: 1 };
+    const payload = { pt_player_state: initial, pt_album_positions: { 'changed-position': initial }, pt_recent_albums: ['changed-position'] };
+    vi.mocked(readPlayerSyncPayload).mockReturnValue(payload);
+    let finish!: (response: Response) => void;
+    const network = vi.mocked(fetch);
+    network.mockImplementation(async (_input, init) => init?.method === 'PUT'
+      ? new Promise<Response>(resolve => { finish = resolve; }) : Response.json(payload));
+    const controller = new AudioPlayerController({ authenticated: true, csrfToken: 'csrf', user: { id: 'position-user' } });
+    await controller.ready;
+    const puts = () => network.mock.calls.filter(([, init]) => init?.method === 'PUT');
+    const hide = () => window.dispatchEvent(new Event('pagehide'));
+    try {
+      payload.pt_player_state = { ...initial, savedAt: 2 };
+      payload.pt_album_positions['changed-position'] = payload.pt_player_state;
+      hide();
+      expect(puts()).toHaveLength(0);
+      payload.pt_player_state = { ...initial, pos: 30, savedAt: 3 };
+      payload.pt_album_positions['changed-position'] = payload.pt_player_state;
+      hide();
+      await vi.waitFor(() => expect(puts()).toHaveLength(1));
+      payload.pt_player_state = { ...initial, pos: 40, savedAt: 4 };
+      payload.pt_album_positions['changed-position'] = payload.pt_player_state;
+      hide();
+      expect(puts()).toHaveLength(1);
+      finish(Response.json({ ok: true }));
+      await new Promise<void>(resolve => setImmediate(resolve));
+      hide();
+      await vi.waitFor(() => expect(puts()).toHaveLength(2));
+      expect(JSON.parse(String(puts()[1][1]?.body)).pt_player_state.pos).toBe(40);
+      finish(Response.json({ ok: true }));
+    } finally { controller.destroy(); }
+  });
 
   it('lets a visible viewer hold the first play synchronously and resumes only after the last frame hold releases', async () => {
     const { AudioPlayerController } = await import('$lib/browser/audio-player-controller');
@@ -892,7 +964,7 @@ describe('AudioPlayerController resume and retry lifecycle', () => {
       csrfToken: 'csrf-b',
       user: { id: 'user-b' },
     };
-    const { selectAudioSyncPrincipal, writeStoredPlayerState } = await import('$lib/browser/audio-sync');
+    const { selectAudioSyncPrincipal, writeStoredPlayerState, readPlayerSyncPayload } = await import('$lib/browser/audio-sync');
     const { AudioPlayerController } = await import('$lib/browser/audio-player-controller');
     const controller = new AudioPlayerController(sessionA);
     await controller.ready;
@@ -901,6 +973,7 @@ describe('AudioPlayerController resume and retry lifecycle', () => {
       tracks: [{ title: 'Bài A', url: '/a.mp3' }],
     });
 
+    vi.mocked(readPlayerSyncPayload).mockReturnValue({ pt_player_state: null, pt_album_positions: {}, pt_recent_albums: ['album-a'] });
     controller.pause();
     await vi.advanceTimersByTimeAsync(1_500);
     expect(putSignal?.aborted).toBe(false);

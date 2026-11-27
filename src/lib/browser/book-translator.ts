@@ -160,21 +160,21 @@ async function translateChunk(text: string, targetLang = 'en', sourceLang = 'vi'
   try {
     const url = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${sourceLang}&tl=${targetLang}&q=${encodeURIComponent(trimmed)}`;
     const response = await fetch(url, { headers: { accept: 'application/json' } });
-    if (!response.ok) return text;
+    if (!response.ok) throw new Error('Translation unavailable');
     const data = await response.json();
-    if (Array.isArray(data) && typeof data[0] === 'string') {
+    if (Array.isArray(data) && typeof data[0] === 'string' && data[0].trim()) {
       return data[0];
     }
-    return text;
+    throw new Error('Invalid translation response');
   } catch {
-    return text;
+    throw new Error('Translation failed');
   }
 }
 
 /**
  * Tự động chia đoạn văn thông minh và dịch song song để đạt tốc độ tối đa
  */
-export async function translateText(
+async function translateTextStrict(
   text: string,
   targetLang = 'en',
   sourceLang = 'vi'
@@ -257,6 +257,12 @@ export async function translateText(
   return results.join('\n');
 }
 
+/** Giữ fallback của API công khai; owner cache dùng bản strict để nhận biết lỗi. */
+export async function translateText(text: string, targetLang = 'en', sourceLang = 'vi'): Promise<string> {
+  try { return await translateTextStrict(text, targetLang, sourceLang); }
+  catch { return text; }
+}
+
 /**
  * Hàm tổng hợp: Lấy bản dịch tiếng Anh từ bộ nhớ app (IndexedDB / RAM) nếu có;
  * nếu chưa có thì dịch ngầm và tự động lưu vào máy để lần sau mở tải ngay lập tức.
@@ -273,13 +279,15 @@ export async function getOrTranslateContent(
 
   // 1. Kiểm tra RAM cache trước (0ms)
   const syncHit = getCachedTranslationSync(docId, targetLang);
-  if (syncHit) {
+  const isOriginalCopy = (value: { title: string; content: string }) =>
+    rawContent.trim() ? value.content === rawContent : value.title === rawTitle;
+  if (syncHit && !isOriginalCopy(syncHit)) {
     return { title: syncHit.title, content: syncHit.content, fromCache: true, isOriginal: false };
   }
 
   // 2. Kiểm tra bộ nhớ IndexedDB
   const cached = await getCachedTranslation(docId, targetLang);
-  if (cached) {
+  if (cached && !isOriginalCopy(cached)) {
     return { title: cached.title, content: cached.content, fromCache: true, isOriginal: false };
   }
 
@@ -291,8 +299,8 @@ export async function getOrTranslateContent(
   // 4. Có mạng: Tự động dịch ngầm tiêu đề và nội dung
   try {
     const [transTitle, transContent] = await Promise.all([
-      rawTitle ? translateText(rawTitle, targetLang, 'vi') : Promise.resolve(rawTitle),
-      rawContent ? translateText(rawContent, targetLang, 'vi') : Promise.resolve(rawContent),
+      rawTitle ? translateTextStrict(rawTitle, targetLang, 'vi') : Promise.resolve(rawTitle),
+      rawContent ? translateTextStrict(rawContent, targetLang, 'vi') : Promise.resolve(rawContent),
     ]);
 
     // 5. Lưu ngay vào bộ nhớ máy (IndexedDB + RAM) để lần sau đọc nhanh tức thì & dùng offline
@@ -316,18 +324,23 @@ export async function getOrTranslateChapters(
   if (!chapters.length || targetLang === 'vi') return {};
 
   const cacheKey = `${bookId}_chapters_${targetLang}`;
+  const cacheDocId = `${bookId}_chapters`;
 
   // Kiểm tra RAM cache
   const memHit = chaptersMemoryCache.get(cacheKey);
   if (memHit) return memHit;
 
   // Kiểm tra IndexedDB cache
-  const cached = await getCachedTranslation(cacheKey, targetLang);
+  // Đọc key cũ một lần để các app đã cài không mất bản dịch khi sửa hậu tố kép.
+  const canonicalCached = await getCachedTranslation(cacheDocId, targetLang);
+  const cached = canonicalCached ?? await getCachedTranslation(cacheKey, targetLang);
   if (cached && cached.content) {
     try {
       const parsed = JSON.parse(cached.content) as Record<string, { tieu_de: string; tom_tat?: string }>;
-      if (parsed && typeof parsed === 'object') {
+      if (parsed && typeof parsed === 'object' && chapters.every(chapter => parsed[chapter.id]?.tieu_de?.trim())
+        && chapters.some(chapter => parsed[chapter.id].tieu_de !== chapter.tieu_de)) {
         chaptersMemoryCache.set(cacheKey, parsed);
+        if (!canonicalCached) void setCachedTranslation(cacheDocId, cached.title, cached.content, targetLang);
         return parsed;
       }
     } catch {}
@@ -341,7 +354,7 @@ export async function getOrTranslateChapters(
     // Ghép các tựa đề thành danh sách để dịch 1 lượt siêu nhanh
     const titles = chapters.map((c, i) => `${i}|||${c.tieu_de || `Tập ${i + 1}`}`);
     const joined = titles.join('\n');
-    const translatedJoined = await translateText(joined, targetLang, 'vi');
+    const translatedJoined = await translateTextStrict(joined, targetLang, 'vi');
     const lines = translatedJoined.split('\n');
 
     const result: Record<string, { tieu_de: string; tom_tat?: string }> = {};
@@ -350,15 +363,16 @@ export async function getOrTranslateChapters(
       if (sepIdx !== -1) {
         const idx = Number(line.slice(0, sepIdx).trim());
         const transTitle = line.slice(sepIdx + 3).trim();
-        if (Number.isInteger(idx) && chapters[idx]) {
+        if (Number.isInteger(idx) && chapters[idx] && transTitle) {
           result[chapters[idx].id] = { tieu_de: transTitle };
         }
       }
     }
 
-    if (Object.keys(result).length > 0) {
+    // Mục lục bị cắt/mất dòng không được trở thành bản cache vĩnh viễn.
+    if (Object.keys(result).length === chapters.length) {
       chaptersMemoryCache.set(cacheKey, result);
-      void setCachedTranslation(cacheKey, 'Chapters Translation', JSON.stringify(result), targetLang);
+      void setCachedTranslation(cacheDocId, 'Chapters Translation', JSON.stringify(result), targetLang);
     }
     return result;
   } catch {

@@ -1,3 +1,5 @@
+import { getVietnamNow } from '$lib/components/lunar/lunar-week';
+
 export interface DailyDharmaQuote {
   id: number;
   verseVi: string;
@@ -281,9 +283,10 @@ export const DAILY_DHARMA_QUOTES: DailyDharmaQuote[] = [
   }
 ];
 
-export function getTodayDharmaQuote(date: Date = new Date()): DailyDharmaQuote {
-  const startOfYear = new Date(date.getFullYear(), 0, 1);
-  const diffDays = Math.floor((date.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
+export function getTodayDharmaQuote(date: Date = getVietnamNow()): DailyDharmaQuote {
+  const startOfYear = Date.UTC(date.getFullYear(), 0, 1);
+  const day = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.floor((day - startOfYear) / (1000 * 60 * 60 * 24));
   const index = Math.abs(diffDays) % DAILY_DHARMA_QUOTES.length;
   return DAILY_DHARMA_QUOTES[index];
 }

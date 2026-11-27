@@ -53,7 +53,7 @@ describe('native community mutation transport', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it('keeps the server receipt if cancellation happens after the native write was sent', async () => {
+  it('stops waiting on cancellation without retrying or applying the late native receipt', async () => {
     let finish!: (response: unknown) => void;
     request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     const controller = new AbortController();
@@ -62,8 +62,33 @@ describe('native community mutation transport', () => {
     });
     expect(request).toHaveBeenCalledOnce();
     controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     finish({ status: 200, data: { joined: true }, headers: { 'content-type': 'application/json' } });
-    expect(await (await pending)!.json()).toEqual({ joined: true });
+    expect(request).toHaveBeenCalledOnce();
+  });
+  it('consumes a late native failure after cancellation', async () => {
+    let fail!: (error: Error) => void;
+    request.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const controller = new AbortController();
+    const pending = fetchNativeJsonMutation('/api/practice/sessions', { method: 'POST', body: '{}', signal: controller.signal });
+    controller.abort(new Error('principal_changed'));
+    await expect(pending).rejects.toThrow('principal_changed');
+    fail(new Error('late transport failure'));
+    await Promise.resolve();
+    expect(request).toHaveBeenCalledOnce();
+  });
+  it.each(['/api/auth/logout', '/api/auth/delete-account'])('keeps %s pending until native cookie changes settle after cancellation', async path => {
+    let finish!: (response: unknown) => void;
+    request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const controller = new AbortController();
+    const pending = fetchNativeJsonMutation(path, { method: 'POST', body: '{"preserveSessionCookie":false}', signal: controller.signal });
+    let settled = false;
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    controller.abort();
+    await Promise.resolve(); await Promise.resolve();
+    expect(settled).toBe(false);
+    finish({ status: 200, data: {}, headers: { 'set-cookie': '__Host-quangtu_session=; Max-Age=0; Path=/; Secure; HttpOnly' } });
+    expect((await pending)!.headers.get('set-cookie')).toContain('Max-Age=0');
     expect(request).toHaveBeenCalledOnce();
   });
   it.each(['POST', 'DELETE', 'PATCH'])('retains backend origin, CSRF and JSON on %s', async (method) => {

@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { buildDayDetail, buildWeekCalendar, buildMonthCalendar } from '../../../src/lib/components/lunar/lunar-week';
 
 describe('lunar week calendar', () => {
+  it('marks leap lunar months in Vietnamese and English week titles', () => {
+    const date = new Date(2023, 2, 27);
+    expect(buildWeekCalendar(date, date, 'vi').lunarMonthTitle).toContain('nhuận');
+    expect(buildWeekCalendar(date, date, 'en').lunarMonthTitle).toContain('leap');
+  });
   it.each([buildWeekCalendar, buildMonthCalendar])('projects Tho Khang markers without changing fasting or feast markers', build => {
     const date = new Date(2026, 1, 17);
     const calendar = build(date, date);

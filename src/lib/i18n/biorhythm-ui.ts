@@ -1,0 +1,67 @@
+import type { BiorhythmAge, BiorhythmCycleId } from '$lib/domain/practice/biorhythm';
+
+const vi = {
+  title: 'NHỊP SINH HỌC', group: 'Cảm ứng tâm linh', back: 'Quay lại', guide: 'Hướng dẫn', close: 'Đóng',
+  backHome: 'Quay lại Trang chủ', backPractice: 'Quay lại Tu Tập',
+  name: 'Họ và tên', namePlaceholder: 'Nhập họ và tên của bạn…', birth: 'Ngày sinh (Dương lịch)', birthPlaceholder: 'dd/mm/yyyy', pickBirthDate: 'Chọn ngày sinh từ lịch hệ thống', you: 'Bạn',
+  loading: 'Đang mở hồ sơ…', empty: 'Chọn ngày sinh để xem các chu kỳ của bạn.', invalid: 'Vui lòng nhập ngày sinh hợp lệ (ngày/tháng/năm, vd: 15/08/1992), không sau hôm nay.',
+  readError: 'Chưa mở được hồ sơ trên thiết bị. Bạn có thể thử lại.', saveError: 'Chưa lưu được hồ sơ. Thông tin đang nhập vẫn được giữ trên màn hình.', retry: 'Thử lại', saved: 'Đã lưu hồ sơ', saving: 'Đang lưu…',
+  average: 'Trung bình', overview: 'Tổng quan hôm nay', action: 'Hành động', study: 'Học tập', wisdom: 'Minh triết',
+  before: 'Ngày trước', after: 'Ngày sau', today: 'Hôm nay', returnToday: 'Về hôm nay', selectedDay: 'Ngày đang xem',
+  highSummary: 'Các đường sóng trong mô hình đang ở vùng cao.',
+  lowSummary: 'Các đường sóng trong mô hình đang ở vùng thấp.',
+  middleSummary: 'Các đường sóng đang dao động quanh vùng giữa.',
+  transitionSummary: 'Có chu kỳ gần mốc 50%. Giữ nếp sinh hoạt và thực hành đều đặn.',
+  cycles: 'Các chu kỳ sinh học', expand: 'Mở rộng · Trực giác, Thẩm mỹ, Tâm thức', collapse: 'Đang hiện 6 chu kỳ',
+  cycleNames: { physical: 'Thể chất', emotional: 'Tình cảm', intellectual: 'Trí tuệ', intuitive: 'Trực giác', aesthetic: 'Thẩm mỹ', spiritual: 'Tâm thức' } as Record<BiorhythmCycleId, string>,
+  above: 'Trên mốc 50%', below: 'Dưới mốc 50%', near: 'Gần mốc 50%', rising: '↗ Đang lên', falling: '↘ Đang xuống',
+  peak: 'Tới đỉnh chu kỳ', crossing: 'Tới mốc 50%', chart: 'Biểu đồ sóng 31 ngày', chartHint: 'Chạm vào biểu đồ để chọn ngày. Bạn cũng có thể dùng nút đổi ngày hoặc bảng bên dưới.',
+  nextWeek: 'Bảng số liệu 7 ngày tới', weekHint: 'Chọn ngày trong bảng để xem chi tiết.', date: 'Ngày', physicalShort: 'Thể', emotionalShort: 'Tâm', intellectualShort: 'Tuệ', averageShort: 'TB', note: 'Lưu ý', modelPhase: 'Pha chu kỳ', nearPhase: 'Gần 50%',
+  advice: 'Gợi ý điều dưỡng & tu tập', body: 'Thân', mind: 'Tâm', insight: 'Tuệ',
+  bodyAdvice: 'Lắng nghe cơ thể, vận động nhẹ và nghỉ ngơi đều đặn. Chọn lễ lạy hoặc kinh hành phù hợp với sức mình.',
+  mindAdvice: 'Giữ chánh niệm khi giao tiếp, thực tập ái ngữ và dành một khoảng lặng để nhận biết cảm xúc.',
+  insightAdvice: 'Duy trì thời gian đọc kinh sách, nghe Pháp hoặc biên chép vừa sức. Nghỉ ngắn khi cần.',
+  upcoming: 'Giao điểm 50% trong 14 ngày tới',
+  modelNotice: 'Các phần trăm là giá trị của mô hình chu kỳ theo ngày sinh, chỉ mang tính tham khảo. Hãy dựa vào trạng thái thực tế của bản thân để điều chỉnh sinh hoạt.',
+  guideSteps: [
+    'Nhập họ tên nếu muốn và chọn ngày sinh Dương lịch. Hồ sơ được lưu trên thiết bị theo tài khoản đang sử dụng.',
+    'Ba chu kỳ chính dài 23, 28 và 33 ngày. Phần mở rộng thêm chu kỳ 38, 43 và 53 ngày. Các đường sóng được tính từ ngày sinh theo một công thức tham khảo.',
+    'Mọi chỉ số hiển thị theo thang 0–100%, với 50% là mốc giữa. Điểm trung bình và các chỉ số tổng hợp được tính từ ba chu kỳ chính.',
+    'Chọn ngày bằng biểu đồ, bảng 7 ngày hoặc nút ngày trước/ngày sau. Về hôm nay đưa bạn về ngày hiện tại theo giờ Việt Nam.',
+    'Đỉnh chu kỳ được tính theo mẫu ngày gần đỉnh nhất. Giao điểm 50% được liệt kê theo ngày lịch chứa giao điểm.',
+  ],
+  age: (age: BiorhythmAge) => `${age.years} năm ${age.months} tháng ${age.days} ngày`,
+  ageBadge: (years: number) => `${years} tuổi`,
+  daysAlive: (days: number) => `${days.toLocaleString('vi-VN')} ngày sống`,
+  cycleDay: (day: number, period: number, round: number) => `Ngày ${day}/${period} · Vòng ${round}`,
+  remaining: (days: number) => days === 0 ? 'Hôm nay' : `còn ${days} ngày`,
+  period: (days: number) => `${days} ngày`,
+};
+
+const en: typeof vi = {
+  title: 'BIORHYTHM', group: 'Spiritual reflection', back: 'Back', guide: 'Guide', close: 'Close', backHome: 'Back to Home', backPractice: 'Back to Practice',
+  name: 'Full name', namePlaceholder: 'Enter your name…', birth: 'Birth date (Gregorian)', birthPlaceholder: 'dd/mm/yyyy', pickBirthDate: 'Choose birth date from system calendar', you: 'You', loading: 'Opening profile…', empty: 'Choose your birth date to view your cycles.', invalid: 'Choose a valid birth date (dd/mm/yyyy) that is no later than today or the selected day.',
+  readError: 'Your profile could not be opened on this device. You can retry.', saveError: 'Your profile could not be saved. Your entries are still on this screen.', retry: 'Retry', saved: 'Profile saved', saving: 'Saving…',
+  average: 'Average', overview: 'Today’s overview', action: 'Action', study: 'Learning', wisdom: 'Wisdom', before: 'Previous day', after: 'Next day', today: 'Today', returnToday: 'Back to today', selectedDay: 'Selected day',
+  highSummary: 'The model’s curves are in their upper range.', lowSummary: 'The model’s curves are in their lower range.', middleSummary: 'The model’s curves are around their middle range.', transitionSummary: 'A cycle is near 50%. Keep a steady daily routine and practice.',
+  cycles: 'Biorhythm cycles', expand: 'More · Intuition, Aesthetics, Awareness', collapse: 'Showing 6 cycles',
+  cycleNames: { physical: 'Physical', emotional: 'Emotional', intellectual: 'Intellectual', intuitive: 'Intuition', aesthetic: 'Aesthetics', spiritual: 'Awareness' },
+  above: 'Above 50%', below: 'Below 50%', near: 'Near 50%', rising: '↗ Rising', falling: '↘ Falling', peak: 'Until cycle peak', crossing: 'Until 50%', chart: '31-day wave chart', chartHint: 'Tap the chart to select a day. You can also use the day buttons or the table below.',
+  nextWeek: 'Next 7 days', weekHint: 'Select a date in the table to view its details.', date: 'Date', physicalShort: 'Body', emotionalShort: 'Mind', intellectualShort: 'Intellect', averageShort: 'Avg', note: 'Note', modelPhase: 'Cycle phase', nearPhase: 'Near 50%',
+  advice: 'Daily care & practice', body: 'Body', mind: 'Mind', insight: 'Insight', bodyAdvice: 'Listen to your body, move gently and rest regularly. Choose bowing or walking meditation that suits your condition.', mindAdvice: 'Communicate mindfully, practise kind speech and make room to notice your emotions.', insightAdvice: 'Keep a manageable routine of reading, listening to Dharma or copying scripture. Take short breaks when needed.', upcoming: '50% crossings in the next 14 days',
+  modelNotice: 'These percentages describe a birth-date cycle model for reference. Use your actual condition when adjusting your daily routine.',
+  guideSteps: [
+    'Enter a name if you wish and choose a Gregorian birth date. The profile is saved on this device for the account currently in use.',
+    'The three main cycles last 23, 28 and 33 days. The expanded view adds 38, 43 and 53-day cycles. The curves follow a reference formula based on your birth date.',
+    'All values use a 0–100% scale with 50% at the middle. The average and combined values use the three main cycles.',
+    'Select a date with the chart, seven-day table or previous/next buttons. Back to today uses the current date in Vietnam.',
+    'A cycle peak uses its nearest daily sample. A 50% crossing is listed on the calendar day containing that crossing.',
+  ],
+  age: (age: BiorhythmAge) => `${age.years} years ${age.months} months ${age.days} days`,
+  ageBadge: (years: number) => `${years} years old`, daysAlive: (days: number) => `${days.toLocaleString('en')} days lived`,
+  cycleDay: (day: number, period: number, round: number) => `Day ${day}/${period} · Cycle ${round}`,
+  remaining: (days: number) => days === 0 ? 'Today' : `${days} days`, period: (days: number) => `${days} days`,
+};
+
+export function getBiorhythmCopy(isEnglish: boolean) { return isEnglish ? en : vi; }
+export type BiorhythmCopy = typeof vi;

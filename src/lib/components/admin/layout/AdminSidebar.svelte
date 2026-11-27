@@ -63,7 +63,7 @@
 <aside id="admin-sidebar" class:admin-sidebar--open={mobileOpen} class="admin-sidebar" aria-label="Điều hướng quản trị" aria-modal={mobileOpen ? 'true' : undefined} role={mobileOpen ? 'dialog' : undefined}>
   <div class="admin-sidebar__brand">
     <a href={role === 'admin' ? '/admin' : '/admin/books'} aria-label="Quản trị Tu Tập Phật Pháp" onclick={closeMobile}>
-      <img src="/assets/branding/tu-tap-logo.png" alt="" width="40" height="40" />
+      <img src="/assets/branding/temple-icon-192.png" alt="" width="40" height="40" />
       <span><strong>Tu Tập Phật Pháp</strong><small>Khu vực quản trị</small></span>
     </a>
     <button bind:this={closeButton} class="admin-sidebar__close" type="button" aria-label="Đóng menu quản trị" onclick={onClose}>

@@ -1,0 +1,196 @@
+.div-page {
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 12px max(14px, env(safe-area-inset-right, 0px)) max(36px, env(safe-area-inset-bottom, 0px))
+    max(14px, env(safe-area-inset-left, 0px));
+  font-family: var(--font-app);
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.div-subbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.div-subbar-title-wrap {
+  min-width: 0;
+}
+
+.div-subbar-eyebrow {
+  display: block;
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--brown);
+  text-transform: uppercase;
+}
+
+.div-subbar-title {
+  margin: 2px 0 0;
+  font-size: clamp(16px, 4.4vw, 20px);
+  font-weight: 700;
+  color: var(--text);
+  text-transform: uppercase;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.div-guide-btn {
+  flex-shrink: 0;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  color: var(--brown-dark);
+  font-family: var(--font-app);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.div-guide-btn:hover {
+  border-color: var(--gold);
+  background: var(--gold-light);
+}
+
+.div-card {
+  border-radius: var(--radius-feature);
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+.div-card--padded {
+  padding: 18px 16px;
+}
+
+@media (min-width: 640px) {
+  .div-card--padded {
+    padding: 22px 24px;
+  }
+}
+
+.div-btn {
+  min-height: 46px;
+  min-width: 44px;
+  padding: 10px 18px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  font-family: var(--font-app);
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  transition: transform 0.14s ease, filter 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.div-btn:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.div-btn:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.div-btn--primary {
+  border: none;
+  background: linear-gradient(135deg, var(--gold2), var(--gold));
+  color: var(--on-gold);
+  box-shadow: 0 6px 16px rgba(200, 150, 62, 0.28);
+}
+
+.div-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.03);
+}
+
+.div-btn--soft {
+  background: var(--gold-light);
+  border-color: color-mix(in srgb, var(--gold) 55%, var(--border));
+  color: var(--brown-dark);
+}
+
+.div-btn--full {
+  width: 100%;
+}
+
+.div-toast {
+  margin-top: 10px;
+  padding: 9px 14px;
+  border-radius: var(--radius-control);
+  background: var(--bg2);
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
+  color: var(--brown-dark);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.div-warning-box {
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid color-mix(in srgb, var(--danger-text) 35%, var(--border));
+  background: color-mix(in srgb, var(--danger-text) 8%, var(--card));
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.55;
+  text-align: justify;
+}
+
+.div-section-accent-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--brown-dark);
+}
+
+.div-section-accent-heading::before {
+  content: '';
+  width: 4px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--gold);
+  flex-shrink: 0;
+}
+
+[data-theme='dark'] .div-subbar-eyebrow,
+[data-theme='dark'] .div-section-accent-heading {
+  color: var(--gold2);
+}
+
+[data-theme='dark'] .div-guide-btn,
+[data-theme='dark'] .div-toast,
+[data-theme='dark'] .div-btn--soft {
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .div-btn {
+    transition: none;
+  }
+}

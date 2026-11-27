@@ -500,7 +500,7 @@ async function dispatch(event: EventLike, env: NonNullable<ReturnType<typeof get
   }
 
   if (path === '/api/phap-bao/claim' && request.method === 'POST') {
-    const denied = enforcePublicWriteOrigin(request, env, requestId);
+    const denied = enforcePublicWriteOrigin(request, env, requestId, session, true);
     if (denied) return denied;
     const claimKey = await sha256(`${env.RATE_LIMIT_SALT || ''}:phap-bao-claim:${session?.appUserId || clientAddressHashInput(request)}`);
     if (!await checkRateLimit((env as unknown as Record<string, unknown>).COMMENT_RATE_LIMITER as { limit: (input: { key: string }) => Promise<{ success?: boolean }> } | undefined, claimKey)) {
@@ -687,13 +687,15 @@ async function dispatch(event: EventLike, env: NonNullable<ReturnType<typeof get
     requireAppUser(session);
     const service = createCopyingService(env, session.appUserId);
     if (request.method === 'GET') {
+      const privateHeaders = { 'Cache-Control': 'no-store' };
+      if (url.searchParams.get('latest') === '1') return json({ copy: await service.latest() }, 200, privateHeaders);
       const sutra = url.searchParams.get('sutra') ?? '';
       const chapter = Number(url.searchParams.get('chapter'));
       const run = url.searchParams.get('run');
-      if (run) return json({ copy: await service.read(sutra, chapter, run) });
+      if (run) return json({ copy: await service.read(sutra, chapter, run) }, 200, privateHeaders);
       const copies = await service.list(sutra, chapter, url.searchParams.get('cursor') ?? '');
       const last = copies.at(-1);
-      return json({ copies, nextCursor: copies.length === 20 && last ? `${last.savedAt}~${last.runId}` : null });
+      return json({ copies, nextCursor: copies.length === 20 && last ? `${last.savedAt}~${last.runId}` : null }, 200, privateHeaders);
     }
     if (request.method === 'PUT') {
       const denied = enforceSameOriginMutation(request, env, session, requestId);
@@ -1512,48 +1514,50 @@ function requireCapability(session: InternalSession | null, capability: string):
   if (!can(session, capability)) throw new ServerInputError(403, 'forbidden', 'Không đủ quyền.');
 }
 
-let appStatsMemoryCache: {
-  data: { total: number; base: number; real: number };
+interface AppStatsData { total: number; base: number; real: number }
+const appStatsMemoryCache = new WeakMap<CloudflareEnvLike['DB'], {
+  data: AppStatsData;
   expiresAt: number;
-} | null = null;
+}>();
+const appStatsPending = new WeakMap<CloudflareEnvLike['DB'], Promise<AppStatsData>>();
 
 const BASE_INSTALL_COUNT = 1230;
 
-async function handleAppStatsRequest(env: CloudflareEnvLike): Promise<Response> {
+export async function handleAppStatsRequest(env: CloudflareEnvLike): Promise<Response> {
   const now = Date.now();
-  if (appStatsMemoryCache && now < appStatsMemoryCache.expiresAt) {
-    return json(appStatsMemoryCache.data, 200, {
+  const cached = appStatsMemoryCache.get(env.DB);
+  if (cached && now < cached.expiresAt) {
+    return json(cached.data, 200, {
       'Cache-Control': 'public, max-age=1800, s-maxage=3600, stale-while-revalidate=86400',
     });
   }
 
-  let realCount = 0;
-  if (env?.DB) {
-    try {
-      const [userRow, visitorRow] = await Promise.all([
-        env.DB.prepare('SELECT COUNT(*) AS total FROM app_users').first<{ total?: number }>(),
-        env.DB.prepare('SELECT COUNT(DISTINCT visitor_id_hash) AS total FROM visitor_daily_presence').first<{ total?: number }>(),
-      ]);
-      const users = Number(userRow?.total || 0);
-      const visitors = Number(visitorRow?.total || 0);
-      realCount = Math.max(users, visitors);
-    } catch {
-      realCount = 0;
-    }
+  let pending = appStatsPending.get(env.DB);
+  if (!pending) {
+    // Giữ ngữ nghĩa unique visitor cũ; counter tương ứng cần schema được duyệt riêng.
+    pending = (async () => {
+      let realCount = 0;
+      try {
+        const [userRow, visitorRow] = await Promise.all([
+          env.DB.prepare('SELECT COUNT(*) AS total FROM app_users').first<{ total?: number }>(),
+          env.DB.prepare('SELECT COUNT(DISTINCT visitor_id_hash) AS total FROM visitor_daily_presence').first<{ total?: number }>(),
+        ]);
+        realCount = Math.max(Number(userRow?.total || 0), Number(visitorRow?.total || 0));
+      } catch {
+        realCount = 0;
+      }
+      const data = { total: BASE_INSTALL_COUNT + realCount, base: BASE_INSTALL_COUNT, real: realCount };
+      appStatsMemoryCache.set(env.DB, { data, expiresAt: now + 30 * 60 * 1000 });
+      return data;
+    })();
+    appStatsPending.set(env.DB, pending);
   }
 
-  const data = {
-    total: BASE_INSTALL_COUNT + realCount,
-    base: BASE_INSTALL_COUNT,
-    real: realCount,
-  };
-
-  appStatsMemoryCache = {
-    data,
-    expiresAt: now + 30 * 60 * 1000,
-  };
-
-  return json(data, 200, {
-    'Cache-Control': 'public, max-age=1800, s-maxage=3600, stale-while-revalidate=86400',
-  });
+  try {
+    return json(await pending, 200, {
+      'Cache-Control': 'public, max-age=1800, s-maxage=3600, stale-while-revalidate=86400',
+    });
+  } finally {
+    if (appStatsPending.get(env.DB) === pending) appStatsPending.delete(env.DB);
+  }
 }

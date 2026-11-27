@@ -44,6 +44,81 @@ it('reloads a failed iOS audio item at its retained position before attempting p
   expect(playback.indexOf(retry?.[0] ?? '')).toBeLessThan(playback.indexOf('player.playImmediately'));
 });
 
+it('keeps legacy iOS audio bytes available while assigning recognized media extensions (source evidence)', () => {
+  const source = readFileSync('ios/App/App/DharmaAudioPlugin.swift', 'utf8');
+  const cache = source.split('private func cachedURL(')[1]?.split('private func sourceURL(')[0] ?? '';
+  expect(cache).toContain('appendingPathExtension("audio")');
+  expect(cache).toContain('try FileManager.default.moveItem(at: legacy, to: target)');
+  expect(cache).toContain('catch { return FileManager.default.fileExists(atPath: target.path) ? target : legacy }');
+  expect(cache).not.toContain('removeItem');
+  expect(source).toContain('read(upToCount: 64)');
+  expect(source).toContain('try root.setResourceValues(values)');
+  const status = source.split('@objc public func cacheStatus(')[1]?.split('@objc public func cacheChunk(')[0] ?? '';
+  expect(status).toContain('cachedURL(key)');
+  const playback = source.split('private func playbackURL(')[1]?.split('private func loadTrack(')[0] ?? '';
+  expect(playback).toContain('cachedURL(source)');
+  const write = source.split('@objc public func cacheChunk(')[1]?.split('private func interrupted(')[0] ?? '';
+  expect(write.indexOf('replaceItemAt(target, withItemAt: partial)')).toBeGreaterThan(write.indexOf('if call.getBool("last") == true'));
+  expect(write.indexOf('for suffix in mediaExtensions + ["audio"]')).toBeGreaterThan(write.indexOf('moveItem(at: partial, to: target)'));
+});
+
+it('publishes iOS duration changes even while the prepared item is paused (source evidence)', () => {
+  const source = readFileSync('ios/App/App/DharmaAudioPlugin.swift', 'utf8');
+  expect(source).toContain('item.observe(\\.duration, options: [.new])');
+  expect(source).toContain('itemDuration?.invalidate(); itemDuration = nil');
+  const widget = source.split('private func publishWidget(')[1]?.split('deinit')[0] ?? '';
+  expect(widget).toMatch(/let duration = trackDuration\(\)[\s\S]*let fingerprint = [^\n]*\\\(Int\(duration\.rounded\(\)\)\)/);
+});
+
+it('reloads iOS widget snapshots before an audio intent returns (source evidence)', () => {
+  const source = readFileSync('ios/App/App/DharmaAudioPlugin.swift', 'utf8');
+  const intent = source.split('@MainActor func widgetPerform(')[1]?.split('private func saveWidgetArtwork(')[0] ?? '';
+  expect(intent).toContain('publishWidget(force: true, immediateReload: true)');
+  const reload = source.split('private func scheduleWidgetReload(')[1]?.split('private func publishWidget(')[0] ?? '';
+  expect(reload).toMatch(/if immediate[^\{]*\{\s*WidgetCenter\.shared\.reloadTimelines/);
+  expect(reload).toContain('widgetReload?.cancel()');
+});
+
+it('handles only the current iOS item failure and cleans up its observer (source evidence)', () => {
+  const source = readFileSync('ios/App/App/DharmaAudioPlugin.swift', 'utf8');
+  const observer = source.split('forName: AVPlayerItem.failedToPlayToEndTimeNotification')[1]?.split('player.replaceCurrentItem')[0] ?? '';
+  expect(observer).toContain('generation == self.itemGeneration');
+  expect(observer).toContain('self.player.currentItem === item');
+  expect(observer).toContain('AVPlayerItemFailedToPlayToEndTimeErrorKey');
+  expect(observer).toContain('self.playbackFailed(');
+  expect(source).toContain('if let observer = failureObserver { NotificationCenter.default.removeObserver(observer) }');
+  const failure = source.split('private func playbackFailed(')[1]?.split('private func removeTrackObservers(')[0] ?? '';
+  expect(failure).toContain('intendedPlaying = false');
+  expect(failure).toContain('cancelPendingSeek(code: "PLAYBACK_FAILED"');
+  expect(failure).toContain('player.pause()');
+  expect(failure).not.toMatch(/trackFinished\(|ended = true|index [+=]/);
+});
+
+it('keeps interruption begin separate from explicit iOS audio-session deactivation (source evidence)', () => {
+  const source = readFileSync('ios/App/App/DharmaAudioPlugin.swift', 'utf8');
+  const interruption = source.split('private func interrupted(')[1]?.split('private func command(')[0] ?? '';
+  const began = interruption.split('if type == .began {')[1]?.split('} else {')[0] ?? '';
+  expect(began).toContain('player.pause()');
+  expect(began).toContain('resumeAfterInterruption = intendedPlaying');
+  expect(began).not.toMatch(/pausePlayback\(|NativeAudioSession\.deactivate/);
+  expect(interruption).toContain('options.contains(.shouldResume)');
+});
+
+it('validates remote iOS commands on the main thread and disables rosary seeking controls (source evidence)', () => {
+  const source = readFileSync('ios/App/App/DharmaAudioPlugin.swift', 'utf8');
+  const command = source.split('private func command(')[1]?.split('private func moveTrack(')[0] ?? '';
+  expect(command).toContain('remoteCommandStatus');
+  const status = source.split('private func remoteCommandStatus(')[1]?.split('private func command(')[0] ?? '';
+  expect(status).toContain('Thread.isMainThread');
+  expect(status).toContain('DispatchQueue.main.sync');
+  expect(command).toMatch(/return self\.remoteCommandStatus \{\s*guard !self\.queueID\.isEmpty else \{ return \.noActionableNowPlayingItem \}/);
+  const controls = source.split('private func updateRemoteCommands(')[1]?.split('private func configureCommands(')[0] ?? '';
+  for (const control of ['nextTrackCommand', 'previousTrackCommand', 'skipForwardCommand', 'skipBackwardCommand', 'changePlaybackPositionCommand']) {
+    expect(controls).toContain(control);
+  }
+  expect(controls).toContain('!queueID.isEmpty && !isRosaryPlayback');
+});
+
 it('keeps the small iOS sleep caption readable without changing the accented timer control', () => {
   const source = readFileSync('ios/App/CalendarWidget/DharmaAudioWidget.swift', 'utf8');
   const face = source.split('private func sleepFace(_ audio: DharmaAudioWidgetData) -> some View {')[1]

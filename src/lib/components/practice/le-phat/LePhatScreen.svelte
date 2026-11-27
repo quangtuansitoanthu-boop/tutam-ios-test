@@ -17,10 +17,10 @@
     type AmbientSoundType
   } from '$lib/browser/ambient-sound';
   import { createWakeLockController } from '$lib/browser/wake-lock';
+  import { triggerHaptic } from '$lib/utils/haptics';
   import { modalDialog } from '$lib/browser/modal-dialog';
   import {
     PROSTRATION_PACE_SECONDS,
-    nextAutoProstrationTick,
     shouldStopAutoProstration,
     type ProstrationPaceSeconds
   } from '$lib/domain/practice/prostration-pacing';
@@ -94,6 +94,8 @@
   let autoPaceSec = $state<ProstrationPaceSeconds>(0);
   let autoPacePaused = $state(false);
   let autoPaceRemaining = $state(0);
+  let autoPaceRemainingMs = 0;
+  let foreground = $state(true);
   let imgLoaded = $state(false);
   let imgError = $state(false);
   let profileBuddha = $state<BuddhaInfo | null>(null);
@@ -132,6 +134,7 @@
 
   // Audio elements
   let musicEl: HTMLAudioElement | null = null;
+  let selectedAudioStarted = false;
   let moLoopEl: HTMLAudioElement | null = null;
   let moTapEl: HTMLAudioElement | null = null;
   const moTapStop = createAudioTapStop();
@@ -164,11 +167,13 @@
     mounted = true;
 
     function handleVisibilityChange() {
-      if (document.visibilityState === 'visible' && wakeLockWanted && open && isPracticing) {
+      foreground = document.visibilityState !== 'hidden';
+      if (foreground && wakeLockWanted && open && isPracticing) {
         void wakeLock?.request();
       }
     }
 
+    handleVisibilityChange();
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -206,6 +211,7 @@
   }
 
   function startSelectedAudio() {
+    selectedAudioStarted = true;
     if (musicTrack !== 'none' && musicEl) {
       musicEl.src = musicTrack;
       musicEl.currentTime = 0;
@@ -220,7 +226,23 @@
     }
   }
 
+  function pauseSelectedAudio() {
+    moTapStop.cancel();
+    musicEl?.pause();
+    moLoopEl?.pause();
+    moTapEl?.pause();
+    ambientCtrl.stop();
+  }
+
+  function resumeSelectedAudio() {
+    if (!selectedAudioStarted) { startSelectedAudio(); return; }
+    if (musicTrack !== 'none' && musicEl) void musicEl.play().catch(() => {});
+    if (moLoop && moLoopEl) void moLoopEl.play().catch(() => {});
+    if (ambientSound !== 'none') ambientCtrl.start(ambientSound);
+  }
+
   function stopAllAudio() {
+    selectedAudioStarted = false;
     moTapStop.cancel();
     if (musicEl) {
       musicEl.pause();
@@ -281,42 +303,48 @@
   function handleStartPractice() {
     autoPacePaused = false;
     autoPaceRemaining = autoPaceSec;
+    autoPaceRemainingMs = autoPaceSec * 1000;
     isPracticing = true;
-    if (!(routineSetup && routinePaused)) startSelectedAudio();
+    if (foreground && !(routineSetup && routinePaused)) startSelectedAudio();
   }
 
+  const autoPaceActive = $derived(open && isPracticing && autoPaceSec > 0 && foreground
+    && !autoPacePaused && !showConfirmModal && !profileBuddha
+    && !(routineSetup && routinePaused) && !shouldStopAutoProstration(count, goal));
+
   $effect(() => {
-    const active = open
-      && isPracticing
-      && autoPaceSec > 0
-      && !autoPacePaused
-      && !showConfirmModal
-      && !profileBuddha
-      && !(routineSetup && routinePaused)
-      && !shouldStopAutoProstration(count, goal);
-    if (!active) return;
-    if (autoPaceRemaining <= 0) autoPaceRemaining = autoPaceSec;
+    if (!autoPaceActive) return;
+    const paceMs = autoPaceSec * 1000;
+    let nextFireAtMs = Date.now() + (autoPaceRemainingMs > 0 ? autoPaceRemainingMs : paceMs);
     const timer = window.setInterval(() => {
-      if (shouldStopAutoProstration(count, goal)) return;
-      const tick = nextAutoProstrationTick(autoPaceRemaining, autoPaceSec);
-      autoPaceRemaining = tick.remaining;
-      if (tick.fire) handleProstrate();
+      if (!autoPaceActive) return;
+      const nowMs = Date.now();
+      if (nowMs >= nextFireAtMs) {
+        // Nhịp bị trễ chỉ phát một lần; không cộng bù các lạy người dùng chưa thực hiện.
+        nextFireAtMs = nowMs + paceMs;
+        handleProstrate();
+      }
+      autoPaceRemaining = Math.max(1, Math.ceil((nextFireAtMs - nowMs) / 1000));
     }, 1000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      autoPaceRemainingMs = Math.max(0, nextFireAtMs - Date.now());
+    };
   });
 
   $effect(() => {
-    const paused = Boolean(routineSetup && routinePaused);
+    const paused = !foreground || Boolean(routineSetup && routinePaused);
     if (!mounted || !open || !isPracticing) {
+      if (mounted) stopAllAudio();
       audioPausedByRoutine = false;
       return;
     }
     if (paused) {
-      stopAllAudio();
+      pauseSelectedAudio();
       audioPausedByRoutine = true;
     } else if (audioPausedByRoutine) {
       audioPausedByRoutine = false;
-      startSelectedAudio();
+      resumeSelectedAudio();
     }
   });
 
@@ -361,9 +389,7 @@
   function handleProstrate() {
     if (!open || !isPracticing || showConfirmModal || profileBuddha || (routineSetup && routinePaused)) return;
     count += 1;
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      try { navigator.vibrate(55); } catch {}
-    }
+    triggerHaptic('medium');
     if (bellType === 'bell') playBell();
     else if (bellType === 'mo') playMoTap();
     completeRoutine();
@@ -615,7 +641,7 @@
             onclick={handleRequestFinish}
             title={t.exit}
           >
-            <span aria-hidden="true">←</span> {t.exit}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg> {t.exit}
           </button>
 
           <div class="lp__title-wrap">
@@ -815,6 +841,7 @@
                 onchange={(e) => {
                   autoPaceSec = Number((e.currentTarget as HTMLSelectElement).value) as ProstrationPaceSeconds;
                   autoPaceRemaining = autoPaceSec;
+                  autoPaceRemainingMs = autoPaceSec * 1000;
                 }}
               >
                 {#each PROSTRATION_PACE_SECONDS as sec}

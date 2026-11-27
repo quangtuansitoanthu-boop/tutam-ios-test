@@ -85,6 +85,21 @@ function record(version = 'v1'): OfflinePdfRecord {
   };
 }
 
+it('reopens after WebKit closes the PDF database without dropping saved records', async () => {
+  const open = vi.spyOn(indexedDB, 'open');
+  const first = await database.openOfflinePdfDatabase();
+  records.set('reader:document', record());
+  expect(first.onclose).toBeTypeOf('function');
+  const closeOldHandle = first.onclose!;
+  closeOldHandle.call(first, new Event('close'));
+  await database.openOfflinePdfDatabase();
+  expect(open).toHaveBeenCalledTimes(2);
+  closeOldHandle.call(first, new Event('close'));
+  await database.openOfflinePdfDatabase();
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(records.get('reader:document')).toEqual(record());
+});
+
 it('does not resurrect a PDF deleted while checksum verification is pending', async () => {
   records.set('reader:document', record());
   const reading = database.getOfflinePdfByKey('reader:document');

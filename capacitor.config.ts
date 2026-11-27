@@ -1,4 +1,5 @@
 import type { CapacitorConfig } from '@capacitor/cli';
+import nativeGoogleConfig from './src/lib/contracts/native-google-auth.json';
 
 const config: CapacitorConfig = {
   appId: 'vn.quangtu.tutam',
@@ -34,7 +35,7 @@ const config: CapacitorConfig = {
       enabled: true
     },
     GoogleAuth: {
-      iosClientId: process.env.VITE_GOOGLE_IOS_CLIENT_ID,
+      iosClientId: process.env.VITE_GOOGLE_IOS_CLIENT_ID?.trim() || nativeGoogleConfig.iosClientId,
       scopes: ['profile', 'email'],
       serverClientId: '18472854734-2hpib1tghifb2li4s42vqaqvthfbn1jp.apps.googleusercontent.com',
       clientId: '18472854734-2hpib1tghifb2li4s42vqaqvthfbn1jp.apps.googleusercontent.com',

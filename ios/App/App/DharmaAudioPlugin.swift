@@ -12,7 +12,7 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "DharmaAudio"
     public let pluginMethods: [CAPPluginMethod] = [
         "setQueue", "play", "pause", "stop", "seek", "options", "sleep", "getState", "peek",
-        "cacheStatus", "cacheChunk", "backgroundStatus", "openBackgroundSettings", "selectPrincipal"
+        "cacheStatus", "cacheChunk", "evictCache", "backgroundStatus", "openBackgroundSettings", "selectPrincipal"
     ].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
 
     private var player = AVPlayer()
@@ -39,8 +39,10 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     private var retainedPosition: Double = 0
     private var resetTrackDuration: Double?
     private var itemStatus: NSKeyValueObservation?
+    private var itemDuration: NSKeyValueObservation?
     private var timeStatus: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
+    private var failureObserver: NSObjectProtocol?
     private var timeObserver: Any?
     private var observers: [NSObjectProtocol] = []
     private var commands: [(MPRemoteCommand, Any)] = []
@@ -50,6 +52,7 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     private var widgetArtworkVerified = false
     private var widgetArtworkKey: String?
     private var configured = false
+    private let cacheLock = NSRecursiveLock()
     private var widgetFingerprint = ""
     private var widgetSavedAt = Date.distantPast
     private var widgetReload: DispatchWorkItem?
@@ -62,6 +65,7 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     private func configure() {
         guard !configured else { return }
         configured = true
+        flushCacheEvictions()
         observePlayer()
         observe(NativeAudioSession.willStart) { [weak self] note in
             guard let self = self, note.object as AnyObject? !== self else { return }
@@ -115,6 +119,7 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
 
         player = AVPlayer()
         player.volume = volume
+        flushCacheEvictions()
         observePlayer()
         retainedPosition = position
         errorMessage = ""
@@ -159,15 +164,64 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func failure(_ message: String) -> NSError { NSError(domain: "TuTapAudio", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
-    private func cacheURL(_ key: String, partial: Bool = false) throws -> URL {
-        let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    private let mediaExtensions = ["mp3", "m4a", "mp4", "aac", "wav", "caf", "aiff", "aif", "flac", "ogg"]
+
+    private func cacheBaseURL(_ key: String) throws -> URL {
+        var root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("DharmaAudio", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try root.setResourceValues(values)
         let hash = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
-        // AVPlayer receives a local file URL. Keep the generated rhythm's WAV extension.
-        let isRosaryWave = key.hasPrefix("asset:///public/assets/audio/rosary-rhythm-v2-") && key.hasSuffix(".wav")
-        let fileExtension = isRosaryWave ? ".wav" : ".audio"
-        return root.appendingPathComponent(hash + (partial ? ".part" : fileExtension))
+        return root.appendingPathComponent(hash)
+    }
+
+    private func mediaExtension(_ key: String, file: URL) -> String? {
+        // URL Drive không có đuôi; chỉ đọc header, không nạp toàn bài vào bộ nhớ.
+        if let handle = try? FileHandle(forReadingFrom: file) {
+            defer { try? handle.close() }
+            let bytes = Array((try? handle.read(upToCount: 64)) ?? Data())
+            let prefix = String(bytes: bytes.prefix(4), encoding: .ascii) ?? ""
+            if prefix == "RIFF", bytes.count >= 12, String(bytes: bytes[8..<12], encoding: .ascii) == "WAVE" { return "wav" }
+            if prefix == "FORM", bytes.count >= 12, ["AIFF", "AIFC"].contains(String(bytes: bytes[8..<12], encoding: .ascii) ?? "") { return "aiff" }
+            if prefix == "caff" { return "caf" }
+            if prefix == "fLaC" { return "flac" }
+            if prefix == "OggS" { return "ogg" }
+            if bytes.count >= 12, String(bytes: bytes[4..<8], encoding: .ascii) == "ftyp" {
+                return String(bytes: bytes[8..<12], encoding: .ascii) == "M4A " ? "m4a" : "mp4"
+            }
+            if bytes.starts(with: [0x49, 0x44, 0x33]) { return "mp3" }
+            if bytes.count >= 2, bytes[0] == 0xff {
+                if bytes[1] & 0xf6 == 0xf0 { return "aac" }
+                if bytes[1] & 0xe0 == 0xe0, bytes[1] & 0x18 != 0x08, bytes[1] & 0x06 != 0 { return "mp3" }
+            }
+        }
+        let suffix = URL(string: key)?.pathExtension.lowercased() ?? ""
+        return mediaExtensions.contains(suffix) ? suffix : nil
+    }
+
+    private func cacheURL(_ key: String, partial: Bool = false) throws -> URL {
+        let base = try cacheBaseURL(key)
+        let pending = base.appendingPathExtension("part")
+        if partial { return pending }
+        guard let suffix = mediaExtension(key, file: pending) else { throw failure("Unsupported offline audio format") }
+        return base.appendingPathExtension(suffix)
+    }
+
+    private func cachedURL(_ key: String) throws -> URL? {
+        let base = try cacheBaseURL(key)
+        if FileManager.default.fileExists(atPath: base.appendingPathExtension("evict").path) { return nil }
+        for suffix in mediaExtensions {
+            let file = base.appendingPathExtension(suffix)
+            if FileManager.default.fileExists(atPath: file.path) { return file }
+        }
+        let legacy = base.appendingPathExtension("audio")
+        guard FileManager.default.fileExists(atPath: legacy.path) else { return nil }
+        guard let suffix = mediaExtension(key, file: legacy) else { return legacy }
+        let target = base.appendingPathExtension(suffix)
+        // Đổi tên trong cùng thư mục; lỗi I/O vẫn giữ nguyên bản tải cũ để thử lại.
+        do { try FileManager.default.moveItem(at: legacy, to: target); return target }
+        catch { return FileManager.default.fileExists(atPath: target.path) ? target : legacy }
     }
     private func sourceURL(_ source: String) throws -> URL {
         if source.hasPrefix("asset:///public/") {
@@ -183,8 +237,7 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         return url
     }
     private func playbackURL(_ source: String) throws -> URL {
-        let cached = try cacheURL(source)
-        if FileManager.default.fileExists(atPath: cached.path) { return cached }
+        if let cached = try cachedURL(source) { return cached }
         return try sourceURL(source)
     }
 
@@ -200,13 +253,17 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         let item = AVPlayerItem(url: url)
         itemStatus = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             DispatchQueue.main.async {
-                guard let self = self, generation == self.itemGeneration else { return }
+                guard let self = self, generation == self.itemGeneration, self.player.currentItem === item else { return }
                 if item.status == .failed {
-                    self.errorMessage = item.error?.localizedDescription ?? "Cannot play audio"
-                    self.intendedPlaying = false
-                    self.cancelPendingSeek(code: "PLAYBACK_FAILED", message: "Cannot play audio")
-                    NativeAudioSession.deactivate(self)
+                    self.playbackFailed(item.error)
+                    return
                 }
+                self.publish()
+            }
+        }
+        itemDuration = item.observe(\.duration, options: [.new]) { [weak self] item, _ in
+            DispatchQueue.main.async {
+                guard let self = self, generation == self.itemGeneration, self.player.currentItem === item else { return }
                 self.publish()
             }
         }
@@ -214,16 +271,34 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self = self, generation == self.itemGeneration else { return }
             self.trackFinished()
         }
+        failureObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main) { [weak self] note in
+            guard let self = self, generation == self.itemGeneration, self.player.currentItem === item else { return }
+            self.playbackFailed(note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error ?? item.error)
+        }
         player.replaceCurrentItem(with: item)
+        flushCacheEvictions()
         resetTrackDuration = nil
         lastTick = ProcessInfo.processInfo.systemUptime; wasPlaying = false
         beginSeek(position: position.isFinite ? max(0, position) : 0, call: call)
     }
 
+    private func playbackFailed(_ error: Error?) {
+        tickSleep()
+        errorMessage = error?.localizedDescription ?? "Cannot play audio"
+        intendedPlaying = false; wasPlaying = false; resumeAfterInterruption = false
+        player.pause()
+        cancelPendingSeek(code: "PLAYBACK_FAILED", message: "Cannot play audio")
+        NativeAudioSession.deactivate(self)
+        publish()
+    }
+
     private func removeTrackObservers() {
         itemStatus?.invalidate(); itemStatus = nil
+        itemDuration?.invalidate(); itemDuration = nil
         if let observer = endObserver { NotificationCenter.default.removeObserver(observer) }
         endObserver = nil
+        if let observer = failureObserver { NotificationCenter.default.removeObserver(observer) }
+        failureObserver = nil
     }
 
     private func cancelPendingSeek(code: String = "SEEK_CANCELLED", message: String = "Seek was superseded") {
@@ -367,6 +442,7 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     }
     private func publish() {
         tickSleep()
+        updateRemoteCommands()
         updateNowPlaying()
         publishWidget()
         notifyListeners("state", data: state())
@@ -383,7 +459,9 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         cancelPendingSeek(); retainedPosition = 0; resetTrackDuration = nil
         removeTrackObservers()
         player.replaceCurrentItem(with: nil)
+        flushCacheEvictions()
         queueID = ""; album = [:]; tracks = []; index = 0; ended = false; pausedAtTrackEnd = false
+        updateRemoteCommands()
         sleepRemaining = 0; sleepAtEnd = false
         artworkRequestID = UUID()
         artworkTask?.cancel(); artworkTask = nil; artwork = nil; widgetArtworkVerified = false; widgetArtworkKey = nil
@@ -458,12 +536,14 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         do {
             let key = call.getString("key") ?? ""
             _ = try sourceURL(key)
-            let file = try cacheURL(key)
-            let attributes = try? FileManager.default.attributesOfItem(atPath: file.path)
+            let file = try cachedURL(key)
+            let attributes = file.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path) }
             call.resolve(["bytes": (attributes?[.size] as? NSNumber)?.int64Value ?? 0])
         } catch { call.reject("Cannot inspect audio cache", "CACHE_FAILED", error) }
     }
     @objc public func cacheChunk(_ call: CAPPluginCall) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
         do {
             let key = call.getString("key") ?? ""
             _ = try sourceURL(key)
@@ -472,7 +552,11 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
                 throw failure("Invalid audio chunk")
             }
             let partial = try cacheURL(key, partial: true)
-            if offset == 0 { try Data().write(to: partial, options: .atomic) }
+            if offset == 0 {
+                let marker = try cacheBaseURL(key).appendingPathExtension("evict")
+                if FileManager.default.fileExists(atPath: marker.path) { try FileManager.default.removeItem(at: marker) }
+                try Data().write(to: partial, options: .atomic)
+            }
             let handle = try FileHandle(forWritingTo: partial)
             defer { try? handle.close() }
             let end = try handle.seekToEnd()
@@ -484,28 +568,86 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
                 if FileManager.default.fileExists(atPath: target.path) {
                     _ = try FileManager.default.replaceItemAt(target, withItemAt: partial)
                 } else { try FileManager.default.moveItem(at: partial, to: target) }
+                // Chỉ bỏ bản định dạng cũ sau khi bản thay thế đã được ghi trọn vẹn.
+                for suffix in mediaExtensions + ["audio"] where suffix != target.pathExtension {
+                    let old = target.deletingPathExtension().appendingPathExtension(suffix)
+                    try? FileManager.default.removeItem(at: old)
+                }
             }
             call.resolve()
         } catch { call.reject("Cannot cache offline audio", "CACHE_FAILED", error) }
+    }
+
+    private func finishCacheEviction(_ base: URL) throws {
+        // AVPlayer giữ file đang nghe; các bài kế tiếp sẽ dùng URL gốc khi marker tồn tại.
+        if let asset = player.currentItem?.asset as? AVURLAsset,
+           asset.url.isFileURL, asset.url.deletingPathExtension().standardizedFileURL == base.standardizedFileURL { return }
+        for suffix in mediaExtensions + ["audio", "part", "evict"] {
+            let file = base.appendingPathExtension(suffix)
+            if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+        }
+    }
+
+    private func flushCacheEvictions() {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        do {
+            let root = try cacheBaseURL("").deletingLastPathComponent()
+            for marker in try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+                where marker.pathExtension == "evict" {
+                let hash = marker.deletingPathExtension().lastPathComponent
+                guard hash.count == 64, hash.allSatisfy({ "0123456789abcdef".contains($0) }) else { continue }
+                try finishCacheEviction(marker.deletingPathExtension())
+            }
+        } catch { NSLog("TuTapAudio: deferred cache eviction unavailable (%@)", String(describing: type(of: error))) }
+    }
+
+    @objc public func evictCache(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.cacheLock.lock()
+            defer { self.cacheLock.unlock() }
+            do {
+                guard let keys = call.getArray("keys", String.self), keys.count <= 5000,
+                      keys.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 8192 }) else { throw self.failure("Invalid audio cache keys") }
+                let bases = try keys.map { try self.cacheBaseURL($0) }
+                for base in bases {
+                    try Data().write(to: base.appendingPathExtension("evict"), options: .atomic)
+                    try self.finishCacheEviction(base)
+                }
+                call.resolve()
+            } catch { call.reject("Cannot evict offline audio", "CACHE_FAILED", error) }
+        }
     }
 
     private func interrupted(_ note: Notification) {
         guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
         if type == .began {
-            let resume = intendedPlaying
-            pausePlayback(); resumeAfterInterruption = resume
+            tickSleep()
+            resumeAfterInterruption = intendedPlaying
+            intendedPlaying = false; wasPlaying = false
+            player.pause()
+            publish()
         } else {
             let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
             if resumeAfterInterruption && options.contains(.shouldResume) { try? startPlayback() }
             resumeAfterInterruption = false; publish()
         }
     }
-    private func command(_ control: MPRemoteCommand, action: @escaping () -> Void) {
+    private func remoteCommandStatus(_ action: () -> MPRemoteCommandHandlerStatus) -> MPRemoteCommandHandlerStatus {
+        if Thread.isMainThread { return action() }
+        return DispatchQueue.main.sync(execute: action)
+    }
+
+    private func command(_ control: MPRemoteCommand, requiresSeeking: Bool = false, action: @escaping () -> Void) {
         let token = control.addTarget { [weak self] _ in
-            guard let self = self, !self.queueID.isEmpty else { return .noSuchContent }
-            DispatchQueue.main.async(execute: action)
-            return .success
+            guard let self = self else { return .noActionableNowPlayingItem }
+            return self.remoteCommandStatus {
+                guard !self.queueID.isEmpty else { return .noActionableNowPlayingItem }
+                guard !requiresSeeking || !self.isRosaryPlayback else { return .commandFailed }
+                action()
+                return .success
+            }
         }
         commands.append((control, token))
     }
@@ -516,6 +658,13 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         do { try NativeAudioSession.activate(self); try loadTrack(position: 0, autoplay: true); publish() }
         catch { errorMessage = error.localizedDescription; publish() }
     }
+    private func updateRemoteCommands() {
+        let center = MPRemoteCommandCenter.shared()
+        let seeking: [MPRemoteCommand] = [center.nextTrackCommand, center.previousTrackCommand,
+            center.skipForwardCommand, center.skipBackwardCommand, center.changePlaybackPositionCommand]
+        seeking.forEach { $0.isEnabled = !queueID.isEmpty && !isRosaryPlayback }
+    }
+
     private func configureCommands() {
         let center = MPRemoteCommandCenter.shared()
         command(center.playCommand) { [weak self] in do { try self?.startPlayback(); self?.publish() } catch { self?.errorMessage = error.localizedDescription; self?.publish() } }
@@ -524,13 +673,13 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self = self else { return }
             if self.intendedPlaying { self.pausePlayback() } else { try? self.startPlayback(); self.publish() }
         }
-        command(center.nextTrackCommand) { [weak self] in
+        command(center.nextTrackCommand, requiresSeeking: true) { [weak self] in
             guard let self = self else { return }
             guard !self.isRosaryPlayback else { return }
             if self.repeatMode == 2 && self.index + 1 >= self.tracks.count { self.moveTrack(-self.index) }
             else { self.moveTrack(1) }
         }
-        command(center.previousTrackCommand) { [weak self] in
+        command(center.previousTrackCommand, requiresSeeking: true) { [weak self] in
             guard let self = self else { return }
             guard !self.isRosaryPlayback else { return }
             if self.playbackPosition() > 3 || self.index == 0 { self.skip(-self.playbackPosition()) }
@@ -538,14 +687,19 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         center.skipForwardCommand.preferredIntervals = [30]
         center.skipBackwardCommand.preferredIntervals = [10]
-        command(center.skipForwardCommand) { [weak self] in self?.skip(30) }
-        command(center.skipBackwardCommand) { [weak self] in self?.skip(-10) }
+        command(center.skipForwardCommand, requiresSeeking: true) { [weak self] in self?.skip(30) }
+        command(center.skipBackwardCommand, requiresSeeking: true) { [weak self] in self?.skip(-10) }
         let token = center.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let self = self, let seek = event as? MPChangePlaybackPositionCommandEvent, !self.queueID.isEmpty, !self.isRosaryPlayback else { return .noSuchContent }
-            DispatchQueue.main.async { self.seekFromSystem(position: max(0, seek.positionTime)) }
-            return .success
+            guard let self = self, let seek = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            return self.remoteCommandStatus {
+                guard !self.queueID.isEmpty, !self.isRosaryPlayback else { return .noActionableNowPlayingItem }
+                guard seek.positionTime.isFinite else { return .commandFailed }
+                self.seekFromSystem(position: max(0, seek.positionTime))
+                return .success
+            }
         }
         commands.append((center.changePlaybackPositionCommand, token))
+        updateRemoteCommands()
     }
     private func skip(_ delta: Double) {
         guard !isRosaryPlayback else { return }
@@ -761,8 +915,8 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             sleepAtEnd = false
         default: throw failure("Thao tác không được hỗ trợ.")
         }
-        publishWidget(force: true)
         publish()
+        publishWidget(force: true, immediateReload: true)
     }
 
     private func saveWidgetArtwork(_ image: UIImage) {
@@ -790,20 +944,25 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         // UUID chỉ nhận diện cover dẫn xuất; không lưu URL, tài khoản hoặc credential vào file ảnh.
         publishWidget(force: true)
     }
-    private func scheduleWidgetReload() {
+    private func scheduleWidgetReload(immediate: Bool = false) {
         widgetReload?.cancel()
+        widgetReload = nil
+        if immediate || UIApplication.shared.applicationState != .active {
+            WidgetCenter.shared.reloadTimelines(ofKind: DharmaAudioWidgetStore.kind)
+            return
+        }
         let work = DispatchWorkItem { WidgetCenter.shared.reloadTimelines(ofKind: DharmaAudioWidgetStore.kind) }
         widgetReload = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
-    private func publishWidget(force: Bool = false) {
+    private func publishWidget(force: Bool = false, immediateReload: Bool = false) {
         guard selectedWidgetPrincipal != nil, !excludesAudioWidget, !queueID.isEmpty, tracks.indices.contains(index) else { return }
         let sleepMinutes = DharmaAudioWidgetStore.sleepMinutes(sleepRemaining)
-        let fingerprint = "\(queueID)|\(index)|\(intendedPlaying)|\(ended)|\(repeatMode)|\(sleepMinutes)|\(errorMessage)"
+        let duration = trackDuration()
+        let fingerprint = "\(queueID)|\(index)|\(intendedPlaying)|\(ended)|\(repeatMode)|\(sleepMinutes)|\(Int(duration.rounded()))|\(errorMessage)"
         let changed = fingerprint != widgetFingerprint
         guard force || changed || (intendedPlaying && Date().timeIntervalSince(widgetSavedAt) >= 15) else { return }
-        let duration = trackDuration()
         let position = playbackPosition()
         let upcoming = tracks.indices.dropFirst(index + 1).prefix(3).map { next in
             let row = tracks[next]
@@ -817,7 +976,7 @@ public class DharmaAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         DharmaAudioWidgetStore.write(snapshot)
         saveWidgetPosition()
         widgetSavedAt = Date(); widgetFingerprint = fingerprint
-        if changed || force { scheduleWidgetReload() }
+        if changed || force { scheduleWidgetReload(immediate: immediateReload) }
     }
 
     deinit {

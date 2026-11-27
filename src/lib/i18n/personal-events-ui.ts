@@ -1,7 +1,7 @@
 export const personalEventsUi = {
   vi: {
-    lunarEquivalentYear: (year: number) => `Âm lịch tự quy đổi theo năm ${year}:`,
-    solarEquivalentYear: (year: number) => `Dương lịch tương ứng năm ${year}:`,
+    lunarEquivalentYear: (year: number) => `Âm lịch năm ${year}:`,
+    solarEquivalentYear: (year: number) => `Dương lịch năm ${year}:`,
     missingInformationTitle: 'Chưa đủ thông tin',
     invalidDateTitle: 'Ngày chưa hợp lệ',
     timingTitle: 'Thời điểm nhắc ngày lễ cá nhân',
@@ -21,6 +21,8 @@ export const personalEventsUi = {
     saving: 'Đang lưu…',
     saveEvent: 'Lưu ngày lễ',
     eventSaved: 'Đã lưu ngày lễ',
+    eventAddedTitle: 'Đã thêm ngày lễ cá nhân',
+    eventAddedMessage: 'Ngày lễ đã được lưu trên thiết bị.',
     eventNameLabel: 'Tên ngày lễ *',
     finishCurrentDraft: 'Vui lòng lưu ngày lễ đang soạn trước khi sửa ngày khác.',
     noEquivalentDate: 'Ngày đã chọn không có ngày tương ứng trong năm đang xem. Hãy giữ lịch hiện tại hoặc chọn ngày khác trước khi đổi lịch.',
@@ -41,8 +43,8 @@ export const personalEventsUi = {
     remindersDisabled: 'Nhắc nhở chung đang tắt. Bật nhắc nhở chung trong cài đặt để ứng dụng nhắc ngày lễ.',
   },
   en: {
-    lunarEquivalentYear: (year: number) => `Lunar equivalent for ${year}:`,
-    solarEquivalentYear: (year: number) => `Solar equivalent for ${year}:`,
+    lunarEquivalentYear: (year: number) => `Lunar date in ${year}:`,
+    solarEquivalentYear: (year: number) => `Solar date in ${year}:`,
     missingInformationTitle: 'Missing information',
     invalidDateTitle: 'Invalid date',
     timingTitle: 'Personal anniversary reminder times',
@@ -62,6 +64,8 @@ export const personalEventsUi = {
     saving: 'Saving…',
     saveEvent: 'Save anniversary',
     eventSaved: 'Anniversary saved',
+    eventAddedTitle: 'Personal anniversary added',
+    eventAddedMessage: 'The anniversary was saved on this device.',
     eventNameLabel: 'Anniversary name *',
     finishCurrentDraft: 'Save the anniversary draft before editing another anniversary.',
     noEquivalentDate: 'The selected date has no equivalent in the displayed year. Keep this calendar or choose another date before switching.',

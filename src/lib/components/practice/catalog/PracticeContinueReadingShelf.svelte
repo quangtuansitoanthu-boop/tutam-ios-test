@@ -71,10 +71,11 @@
   function positionLabel(row: ReadingProgressRecord): string {
     const isEn = localeStore.current === 'en';
     if (row.percent >= 100) return isEn ? '✓ Completed' : '✓ Đã hoàn thành';
-    if (row.position.chapterId != null && !Number.isNaN(Number(row.position.chapterId))) {
+    const rawChapter = row.position.chapterIdx ?? row.position.chapterId;
+    if (rawChapter != null && String(rawChapter).trim() !== '' && !Number.isNaN(Number(rawChapter))) {
       return isEn
-        ? `Reciting Chapter ${Number(row.position.chapterId) + 1}`
-        : `Đang tụng Phẩm ${Number(row.position.chapterId) + 1}`;
+        ? `Reciting Chapter ${Number(rawChapter) + 1}`
+        : `Đang tụng Phẩm ${Number(rawChapter) + 1}`;
     }
     return isEn ? 'Practicing' : 'Đang công phu';
   }

@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { openReaderTools, settleClient } from './runtime-helpers';
+import { deferStartupNotification, openReaderTools, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 for (const platform of ['android', 'ios']) for (const width of [375, 1440]) {
   test(`reader paper reaches the ${platform} bridge at ${width}px and restores the app surface`, async ({ page }) => {
@@ -87,7 +89,7 @@ for (const platform of ['android', 'ios']) for (const width of [375, 1440]) {
     }
     await choosePreviewPaper('gray');
     await expect(page.locator('html')).toHaveAttribute('data-app-palette', 'gray');
-    await page.locator('.tt-theme-btn').click();
+    await page.locator('.qts-nav .nav-theme-btn').click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await expect(preview).toHaveAttribute('data-read-bg', 'dark');
     await expect(preview).toHaveCSS('background-color', 'rgb(21, 18, 13)');
@@ -113,7 +115,7 @@ for (const platform of ['android', 'ios']) for (const width of [375, 1440]) {
     await expect.poll(() => page.evaluate(() => ['tutam_read_bg', 'tutam_read_bg_dark', 'tt_bg', 'tt_practice_bg'].map(key => localStorage.getItem(key))))
       .toEqual(['cream', 'cream', 'cream', 'cream']);
     expect(requests).toHaveLength(baselineRequests);
-    await page.locator('.tt-topbar .tt-back-btn').click();
+    await page.locator('.qts-nav .nav-back-circle-btn').click();
     await expect(preview).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => (window as any).barCalls.at(-1)))
       .toEqual({ dark: false, backgroundColor: '#faf6ee' });
@@ -122,6 +124,8 @@ for (const platform of ['android', 'ios']) for (const width of [375, 1440]) {
 
 for (const platform of ['android', 'ios']) {
   test(`six app palettes persist, follow Auto and update the ${platform} bars without API calls`, async ({ page }, info) => {
+    // Exercise both viewports and cold-start persistence across three navigations.
+    test.slow();
     await page.addInitScript(platform => {
       localStorage.setItem('tutam_locale', 'vi');
       if (localStorage.getItem('tutam_dark_mode') === null) localStorage.setItem('tutam_dark_mode', '0');
@@ -215,11 +219,11 @@ for (const platform of ['android', 'ios']) {
     const english = page.getByRole('group', { name: 'App Theme', exact: true });
     await expect(english.getByRole('button')).toHaveText(['Auto', 'White', 'Cream', 'Gray', 'Light purple', 'Dark'].map(label => new RegExp(label)));
     await english.getByRole('button', { name: 'Light purple', exact: true }).click();
-    await page.goto('/tu-tap');
+    await page.goto('/tu-tap/chep-kinh');
     await settleClient(page);
-    await expect(page.locator('.tt-topbar')).toHaveCSS('background-color', 'rgb(238, 230, 250)');
-    await expect(page.locator('.tt-topbar .tt-back-btn')).toHaveCSS('color', 'rgb(89, 65, 116)');
-    await expect(page.locator('.tt-topbar .tt-theme-btn')).toHaveCSS('color', 'rgb(89, 65, 116)');
+    await expect(page.locator('.qts-nav')).toHaveCSS('background-color', 'rgb(238, 230, 250)');
+    await expect(page.locator('.qts-nav .nav-back-circle-btn')).toHaveCSS('color', 'rgb(89, 65, 116)');
+    await expect(page.locator('.qts-nav .nav-theme-btn')).toHaveCSS('color', 'rgb(89, 65, 116)');
     expect(requests).toHaveLength(baselineRequests);
   });
 }

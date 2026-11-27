@@ -2,8 +2,8 @@
   "bookId": "tuyen-tap-phap-facebook-quang-tu",
   "remotePrefix": "https://media.quangtu.vn/videos/",
   "posterPrefix": "https://media.quangtu.vn/posters/",
-  "totalBytes": 89076733,
-  "remoteTotalBytes": 89076733,
+  "totalBytes": 111400475,
+  "remoteTotalBytes": 111400475,
   "videos": [
     {
       "chapterId": "13476",
@@ -144,9 +144,9 @@
       "poster": "https://media.quangtu.vn/posters/fb-poster-1703661284-13.webp",
       "src": "https://media.quangtu.vn/videos/fb-video-1703661284-13.mp4",
       "filename": "fb-video-1703661284-13.mp4",
-      "bytes": 10844408,
-      "remoteBytes": 10844408,
-      "sha256": "89394cb228ba0258934be8b731ccdc9d14d96d99eca5fab62994d7ac1e162dff"
+      "bytes": 33168150,
+      "remoteBytes": 33168150,
+      "sha256": "50680e8cbc0fe15a30777ed8d575bf387349e28c2fa77dd65383373eae2007ef"
     },
     {
       "chapterId": "13489",

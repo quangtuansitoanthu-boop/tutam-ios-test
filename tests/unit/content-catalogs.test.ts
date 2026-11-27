@@ -18,6 +18,23 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
+it('persists the existing online view-count response for offline reuse without an extra request', async () => {
+  const values = new Map<string, string>();
+  vi.stubGlobal('navigator', { onLine: true });
+  vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) });
+  const views = [{ bai_viet_id: 'views-book', so_luot: 123 }];
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => jsonResponse(String(input).includes('/luot_xem') ? views : [
+    { id: 'views-book', tieu_de: 'Views book', trang_thai: 'Hoàn thành', danh_muc: 'KHÁC' },
+  ]));
+  try {
+    const articles = await fetchHomepageArticles(fetcher, 'guest');
+    expect(articles[0].viewCount).toBe(123);
+    expect(JSON.parse(values.get('quangtu_views_cache')!)).toEqual(views);
+    expect(Number(values.get('quangtu_views_last_sync_time'))).toBeGreaterThan(0);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  } finally { vi.unstubAllGlobals(); }
+});
+
 describe('talk catalog session visibility', () => {
   let unregister: (() => void) | undefined;
   afterEach(() => { unregister?.(); unregister = undefined; vi.unstubAllGlobals(); });

@@ -22,7 +22,7 @@
   import { beforeNavigate, goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-  import { encodeMediaFileNameHeader } from '$lib/browser/media-upload';
+  import { mediaFileContentType, uploadMediaFile } from '$lib/browser/media-upload';
   import { invalidateArticleState } from '$lib/browser/server-state';
   import { fetchWithSessionRefresh, requireBrowserCsrf } from '$lib/browser/session-csrf';
   import type { ArticleCategory, LibraryArticle } from '$lib/components/library/article';
@@ -273,20 +273,7 @@
 
   async function upload(file: File, folder: 'covers' | 'pdfs' | 'content'): Promise<string> {
     const csrf = await requireBrowserCsrf();
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
-    const encoded = btoa(String.fromCharCode(...digest)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
-    const response = await fetchWithSessionRefresh('/api/media', {
-      method: 'POST',
-      headers: {
-        'content-type': file.type,
-        'x-content-sha256': encoded,
-        'x-csrf-token': csrf,
-        'x-file-name': encodeMediaFileNameHeader(file.name),
-        'x-media-prefix': folder,
-        'idempotency-key': createBrowserId()
-      },
-      body: file
-    });
+    const response = await uploadMediaFile(file, folder, csrf);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload?.error?.message || 'Tải tệp thất bại.');
     return String(payload.url || payload.objectKey || '');
@@ -294,11 +281,11 @@
 
   async function uploadSelectedFile(file: File, folder: 'covers' | 'pdfs'): Promise<void> {
     if (uploadKind) return;
-    if (folder === 'pdfs' && file.type !== 'application/pdf') {
+    if (folder === 'pdfs' && mediaFileContentType(file) !== 'application/pdf') {
       error = 'Vui lòng chọn đúng file PDF.';
       return;
     }
-    if (folder === 'covers' && !file.type.startsWith('image/')) {
+    if (folder === 'covers' && !mediaFileContentType(file).startsWith('image/')) {
       error = 'Vui lòng chọn đúng file ảnh.';
       return;
     }

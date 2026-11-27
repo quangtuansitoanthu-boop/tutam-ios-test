@@ -154,7 +154,7 @@ it.each([0, 3])('fits dense real-calendar reminders into the iOS budget with %s 
     lunarDay: index + 1, lunarMonth: 0, frequency: 'monthly', type: 'gia-dinh', createdAt: '2026-01-01',
   }));
   const foreign = Array.from({ length: foreignCount }, (_, index) => ({ id: 700 + index, extra: { type: 'another_tool' } }));
-  os.pending.mockResolvedValue({ notifications: [{ id: 42, extra: { type: 'lunar_eve' } }, ...foreign] });
+  os.pending.mockResolvedValue({ notifications: [{ id: 42, extra: { type: 'lunar_eve' } }, ...foreign], transactionalReplacement: true });
   const value = structuredClone(DEFAULT_PRACTICE_REMINDER_SETTINGS);
   const full = buildUpcomingNotificationBatch(value, 45);
   const recurringIds = full.filter(item => item.schedule?.repeats).map(item => item.id);
@@ -180,7 +180,8 @@ it.each([0, 3])('fits dense real-calendar reminders into the iOS budget with %s 
   const retainedOnce = retained.filter(item => item.schedule?.at).map(item => item.id);
   expect.soft(retainedOnce).toEqual(nearest.slice(0, 64 - foreignCount - recurringIds.length).map(item => item.id));
   expect(os.pending).toHaveBeenCalledOnce();
-  expect(os.cancel).toHaveBeenCalledExactlyOnceWith({ notifications: [{ id: 42 }] });
+  expect(os.schedule.mock.calls[0][0].replaceReminderIds).toEqual([42]);
+  expect(os.cancel).not.toHaveBeenCalled();
 });
 
 it('passes daily and weekly times, weekdays and sound from settings through the iOS SDK', async () => {
@@ -196,6 +197,32 @@ it('passes daily and weekly times, weekdays and sound from settings through the 
   expect(os.cancel).toHaveBeenCalledExactlyOnceWith({ notifications: [{ id: 42 }] });
   expect(os.schedule.mock.invocationCallOrder[0]).toBeLessThan(os.cancel.mock.invocationCallOrder[0]);
   expect(os.pending).toHaveBeenCalledOnce();
+});
+
+it('removes obsolete reminders before replacing a full iOS queue without evicting other tools', async () => {
+  const previous = Array.from({ length: 63 }, (_, i) => ({ id: 200000 + i, extra: { type: 'lunar_eve' } }));
+  const foreign = { id: 777, extra: { type: 'another_tool' } };
+  const retained = new Set([...previous.map(item => item.id), foreign.id]);
+  os.pending.mockResolvedValue({ notifications: [...previous, foreign], transactionalReplacement: true });
+  os.schedule.mockImplementationOnce(async ({ notifications, replaceReminderIds }: { notifications: { id: number }[]; replaceReminderIds: number[] }) => {
+    for (const id of replaceReminderIds) retained.delete(id);
+    for (const item of notifications) retained.add(item.id);
+    expect(retained.size).toBeLessThanOrEqual(64);
+  });
+  expect((await syncRemindersWithSystem(settings())).success).toBe(true);
+  expect(os.schedule.mock.calls[0][0].replaceReminderIds).toEqual(previous.map(item => item.id));
+  expect(os.cancel).not.toHaveBeenCalled();
+  expect(retained.has(foreign.id)).toBe(true);
+  expect(retained.has(1000)).toBe(true);
+  expect(retained.has(1001)).toBe(true);
+});
+
+it('keeps an old installed shell’s full queue intact when safe replacement is unavailable', async () => {
+  const previous = Array.from({ length: 63 }, (_, i) => ({ id: 200000 + i, extra: { type: 'lunar_eve' } }));
+  os.pending.mockResolvedValue({ notifications: [...previous, { id: 777, extra: { type: 'another_tool' } }] });
+  expect((await syncRemindersWithSystem(settings())).success).toBe(false);
+  expect(os.schedule).not.toHaveBeenCalled();
+  expect(os.cancel).not.toHaveBeenCalled();
 });
 
 it('keeps the user-selected silent mode while retaining both daily schedules', async () => {

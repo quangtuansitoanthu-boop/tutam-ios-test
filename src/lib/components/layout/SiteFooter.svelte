@@ -13,7 +13,7 @@
 <footer class="qts-footer">
   <div class="qts-footer__inner">
     <div class="qts-footer__brand">
-      <img src="/assets/branding/tu-tap-logo.png" alt="" width="36" height="36" />
+      <img src="/assets/branding/temple-icon-192.png" alt="" width="36" height="36" />
       <div>
         <div class="qts-footer__name">{t.footer.brandName}</div>
         <div class="qts-footer__tagline">{t.footer.tagline}</div>

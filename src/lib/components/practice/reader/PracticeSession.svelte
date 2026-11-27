@@ -106,7 +106,6 @@
   const resolvedPracticeBackground = $derived(themeStore?.paper ?? (['white', 'cream', 'gray', 'dark', 'purple'].includes(practiceBackground) ? practiceBackground : 'cream'));
   let tocOpen = $state(false);
   let settingsOpen = $state(false);
-  let zenMode = $state(false);
   let mantraGoal = $state<number>(0);
   let goalReachedToast = $state(false);
   let goalToastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -115,12 +114,11 @@
   let practiceArticle = $state<HTMLElement | null>(null);
   let readerToolbar = $state<HTMLElement | null>(null);
 
-  const isMantra = $derived(article.category === 'TRÌ CHÚ');
-  const MANTRA_GOALS = [0, 3, 7, 21, 49, 108] as const;
+  const MANTRA_GOALS = [0, 1, 3, 7, 21, 49, 108] as const;
   const preparedRitual = $derived(preparePracticeHeadings(formatPracticeRitualHtml(practiceHtml)));
   const autoHeadings = $derived(chapters.length === 0 ? preparedRitual.headings : []);
   const hasToc = $derived(chapters.length > 0 || autoHeadings.length > 0);
-  const goalReached = $derived(isMantra && mantraGoal > 0 && practiceCount >= mantraGoal);
+  const goalReached = $derived(mantraGoal > 0 && practiceCount >= mantraGoal);
 
   $effect(() => {
     return () => {
@@ -128,19 +126,12 @@
     };
   });
 
-  function handleArticleTap(event: MouseEvent): void {
-    const target = event.target as HTMLElement | null;
-    if (!target || target.closest('button, a, select, input, dialog')) return;
-    if (typeof window !== 'undefined' && window.getSelection()?.toString()) return;
-    zenMode = !zenMode;
-  }
-
   function jumpToHeading(id: string): void {
     tocOpen = false;
     void tick().then(() => {
       const heading = practiceArticle?.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
       if (!heading) return;
-      const offset = zenMode ? 16 : (readerToolbar?.getBoundingClientRect().bottom ?? 118) + 12;
+      const offset = (readerToolbar?.getBoundingClientRect().bottom ?? 118) + 12;
       const top = Math.max(0, window.scrollY + heading.getBoundingClientRect().top - offset);
       window.scrollTo({ top, behavior: 'smooth' });
     });
@@ -170,7 +161,7 @@
   async function countAndRestart(delta: number): Promise<void> {
     const nextCount = Math.max(0, practiceCount + delta);
     onCountChange(delta);
-    if (delta === 1 && isMantra && mantraGoal > 0 && nextCount === mantraGoal) {
+    if (delta === 1 && mantraGoal > 0 && nextCount === mantraGoal) {
       triggerHaptic('success');
       goalReachedToast = true;
       if (goalToastTimer !== undefined) clearTimeout(goalToastTimer);
@@ -218,7 +209,7 @@
   ] as const);
 </script>
 
-<section use:nativeSystemBarsSurface class="tt-practice practice-theme" class:ttp-zen={zenMode} data-practice={article.category} data-bg={resolvedPracticeBackground} aria-label={t.title}>
+<section use:nativeSystemBarsSurface class="tt-practice practice-theme" data-practice={article.category} data-bg={resolvedPracticeBackground} aria-label={t.title}>
   <header class="ttp-header">
     <button class="ttp-back" type="button" aria-label={t.confirmExitPracticeBtn} title={t.confirmExitPracticeBtn} onclick={onExit}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7" /></svg></button>
     {#if routineContext}
@@ -230,7 +221,7 @@
       <strong class="ttp-header-title">{article.title}</strong>
     {/if}
     <span class="ttp-header-badge" class:ttp-header-badge--done={goalReached} aria-live="polite">
-      {#if isMantra && mantraGoal > 0}
+      {#if mantraGoal > 0}
         {goalReached ? '✓ ' : ''}{practiceCount}/{mantraGoal} {localeStore.current === 'en' ? 'reps' : 'biến'}
       {:else}
         {practiceCount > 0 ? t.chantedCountBadge.replace('{count}', String(practiceCount)) : t.practiceSessionBadge}
@@ -289,31 +280,28 @@
         <option value="1">{t.speedNormal}</option>
         <option value="2">{t.speedFast}</option>
       </select>
-      {#if isMantra}
-        <span class="ttp-rbar-sep" aria-hidden="true"></span>
-        <select
-          aria-label={localeStore.current === 'en' ? 'Target repetitions' : 'Mục tiêu số biến'}
-          value={String(mantraGoal)}
-          onchange={(event) => { mantraGoal = Number((event.currentTarget as HTMLSelectElement).value); }}
-        >
-          {#each MANTRA_GOALS as goal (goal)}
-            <option value={String(goal)}>{goal === 0 ? (localeStore.current === 'en' ? 'Free reps' : 'Tự do') : `${goal} ${localeStore.current === 'en' ? 'reps' : 'biến'}`}</option>
-          {/each}
-        </select>
-      {/if}
+      <span class="ttp-rbar-sep" aria-hidden="true"></span>
+      <select
+        aria-label={localeStore.current === 'en' ? 'Target repetitions' : 'Số biến mục tiêu'}
+        value={String(mantraGoal)}
+        onchange={(event) => { mantraGoal = Number((event.currentTarget as HTMLSelectElement).value); }}
+      >
+        {#each MANTRA_GOALS as goal (goal)}
+          <option value={String(goal)}>{goal === 0 ? (localeStore.current === 'en' ? 'Free reps' : 'Tự do') : `${goal} ${localeStore.current === 'en' ? 'reps' : 'biến'}`}</option>
+        {/each}
+      </select>
     </div>
   </div>
 
   {#if goalReachedToast}
     <div class="ttp-goal-toast" role="status" aria-live="polite">
-      🪷 {localeStore.current === 'en' ? `Completed ${mantraGoal} repetitions!` : `Hoàn mãn ${mantraGoal} biến trì chú!`}
+      🪷 {localeStore.current === 'en' ? `Completed ${mantraGoal} repetitions!` : `Hoàn mãn ${mantraGoal} biến hành trì!`}
     </div>
   {/if}
 
   <main class="ttp-body">
     <div class="ttp-candle-glow" aria-hidden="true"></div>
-    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-    <article class="ttp-scroll-area" bind:this={practiceArticle} onclick={handleArticleTap}>
+    <article class="ttp-scroll-area" bind:this={practiceArticle}>
       <h1 class="ttp-art-title">{practiceTitle}</h1>
       <div class="ttp-divider" aria-hidden="true"><span>☸</span></div>
       <div class:ttp-read-bold={practiceBold} class="ttp-content" style={`font-size:${fontSize}px`} use:savedContentImages>
@@ -383,6 +371,22 @@
   >
     <div class="ttp-sheet-settings">
       <div class="ttp-sheet-row">
+        <span class="ttp-sheet-label">{localeStore.current === 'en' ? 'Target repetitions' : 'Số biến mục tiêu'}</span>
+        <div class="ttp-sheet-controls">
+          <select
+            class="ttp-sheet-select"
+            aria-label={localeStore.current === 'en' ? 'Target repetitions' : 'Số biến mục tiêu'}
+            value={String(mantraGoal)}
+            onchange={(event) => { mantraGoal = Number((event.currentTarget as HTMLSelectElement).value); }}
+          >
+            {#each MANTRA_GOALS as goal (goal)}
+              <option value={String(goal)}>{goal === 0 ? (localeStore.current === 'en' ? 'Free' : 'Tự do') : `${goal} ${localeStore.current === 'en' ? 'reps' : 'biến'}`}</option>
+            {/each}
+          </select>
+        </div>
+      </div>
+
+      <div class="ttp-sheet-row">
         <span class="ttp-sheet-label">{localeStore.current === 'en' ? 'Font size' : 'Cỡ chữ'}</span>
         <div class="ttp-sheet-controls">
           <button class="ttp-rbar-btn" type="button" aria-label="A−" onclick={() => onFontSizeChange(-1)}>A−</button>
@@ -430,22 +434,6 @@
           </select>
         </div>
       </div>
-
-      {#if isMantra}
-        <div class="ttp-sheet-row">
-          <span class="ttp-sheet-label">{localeStore.current === 'en' ? 'Target reps' : 'Mục tiêu biến'}</span>
-          <div class="ttp-sheet-controls ttp-goal-chips">
-            {#each MANTRA_GOALS as goal (goal)}
-              <button
-                type="button"
-                class="ttp-rbar-btn"
-                class:active={mantraGoal === goal}
-                onclick={() => { mantraGoal = goal; }}
-              >{goal === 0 ? (localeStore.current === 'en' ? 'Free' : 'Tự do') : goal}</button>
-            {/each}
-          </div>
-        </div>
-      {/if}
     </div>
   </RosarySelect>
 {/if}
@@ -463,7 +451,7 @@
   .ttp-toc-dialog nav button.current{background:var(--gold-light);border-color:var(--gold)}
   .ttp-toc-dialog small{display:block;color:var(--text2);margin-top:calc(var(--space-page)/4)}
   .ttp-toc-dialog button:disabled{opacity:.6;cursor:wait}
-  .tt-practice{position:relative;z-index:640;width:100%;min-height:100vh;background:var(--reading-paper-cream);color:var(--reading-paper-cream-ink);font-family:var(--font-app)}
+  .tt-practice{position:relative;z-index:640;width:100%;min-height:100vh;min-height:100dvh;background:var(--reading-paper-cream);color:var(--reading-paper-cream-ink);font-family:var(--font-app)}
   .ttp-header{position:fixed;z-index:650;top:0;right:0;left:0;display:flex;height:58px;align-items:center;gap:12px;padding:0 16px;border-bottom:1.5px solid var(--border2);background:var(--bg);box-shadow:var(--shadow);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
   .ttp-back{flex-shrink:0;padding:4px 8px;border:0;border-radius:6px;background:none;color:var(--gold);cursor:pointer;font:400 22px/1 var(--font-app);transition:background .15s}.ttp-back:hover{background:var(--gold-light)}
   .ttp-header-title{overflow:hidden;flex:1;color:var(--text2);font-size:var(--font-size-label);font-weight:700;line-height:1.25;text-align:center;text-transform:uppercase;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical}.ttp-header-badge{flex-shrink:0;padding:4px 10px;border:1px solid var(--gold-muted);border-radius:999px;background:var(--gold-light);color:var(--gold);font-size:var(--font-size-meta);font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}.ttp-header-badge--done{border-color:var(--gold);background:var(--gold);color:var(--on-gold)}
@@ -472,7 +460,6 @@
   .ttp-reader-bar{position:fixed;z-index:645;top:58px;right:0;left:0;display:flex;overflow-x:auto;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid var(--border2);background:var(--bg2);scrollbar-width:none;transition:transform .22s ease,opacity .22s ease}.ttp-reader-bar::-webkit-scrollbar{display:none}
   .ttp-desktop-controls{display:inline-flex;align-items:center;gap:8px;flex-shrink:0}
   .ttp-settings-trigger{display:none}
-  .tt-practice.ttp-zen .ttp-header,.tt-practice.ttp-zen .ttp-reader-bar{transform:translateY(-130%);opacity:0;pointer-events:none}
   .ttp-header{transition:transform .22s ease,opacity .22s ease}
   .ttp-goal-toast{position:fixed;z-index:680;top:calc(126px + var(--app-safe-top,env(safe-area-inset-top,0px)));left:50%;transform:translateX(-50%);padding:8px 16px;border:1px solid var(--gold);border-radius:999px;background:var(--card);color:var(--brown);font-size:var(--font-size-label);font-weight:700;box-shadow:var(--shadow-lg);white-space:nowrap}
   .ttp-rbar-label{flex-shrink:0;color:var(--muted);font-size:var(--font-size-meta);white-space:nowrap}.ttp-rbar-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;padding:0 12px;border:1.5px solid var(--border);border-radius:var(--radius-control);background:var(--bg2);color:var(--text2);cursor:pointer;font:600 var(--font-size-label)/1 var(--font-app);white-space:nowrap;transition:border-color .15s,color .15s,background .15s}.ttp-rbar-btn:hover,.ttp-rbar-btn.active{border-color:var(--gold);background:var(--gold-light);color:var(--brown)}
@@ -480,7 +467,7 @@
   .ttp-bold-btn{display:inline-flex;width:44px;height:44px;flex-shrink:0;align-items:center;justify-content:center;padding:0;border:1.5px solid var(--border);border-radius:var(--radius-control);background:var(--bg2);color:var(--text2);cursor:pointer;font:800 var(--font-size-card-title)/1 var(--font-app);transition:background .15s,border-color .15s,color .15s}.ttp-bold-btn:hover{border-color:var(--gold);color:var(--gold)}.ttp-bold-btn.active{border-color:var(--gold);background:var(--gold);color:var(--on-gold)}
   .ttp-bg-swatch{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer}.ttp-bg-swatch::before{content:'';box-sizing:border-box;width:24px;height:24px;border:2px solid transparent;border-radius:50%;background:var(--swatch-color);box-shadow:inset 0 0 0 1px rgba(80,65,48,.14);transition:border-color .15s,transform .18s}.ttp-bg-swatch:hover::before{transform:scale(1.08)}.ttp-bg-swatch.active::before{border-color:var(--gold)}
   .ttp-reader-bar select,.ttp-sheet-select{height:44px;flex-shrink:0;padding:0 10px;border:1.5px solid var(--border);border-radius:var(--radius-control);outline:none;background:var(--card);color:var(--text);cursor:pointer;font:600 var(--font-size-label)/1 var(--font-app)}.ttp-reader-bar select:focus-visible,.ttp-sheet-select:focus-visible{border-color:var(--gold);box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 24%,transparent)}
-  .ttp-body{position:relative;min-height:100vh;padding-top:118px;background:var(--reading-paper-cream);transition:background-color .25s ease,color .25s ease}.ttp-body::before{position:fixed;z-index:0;inset:0;background-image:repeating-linear-gradient(0deg,transparent,transparent 28px,rgba(139,99,64,.04) 28px,rgba(139,99,64,.04) 29px);pointer-events:none;content:''}.ttp-candle-glow{position:fixed;z-index:0;inset:0;background:radial-gradient(ellipse 60% 40% at 50% 20%,color-mix(in srgb,var(--gold) 8%,transparent) 0%,transparent 70%);pointer-events:none}
+  .ttp-body{position:relative;min-height:100vh;min-height:100dvh;padding-top:118px;background:var(--reading-paper-cream);transition:background-color .25s ease,color .25s ease}.ttp-body::before{position:fixed;z-index:0;inset:0;background-image:repeating-linear-gradient(0deg,transparent,transparent 28px,rgba(139,99,64,.04) 28px,rgba(139,99,64,.04) 29px);pointer-events:none;content:''}.ttp-candle-glow{position:fixed;z-index:0;inset:0;background:radial-gradient(ellipse 60% 40% at 50% 20%,color-mix(in srgb,var(--gold) 8%,transparent) 0%,transparent 70%);pointer-events:none}
   .ttp-scroll-area{position:relative;z-index:1;max-width:680px;margin:0 auto;padding:32px 24px calc(180px + env(safe-area-inset-bottom,0px))}.ttp-art-title{margin:0 0 8px;color:var(--brown);font:700 clamp(17px,3.5vw,22px)/1.35 var(--font-app);letter-spacing:.5px;text-align:center;text-transform:uppercase}.ttp-divider{display:flex;max-width:300px;align-items:center;gap:12px;margin:0 auto 28px}.ttp-divider::before,.ttp-divider::after{height:1px;flex:1;background:linear-gradient(to right,transparent,color-mix(in srgb,var(--gold) 40%,transparent),transparent);content:''}.ttp-divider span{font-size:16px}
   .ttp-content{color:var(--reading-paper-cream-ink);font-family:var(--font-reader);line-height:2.1;letter-spacing:.3px;text-align:center;white-space:pre-line}.ttp-content.ttp-read-bold,.ttp-content.ttp-read-bold :global(*){font-weight:700!important}.ttp-content :global(.tt-content__line){display:block;margin-bottom:.15em;text-align:justify;text-align-last:left}.ttp-content :global(.tt-content__line--center){text-align:center;text-align-last:center}.ttp-content :global(.tt-content__line--right){text-align:right;text-align-last:right}.ttp-content :global(.tt-content__gap){height:.38em!important}.ttp-content :global(p){margin:0 0 .38em!important;white-space:normal}.ttp-content :global(p:empty){display:none!important}.ttp-content :global(h1),.ttp-content :global(h2),.ttp-content :global(h3){margin:1.35em 0 .45em!important;color:var(--brown);font-size:clamp(16px,3vw,20px);text-align:center}.ttp-content :global(h2){padding-top:.8em;border-top:1px solid color-mix(in srgb,var(--gold) 24%,transparent)}.ttp-content :global(h2:first-child){padding-top:0;border-top:0}.ttp-content :global(strong){color:inherit}.ttp-content :global(em){color:inherit}.ttp-content :global(.tt-content__paren){opacity:.78;font-style:italic}.ttp-content :global(img){max-width:100%;height:auto;margin:1em 0;border-radius:8px}.ttp-content :global(blockquote){max-width:500px;margin:1em auto;padding:10px 16px;border-left:3px solid var(--gold);border-radius:0 8px 8px 0;background:var(--gold-light);color:var(--brown);font-style:italic;text-align:left}
   .ttp-toc-dialog nav button.sub{padding-inline-start:calc(var(--space-page) * 1.4);font-weight:500}
@@ -489,7 +476,6 @@
   .ttp-sheet-row:last-child{border-bottom:0;padding-bottom:0}
   .ttp-sheet-label{font-size:var(--font-size-label);font-weight:700;color:var(--text)}
   .ttp-sheet-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-  .ttp-goal-chips{gap:6px}
   .ttp-chapter-nav{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:40px;padding:20px 0 10px;border-top:1px solid color-mix(in srgb,var(--gold) 15%,transparent)}.ttp-chapter-nav button{display:flex;align-items:center;gap:6px;padding:9px 18px;border:1.5px solid color-mix(in srgb,var(--gold) 50%,transparent);border-radius:20px;background:color-mix(in srgb,var(--gold) 15%,transparent);color:var(--gold);cursor:pointer;font:600 13px/1 var(--font-app);transition:.15s}.ttp-chapter-nav button:disabled{border-color:color-mix(in srgb,var(--gold) 20%,transparent);background:color-mix(in srgb,var(--gold) 5%,transparent);color:color-mix(in srgb,var(--gold) 30%,transparent);cursor:default}.ttp-chapter-nav span{color:rgba(107,76,42,.6);font-size:12px;white-space:nowrap}
   .tt-practice[data-bg='white'],.tt-practice[data-bg='white'] .ttp-body{background:var(--reading-paper-white)}.tt-practice[data-bg='white'] .ttp-content{color:var(--reading-paper-white-ink)}.tt-practice[data-bg='cream'],.tt-practice[data-bg='cream'] .ttp-body{background:var(--reading-paper-cream)}.tt-practice[data-bg='cream'] .ttp-content{color:var(--reading-paper-cream-ink)}.tt-practice[data-bg='gray'],.tt-practice[data-bg='gray'] .ttp-body{background:var(--reading-paper-gray)}.tt-practice[data-bg='gray'] .ttp-content{color:var(--reading-paper-gray-ink)}.tt-practice[data-bg='gray'] .ttp-art-title{color:var(--reading-paper-gray-ink)}.tt-practice[data-bg='dark'],.tt-practice[data-bg='dark'] .ttp-body{background:var(--reading-paper-dark)}.tt-practice[data-bg='dark'] .ttp-content{color:var(--reading-paper-dark-ink)}.tt-practice[data-bg='dark'] .ttp-art-title{color:var(--reading-paper-dark-accent)}.tt-practice[data-bg='dark'] .ttp-chapter-nav span{color:color-mix(in srgb,var(--reading-paper-dark-ink) 50%,transparent)}
   .tt-practice[data-bg='dark'] .ttp-content :global(h1),.tt-practice[data-bg='dark'] .ttp-content :global(h2),.tt-practice[data-bg='dark'] .ttp-content :global(h3){color:var(--gold)}
@@ -545,4 +531,41 @@
   .tt-practice:is([data-bg='white'],[data-bg='gray'],[data-bg='purple']) .ttp-art-title,
   .tt-practice:is([data-bg='white'],[data-bg='gray'],[data-bg='purple']) .ttp-content :global(:is(h1,h2,h3)){color:var(--practice-paper-ink)}
   .tt-practice:is([data-bg='white'],[data-bg='gray'],[data-bg='purple']) .ttp-chapter-nav span{color:var(--muted)}
+
+  /* Phong cách 3D Pha lê đồng bộ cho thanh điều khiển & mục lục hành trì (giữ mặt giấy đọc tĩnh lặng) */
+  .tt-practice .ttp-header,
+  .tt-practice .ttp-reader-bar{
+    background:linear-gradient(180deg,rgba(255,255,255,.42) 0%,rgba(255,255,255,0) 65%),var(--bg2);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 3px 10px -4px rgba(60,40,10,.14);
+  }
+  .tt-practice[data-bg='dark'] .ttp-header,
+  .tt-practice[data-bg='dark'] .ttp-reader-bar{
+    background:linear-gradient(180deg,rgba(255,255,255,.06) 0%,transparent 65%),var(--bg2);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 4px 12px rgba(0,0,0,.45);
+  }
+  .tt-practice .ttp-back,
+  .tt-practice .ttp-header-badge,
+  .tt-practice .ttp-chapter-nav button{
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,.78);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.88),inset 0 -2px 0 rgba(60,40,10,.12),0 3px 8px -2px rgba(60,40,10,.14);
+  }
+  .tt-practice[data-bg='dark'] .ttp-back,
+  .tt-practice[data-bg='dark'] .ttp-header-badge,
+  .tt-practice[data-bg='dark'] .ttp-chapter-nav button{
+    border-color:rgba(255,255,255,.16);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.18),inset 0 -2px 0 rgba(0,0,0,.46),0 4px 10px rgba(0,0,0,.4);
+  }
+  .tt-practice .ttp-rbar-btn,
+  .tt-practice .ttp-bold-btn{
+    border-radius:999px;
+  }
+  .ttp-toc-dialog{
+    border-radius:var(--radius-card) var(--radius-card) 0 0;
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.78),0 -8px 28px rgba(60,40,10,.18);
+  }
+  .ttp-toc-dialog nav button{
+    border-radius:var(--radius-control);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.75),inset 0 -2px 0 rgba(60,40,10,.08),0 2px 6px rgba(60,40,10,.06);
+  }
 </style>

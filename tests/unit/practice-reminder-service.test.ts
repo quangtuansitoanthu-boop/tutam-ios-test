@@ -51,6 +51,20 @@ import { cancelUnifiedNotifications, getPendingReminderNotifications, scheduleUn
 import { getLunarEvent } from '$lib/components/lunar/lunar-events';
 
 describe('PracticeReminderService', () => {
+  it('keeps the lunar date label in English in English reminders', () => {
+    const settings = structuredClone(DEFAULT_PRACTICE_REMINDER_SETTINGS);
+    settings.dailySchedules = [];
+    settings.lunar.thapTrai = true;
+    const batch = buildUpcomingNotificationBatch(settings, 1, 'en', {
+      now: new Date(2026, 9, 22, 12), personalEnabled: false,
+      lunarEvent: () => ({ ...getLunarEvent(new Date(2026, 9, 23), 'en'), isThapTrai: true }),
+    });
+    expect(batch.length).toBeGreaterThan(0);
+    for (const notice of batch) {
+      expect(notice.body).toMatch(/lunar/i);
+      expect(notice.body).not.toContain('Âm lịch');
+    }
+  });
   it('includes the selected sound mode in daily notifications for iOS', () => {
     const settings = structuredClone(DEFAULT_PRACTICE_REMINDER_SETTINGS);
     const audible = buildUpcomingNotificationBatch(settings, 0).filter(item => item.extra?.type === 'daily_schedule');

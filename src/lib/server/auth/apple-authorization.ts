@@ -62,10 +62,14 @@ export async function revokeStoredAppleAuthorization(env: CloudflareEnvLike, own
 async function appleRequest(env: CloudflareEnvLike, endpoint: 'token' | 'revoke', fields: Record<string, string>): Promise<Response> {
   const body = new URLSearchParams({ client_id: env.APPLE_CLIENT_ID || 'vn.quangtu.tutam', client_secret: await clientSecret(env), ...fields });
   const response = await fetch(`https://appleid.apple.com/auth/${endpoint}`, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
+    // Workers từ chối error; dùng manual để code/token không bị chuyển sang host khác.
+    method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(10_000),
     headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: body.toString(),
   });
-  if (!response.ok) { await response.body?.cancel(); throw new Error('apple-authorization-unavailable'); }
+  if ((response.status >= 300 && response.status < 400) || !response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error('apple-authorization-unavailable');
+  }
   if (endpoint === 'revoke') await response.body?.cancel();
   return response;
 }

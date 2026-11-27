@@ -1,4 +1,5 @@
 import { getLunarEvent } from '../../components/lunar/lunar-events';
+import { getVietnamNow } from '../../components/lunar/lunar-week';
 import { getVietnamIsoDate, shiftVietnamDate } from './stats';
 
 export interface ThanhTinhMilestone {
@@ -386,7 +387,7 @@ export interface ThanhTinhAbstinenceInfo {
 }
 
 export function getThanhTinhAbstinenceInfo(date: Date = new Date(), isEn: boolean = false): ThanhTinhAbstinenceInfo {
-  const lunar = getLunarEvent(date);
+  const lunar = getLunarEvent(getVietnamNow(date), isEn ? 'en' : 'vi');
   const isAbstinenceDay = Boolean(lunar.viaName || lunar.isThapTrai || lunar.kiengDam);
 
   const reasons: ThanhTinhAbstinenceReasonItem[] = [];

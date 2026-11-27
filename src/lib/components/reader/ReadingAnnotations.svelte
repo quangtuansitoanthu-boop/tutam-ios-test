@@ -43,6 +43,7 @@
     targetAnnotationId = null,
   }: Props = $props();
   const locale = getLocaleContext();
+  const isEn = $derived(locale.current === 'en');
   let handledTarget = '';
 
   let annotations = $state<ReadingAnnotationRecord[]>([]);
@@ -133,8 +134,8 @@
       mark.tabIndex = 0;
       mark.setAttribute('role', 'button');
       mark.setAttribute('aria-label', annotation.note
-        ? `Trích dẫn có ghi chú: ${annotation.note}`
-        : 'Mở trích dẫn đã tô sáng');
+        ? (isEn ? `Quote with note: ${annotation.note}` : `Trích dẫn có ghi chú: ${annotation.note}`)
+        : (isEn ? 'Open highlighted quote' : 'Mở trích dẫn đã tô sáng'));
       mark.addEventListener('click', () => editAnnotation(annotation));
       mark.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -380,9 +381,9 @@
         document.execCommand('copy');
         ta.remove();
       }
-      onNotify('✓ Đã sao chép đoạn văn');
+      onNotify(isEn ? '✓ Passage copied' : '✓ Đã sao chép đoạn văn');
     } catch {
-      onNotify('⚠️ Không thể sao chép');
+      onNotify(isEn ? '⚠️ Could not copy' : '⚠️ Không thể sao chép');
     }
     floatingBtnPos = null;
     window.getSelection()?.removeAllRanges();
@@ -403,12 +404,12 @@
       await tick();
       if (!principalGuard.isCurrent(principalToken)) return;
       renderHighlights();
-      onNotify('✓ Đã lưu trích dẫn');
+      onNotify(isEn ? '✓ Quote saved' : '✓ Đã lưu trích dẫn');
     } catch (cause) {
       if (!principalGuard.isCurrent(principalToken)) return;
       onNotify(isReadingActivityCapacityError(cause)
-        ? '❌ Hàng đợi đọc ngoại tuyến đã đầy. Hãy kết nối để đồng bộ rồi thử lại.'
-        : '⚠️ Chưa thể lưu trích dẫn.');
+        ? (isEn ? '❌ Offline reading queue is full. Reconnect to sync and try again.' : '❌ Hàng đợi đọc ngoại tuyến đã đầy. Hãy kết nối để đồng bộ rồi thử lại.')
+        : (isEn ? '⚠️ Could not save quote.' : '⚠️ Chưa thể lưu trích dẫn.'));
     } finally {
       if (principalGuard.isCurrent(principalToken)) saving = false;
     }
@@ -458,12 +459,12 @@
       await tick();
       if (!principalGuard.isCurrent(principalToken)) return;
       renderHighlights();
-      onNotify('✓ Đã lưu trích dẫn');
+      onNotify(isEn ? '✓ Quote saved' : '✓ Đã lưu trích dẫn');
     } catch (cause) {
       if (!principalGuard.isCurrent(principalToken)) return;
       onNotify(isReadingActivityCapacityError(cause)
-        ? '❌ Hàng đợi đọc ngoại tuyến đã đầy. Hãy kết nối để đồng bộ rồi thử lại.'
-        : '⚠️ Chưa thể lưu trích dẫn. Nội dung đang soạn vẫn được giữ.');
+        ? (isEn ? '❌ Offline reading queue is full. Reconnect to sync and try again.' : '❌ Hàng đợi đọc ngoại tuyến đã đầy. Hãy kết nối để đồng bộ rồi thử lại.')
+        : (isEn ? '⚠️ Could not save quote. Your draft is preserved.' : '⚠️ Chưa thể lưu trích dẫn. Nội dung đang soạn vẫn được giữ.'));
     } finally {
       if (principalGuard.isCurrent(principalToken)) saving = false;
     }
@@ -474,7 +475,7 @@
     const principalToken = principalGuard.capture();
     const annotationId = active.id;
     const currentClient = client;
-    if (!await confirmInApp('Xóa trích dẫn và ghi chú này?')) return;
+    if (!await confirmInApp(isEn ? 'Delete this quote and note?' : 'Xóa trích dẫn và ghi chú này?')) return;
     if (!principalGuard.isCurrent(principalToken) || client !== currentClient || active?.id !== annotationId) return;
     saving = true;
     try {
@@ -486,12 +487,12 @@
         && String(row.locator.sectionId || 'root') === sectionId);
       closeComposer();
       renderHighlights();
-      onNotify('Đã xóa trích dẫn');
+      onNotify(isEn ? 'Quote deleted' : 'Đã xóa trích dẫn');
     } catch (cause) {
       if (!principalGuard.isCurrent(principalToken)) return;
       onNotify(isReadingActivityCapacityError(cause)
-        ? '❌ Hàng đợi đọc ngoại tuyến đã đầy; trích dẫn chưa bị xóa.'
-        : '⚠️ Chưa thể xóa trích dẫn lúc này.');
+        ? (isEn ? '❌ Offline reading queue is full; quote was not deleted.' : '❌ Hàng đợi đọc ngoại tuyến đã đầy; trích dẫn chưa bị xóa.')
+        : (isEn ? '⚠️ Could not delete quote right now.' : '⚠️ Chưa thể xóa trích dẫn lúc này.'));
     } finally {
       if (principalGuard.isCurrent(principalToken)) saving = false;
     }
@@ -539,24 +540,24 @@
 </script>
 
 {#if (pendingDraft && composerOpen) || active}
-  <aside data-dialog-glass class="annotation-composer" aria-label={active ? 'Sửa trích dẫn' : 'Tạo trích dẫn'}>
+  <aside data-dialog-glass class="annotation-composer" aria-label={active ? (isEn ? 'Edit quote' : 'Sửa trích dẫn') : (isEn ? 'Create quote' : 'Tạo trích dẫn')}>
     <header>
-      <strong>{active ? 'Sửa trích dẫn' : 'Tô sáng đoạn đã chọn'}</strong>
-      <button type="button" aria-label="Đóng" onclick={closeComposer}>✕</button>
+      <strong>{active ? (isEn ? 'Edit quote' : 'Sửa trích dẫn') : (isEn ? 'Highlight selected passage' : 'Tô sáng đoạn đã chọn')}</strong>
+      <button type="button" aria-label={isEn ? 'Close' : 'Đóng'} onclick={closeComposer}>✕</button>
     </header>
     <blockquote>{active?.quoteText || pendingDraft?.quoteText}</blockquote>
     <fieldset>
-      <legend>Màu tô sáng</legend>
-      <label><input type="radio" bind:group={color} value="yellow" /> <span class="swatch yellow"></span> Vàng</label>
-      <label><input type="radio" bind:group={color} value="green" /> <span class="swatch green"></span> Xanh</label>
+      <legend>{isEn ? 'Highlight color' : 'Màu tô sáng'}</legend>
+      <label><input type="radio" bind:group={color} value="yellow" /> <span class="swatch yellow"></span> {isEn ? 'Yellow' : 'Vàng'}</label>
+      <label><input type="radio" bind:group={color} value="green" /> <span class="swatch green"></span> {isEn ? 'Green' : 'Xanh'}</label>
     </fieldset>
-    <label class="note-label">Ghi chú riêng
-      <textarea bind:value={note} maxlength="12000" rows="3" placeholder="Thêm suy ngẫm của bạn…"></textarea>
+    <label class="note-label">{isEn ? 'Personal note' : 'Ghi chú riêng'}
+      <textarea bind:value={note} maxlength="12000" rows="3" placeholder={isEn ? 'Add your reflection…' : 'Thêm suy ngẫm của bạn…'}></textarea>
     </label>
     <div class="annotation-actions" class:dialog-actions-balanced={!active}>
-      <button class="card-action-btn" type="button" onclick={() => openQuoteCard(active?.quoteText || pendingDraft?.quoteText || '')} title="Tạo ảnh chia sẻ mạng xã hội">🖼️ Tạo ảnh</button>
-      {#if active}<button class="danger" type="button" disabled={saving} onclick={() => void deleteAnnotation()}>Xóa</button>{/if}
-      <button type="button" disabled={saving} onclick={() => void saveAnnotation()}>{saving ? 'Đang lưu…' : 'Lưu trích dẫn'}</button>
+      <button class="card-action-btn" type="button" onclick={() => openQuoteCard(active?.quoteText || pendingDraft?.quoteText || '')} title={isEn ? 'Create image for social sharing' : 'Tạo ảnh chia sẻ mạng xã hội'}>{isEn ? '🖼️ Create image' : '🖼️ Tạo ảnh'}</button>
+      {#if active}<button class="danger" type="button" disabled={saving} onclick={() => void deleteAnnotation()}>{isEn ? 'Delete' : 'Xóa'}</button>{/if}
+      <button type="button" disabled={saving} onclick={() => void saveAnnotation()}>{saving ? (isEn ? 'Saving…' : 'Đang lưu…') : (isEn ? 'Save quote' : 'Lưu trích dẫn')}</button>
     </div>
   </aside>
 {/if}
@@ -566,7 +567,7 @@
     class="quote-floating-bar"
     style="top:{floatingBtnPos.top}px;left:{floatingBtnPos.left}px;"
     role="toolbar"
-    aria-label="Thao tác đoạn văn"
+    aria-label={isEn ? 'Passage actions' : 'Thao tác đoạn văn'}
     tabindex="-1"
     oncontextmenu={(e) => e.preventDefault()}
   >
@@ -579,41 +580,43 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
         <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
       </svg>
-      <span>Lưu trích dẫn</span>
+      <span>{isEn ? 'Save quote' : 'Lưu trích dẫn'}</span>
     </button>
     <button
       class="quote-floating-btn secondary"
       type="button"
-      title="Thêm ghi chú suy ngẫm"
+      title={isEn ? 'Add reflection note' : 'Thêm ghi chú suy ngẫm'}
       onmousedown={(e) => e.preventDefault()}
       onclick={openComposerWithNote}
     >
-      <span>✍️ Ghi chú</span>
+      <span>{isEn ? '✍️ Note' : '✍️ Ghi chú'}</span>
     </button>
     <button
       class="quote-floating-btn secondary"
       type="button"
-      title="Tạo ảnh trích dẫn để chia sẻ"
+      title={isEn ? 'Create quote image to share' : 'Tạo ảnh trích dẫn để chia sẻ'}
       onmousedown={(e) => e.preventDefault()}
       onclick={() => openQuoteCard(pendingDraft?.quoteText || window.getSelection()?.toString().trim() || '')}
     >
-      <span>🖼️ Tạo ảnh</span>
+      <span>{isEn ? '🖼️ Create image' : '🖼️ Tạo ảnh'}</span>
     </button>
     <button
       class="quote-floating-btn secondary"
       type="button"
-      title="Sao chép đoạn văn vào bộ nhớ tạm"
+      title={isEn ? 'Copy passage to clipboard' : 'Sao chép đoạn văn vào bộ nhớ tạm'}
       onmousedown={(e) => e.preventDefault()}
       onclick={() => void copySelectedText()}
     >
-      <span>📋 Sao chép</span>
+      <span>{isEn ? '📋 Copy' : '📋 Sao chép'}</span>
     </button>
   </div>
 {/if}
 
-{#if loading}<span class="sr-only" role="status">Đang tải trích dẫn…</span>{/if}
+{#if loading}<span class="sr-only" role="status">{isEn ? 'Loading quotes…' : 'Đang tải trích dẫn…'}</span>{/if}
 {#if annotations.some((annotation) => annotation.anchorStatus === 'orphaned')}
-  <p class="annotation-orphan-notice" role="status">Có {annotations.filter((annotation) => annotation.anchorStatus === 'orphaned').length} trích dẫn không còn khớp với phiên bản nội dung này. Chúng vẫn được giữ trong “Trích dẫn của tôi”.</p>
+  <p class="annotation-orphan-notice" role="status">{isEn
+    ? `${annotations.filter((annotation) => annotation.anchorStatus === 'orphaned').length} quote(s) no longer match this content version. They are still preserved in “My quotes”.`
+    : `Có ${annotations.filter((annotation) => annotation.anchorStatus === 'orphaned').length} trích dẫn không còn khớp với phiên bản nội dung này. Chúng vẫn được giữ trong “Trích dẫn của tôi”.`}</p>
 {/if}
 
 <QuoteCardModal

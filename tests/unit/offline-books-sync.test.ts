@@ -53,6 +53,9 @@ describe('legacy offline book completion', () => {
     await expect(downloadBookOffline(book)).resolves.toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(readDownloadedBooks()[book.id]?.chapterCount).toBe(2);
+    expect(await cached.get(cacheKey(`/api/articles/${book.id}`))!.json()).toMatchObject({
+      id: book.id, tieu_de: book.title, trang_thai: 'Hoàn thành', has_muc_luc: 1, so_tap: 2,
+    });
   });
   it('reads an explicitly downloaded book after legacy cache cleanup and without a network', async () => {
     const buckets = new Map<string, Map<string, Response>>();

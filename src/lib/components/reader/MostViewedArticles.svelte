@@ -29,6 +29,7 @@
   function getLocalizedBadge(badge: string | null): string | null {
     if (!badge || localeStore.current !== 'en') return badge;
     if (badge === 'Tập tiếp theo') return 'Next volume';
+    if (badge === 'Cùng bộ') return 'Same series';
     if (badge.startsWith('Tập ')) return badge.replace('Tập ', 'Volume ');
     if (badge.startsWith('Quyển ')) return badge.replace('Quyển ', 'Volume ');
     if (badge.startsWith('Phần ')) return badge.replace('Phần ', 'Part ');

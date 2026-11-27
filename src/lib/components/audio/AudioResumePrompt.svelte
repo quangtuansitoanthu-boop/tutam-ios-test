@@ -74,8 +74,8 @@
   .pt-resume-btn-no,.pt-resume-btn-yes{padding:6px 16px;border-radius:20px;cursor:pointer;font-family:inherit;font-size:var(--font-size-label);font-weight:700;transition:background .15s,border-color .15s,color .15s}
   .pt-resume-btn-no{border:1.5px solid var(--border);background:none;color:var(--muted)}
   .pt-resume-btn-no:hover{background:var(--bg3)}
-  .pt-resume-btn-yes{border:0;background:var(--gold);color:#fff}
-  .pt-resume-btn-yes:hover{background:var(--brown2)}
+  .pt-resume-btn-yes{border:0;background:var(--gold);color:var(--on-gold)}
+  .pt-resume-btn-yes:hover{background:var(--gold2)}
   @media(max-width:768px){.pt-resume-dialog{top:50%;bottom:auto;transform:translate(-50%,calc(-50% + 20px))}.pt-resume-dialog.show{transform:translate(-50%,-50%)}}
   .pt-resume-dialog.inline{position:relative;inset:auto;z-index:auto;box-sizing:border-box;align-self:center;flex-shrink:0;width:calc(100% - var(--space-page) * 2);min-width:0;max-width:var(--dialog-compact-width);margin:calc(var(--space-page) / 2) var(--space-page);transform:translateY(var(--space-page))}
   .pt-resume-dialog.inline.show{transform:none}

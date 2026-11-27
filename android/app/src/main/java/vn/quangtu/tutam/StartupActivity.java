@@ -12,6 +12,13 @@ public class StartupActivity extends androidx.appcompat.app.AppCompatActivity {
     }
     private boolean started;
     private int artworkIndex;
+    private long firstDrawUptime = -1;
+    private long entranceFinishedAt = -1;
+
+    @Override public void onEnterAnimationComplete() {
+        super.onEnterAnimationComplete();
+        if (entranceFinishedAt < 0) entranceFinishedAt = android.os.SystemClock.uptimeMillis();
+    }
 
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
@@ -29,6 +36,7 @@ public class StartupActivity extends androidx.appcompat.app.AppCompatActivity {
             @Override public void onDraw() {
                 if (posted) return;
                 posted = true;
+                firstDrawUptime = android.os.SystemClock.uptimeMillis();
                 artwork.post(() -> {
                     artwork.getViewTreeObserver().removeOnDrawListener(this);
                     if (started || isFinishing() || isDestroyed()) return;

@@ -515,10 +515,6 @@
     color: #e53935;
   }
 
-  .day-col.is-selected .day-solar-num {
-    color: var(--text) !important;
-  }
-
   .day-dots {
     display: flex;
     align-items: center;

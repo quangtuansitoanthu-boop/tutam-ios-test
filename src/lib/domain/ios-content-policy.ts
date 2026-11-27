@@ -9,7 +9,7 @@ export function isIosExcludedContent(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const row = value as Record<string, unknown>;
   if (row.row && isIosExcludedContent(row.row)) return true;
-  for (const key of ['id', 'bai_viet_id', 'file']) {
+  for (const key of ['id', 'bai_viet_id', 'file', 'albumId']) {
     const id = String(row[key] ?? '').replace(/\.json$/u, '').replace(/^book_/u, '');
     if (IDS.has(id)) return true;
   }
@@ -22,7 +22,7 @@ export function isIosExcludedContent(value: unknown): boolean {
 
 /** Lọc bản sao: không sửa dữ liệu nguồn, con trỏ phân trang hay persisted state. */
 export function filterIosContent<T>(value: T): T {
-  if (Array.isArray(value)) return value.filter(row => !isIosExcludedContent(row)).map(row => filterIosContent(row)) as T;
+  if (Array.isArray(value)) return value.filter(row => !isIosExcludedContent(typeof row === 'string' ? { id: row } : row)).map(row => filterIosContent(row)) as T;
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).filter(([key]) => !isIosExcludedContent({ id: key }))
       .map(([key, item]) => [key, filterIosContent(item)])) as T;

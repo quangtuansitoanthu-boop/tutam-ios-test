@@ -17,17 +17,6 @@
 </svelte:head>
 
 <div class="privacy-container">
-  <div class="top-nav">
-      <button
-        type="button"
-        class="back-btn"
-        onclick={() => history.back()}
-        aria-label={isEn ? 'Go back' : 'Quay lại'}
-      >
-        <span aria-hidden="true">←</span> {isEn ? 'Back' : 'Quay lại'}
-      </button>
-  </div>
-
   <div class="privacy-card">
     <header class="header">
       <div class="badge">{isEn ? 'OFFICIAL' : 'CHÍNH THỨC'}</div>
@@ -289,7 +278,7 @@
 
 <style>
   .privacy-container {
-    min-height: 100vh;
+    min-height: 100dvh;
     padding: 28px 18px var(--space-page);
     background: linear-gradient(180deg, #fdfbf7 0%, #f4eee1 100%);
     display: flex;
@@ -310,34 +299,6 @@
     box-shadow: 0 10px 30px rgba(74, 53, 23, 0.08);
     border: 1px solid rgba(220, 205, 175, 0.4);
     transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-  }
-
-  .top-nav {
-    display: flex;
-    width: 100%;
-    max-width: 780px;
-    margin-bottom: 12px;
-  }
-
-  .back-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 40px;
-    padding: 8px 16px;
-    background: rgba(226, 135, 67, 0.1);
-    color: #b85d19;
-    border: 1px solid rgba(226, 135, 67, 0.25);
-    border-radius: 999px;
-    font-size: 0.875rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .back-btn:hover {
-    background: rgba(226, 135, 67, 0.2);
-    transform: translateX(-2px);
   }
 
   .header {
@@ -449,12 +410,6 @@
     background: #201c18;
     border-color: rgba(255, 255, 255, 0.08);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  }
-
-  :global([data-theme="dark"]) .back-btn {
-    background: rgba(226, 135, 67, 0.15);
-    color: #f3a660;
-    border-color: rgba(226, 135, 67, 0.3);
   }
 
   :global([data-theme="dark"]) .header {

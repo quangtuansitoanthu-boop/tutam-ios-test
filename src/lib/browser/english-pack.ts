@@ -6,7 +6,43 @@ import bundledRituals from '$lib/data/bundled-english-rituals.json';
 import { isHtmlResponse, resolveRemoteUrl } from './native-api';
 import { fetchWithDeadline } from './network-deadline';
 import { deferPublicMediaHost, publicMediaUrls } from './public-media-fallback';
+import { openOfflineResponseCache, type OfflineResponseCache } from './offline-response-cache';
+import { hasEnglishChapters } from '$lib/domain/library/localized-article';
 const PREFIX = '/offline-data/chapters-en/';
+
+/** Nội dung đơn chương: ưu tiên map đóng gói, dùng cùng English Pack khi map cũ thiếu ID. */
+export async function loadEnglishSingleArticleContent(id: string, signal?: AbortSignal): Promise<string | null> {
+  throwIfAborted(signal);
+  if (!isContentAvailable({ id })) return null;
+  const variants = [...new Set([id, id.replace(/^book_/u, ''), `book_${id.replace(/^book_/u, '')}`])];
+  try {
+    const response = await fetch('/offline-data/articles-en.json', { signal });
+    if (response.ok && !isHtmlResponse(response)) {
+      const map = await response.json();
+      for (const key of variants) {
+        const content = map?.[key]?.noi_dung;
+        if (typeof content === 'string' && content.trim()) {
+          throwIfAborted(signal);
+          return content;
+        }
+      }
+    }
+  } catch { throwIfAborted(signal); }
+  if (!hasEnglishChapters(id)) return null;
+  for (const key of variants) {
+    try {
+      const response = await fetchEnglishChapters(`${PREFIX}${encodeURIComponent(key)}.json`, signal);
+      if (!response.ok || isHtmlResponse(response)) continue;
+      const rows = await response.json();
+      const content = Array.isArray(rows) && rows.length === 1 ? rows[0]?.noi_dung : null;
+      if (typeof content === 'string' && content.trim()) {
+        throwIfAborted(signal);
+        return content;
+      }
+    } catch { throwIfAborted(signal); }
+  }
+  return null;
+}
 type Manifest = typeof bundledManifest;
 let manifest: Manifest = bundledManifest;
 let checkedAt = 0;
@@ -63,8 +99,8 @@ export async function fetchEnglishChapters(path: string, signal?: AbortSignal, e
   }
   const metadata = (await currentManifest()).entries.find(entry => entry.file === decodeURIComponent(path.slice(PREFIX.length)));
   const cacheKey = `${path}?revision=${metadata?.sha256 ?? 'unlisted'}`;
-  let cache: Cache | undefined;
-  try { cache = await caches.open(CACHE); const saved = await cache.match(cacheKey); throwIfAborted(signal); if (saved) return saved; } catch { throwIfAborted(signal); }
+  let cache: OfflineResponseCache | undefined;
+  try { cache = await openOfflineResponseCache(CACHE); const saved = await cache.match(cacheKey); throwIfAborted(signal); if (saved) return saved; } catch { throwIfAborted(signal); }
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     if (cache && !expectedDigest) {
       // An offline launch only knows the bundled manifest. Look up revisions
@@ -117,7 +153,7 @@ export async function fetchEnglishChapters(path: string, signal?: AbortSignal, e
 }
 export async function downloadEnglishPack(onProgress: (done: number, total: number) => void, signal?: AbortSignal): Promise<void> {
   const metadata = await currentManifest();
-  const cache = await caches.open(CACHE);
+  const cache = await openOfflineResponseCache(CACHE);
   const quota = typeof navigator !== 'undefined' ? await navigator.storage?.estimate?.().catch(() => null) : null;
   let missingBytes = 0;
   for (const entry of metadata.entries) { throwIfAborted(signal); if (!await cache.match(`${PREFIX}${entry.file}?revision=${entry.sha256}`)) missingBytes += entry.bytes; }

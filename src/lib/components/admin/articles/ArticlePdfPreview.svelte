@@ -139,6 +139,8 @@
         loadingTask = pdfjs.getDocument({
           url: source,
           cMapUrl: '/vendor/pdfjs/cmaps/',
+          wasmUrl: '/vendor/pdfjs/wasm/',
+          standardFontDataUrl: '/vendor/pdfjs/standard_fonts/',
           cMapPacked: true,
           disableRange: false,
           disableStream: false,

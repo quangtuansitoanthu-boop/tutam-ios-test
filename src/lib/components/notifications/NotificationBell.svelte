@@ -13,8 +13,19 @@
   import { fetchWithSessionRefresh } from '$lib/browser/session-csrf';
   import { isNativeApp } from '$lib/browser/native-platform';
   import { getLunarEvent } from '$lib/components/lunar/lunar-events';
+  import { getVietnamNow } from '$lib/components/lunar/lunar-week';
   import type { AdminNotificationItem, AdminNotificationsResponse } from '$lib/server/services/admin-notifications';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
+  import {
+    filterNotifications,
+    notificationCategoryForType,
+    notificationCategoryLabel,
+    notificationEmptyState,
+    notificationTabLabel,
+    notificationTabsForRole,
+    tabUnreadCount,
+    type NotificationFilterTab,
+  } from '$lib/domain/notifications/notification-filters';
 
   const localeStore = getLocaleContext();
   const t = $derived(localeStore.t.notifications);
@@ -53,9 +64,6 @@
   let mounted = $state(false);
   let requestGeneration = 0;
   let requestController: AbortController | null = null;
-  let firstOpen = true;
-  let loadedForPrincipal = false;
-  let loadedAt = 0;
   let selectedPrincipal: string | null = null;
   let previousAccountPrincipal: string | null = null;
   let pendingReadIds = new Set<string>();
@@ -64,6 +72,7 @@
   let readSyncing = $state(false);
   let readSyncQueued = false;
   let readRefreshQueued = false;
+  let readSyncIds: string | null = null;
   let bubbleTailRight = $state(20);
   let popoverTop = $state(80);
   let popoverRight = $state(12);
@@ -148,17 +157,13 @@
 
   const storageKey = $derived(`quangtu_notifications_read_${session.user?.id || 'anon'}`);
   const isAdmin = $derived(Boolean(session.authenticated && session.user?.role === 'admin'));
-  let activeFilter = $state<'unread' | 'admin' | 'all'>('unread');
+  let activeFilter = $state<NotificationFilterTab>('unread');
+  const allowedTabs = $derived(notificationTabsForRole(isAdmin));
+  const effectiveFilter = $derived<NotificationFilterTab>(allowedTabs.includes(activeFilter) ? activeFilter : 'unread');
   const unreadNotifications = $derived(notifications.filter((n) => !readIds.has(n.id)));
   const unreadCount = $derived(unreadNotifications.length);
-  const adminUnreadCount = $derived(adminNotifications.filter((n) => !readIds.has(n.id)).length);
-  const filteredNotifications = $derived(
-    activeFilter === 'unread'
-      ? unreadNotifications
-      : activeFilter === 'admin'
-        ? adminNotifications
-        : notifications,
-  );
+  const filteredNotifications = $derived(filterNotifications(notifications, effectiveFilter, readIds));
+  const emptyState = $derived(notificationEmptyState(effectiveFilter, notifications.length, isEn));
 
   const pendingStorageKey = () => `${storageKey}_pending_v1`;
   function savePendingReadState(): void {
@@ -168,10 +173,18 @@
   async function syncReadState(force = false, writeOnly = false): Promise<void> {
     const principal = accountPrincipal;
     if (!principal || document.visibilityState === 'hidden') return;
-    if (readSyncing) { readSyncQueued = true; readRefreshQueued ||= !writeOnly; return; }
+    const idsKey = notifications.map(item => item.id).join(',');
+    if (readSyncing) {
+      // Resume/focus trùng nhau dùng chung GET; chỉ nối lượt ghi hoặc tập ID mới.
+      if (writeOnly || readSyncIds !== idsKey) {
+        readSyncQueued = true;
+        readRefreshQueued ||= !writeOnly;
+      }
+      return;
+    }
     if (!writeOnly && (loading || accountInbox.isFetching)) return;
     const controller = new AbortController();
-    readController = controller; readSyncing = true;
+    readController = controller; readSyncing = true; readSyncIds = writeOnly ? null : idsKey;
     const current = () => !controller.signal.aborted && accountPrincipal === principal && readController === controller;
     try {
       const next = new Set(readIds);
@@ -200,10 +213,10 @@
       if (current()) readSyncError = true;
     } finally {
       if (readController === controller) {
-        readController = null; readSyncing = false;
+        readController = null; readSyncing = false; readSyncIds = null;
         if (readSyncQueued) {
           const refresh = readRefreshQueued; readSyncQueued = false; readRefreshQueued = false;
-          void syncReadState(refresh, !refresh);
+          void syncReadState(false, !refresh);
         }
       }
     }
@@ -253,7 +266,7 @@
   }
 
   function loadUserNotifications(): void {
-    const now = new Date();
+    const now = getVietnamNow();
     const items: NotificationBellItem[] = [];
     const dateKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
     const lunarInfo = getLunarEvent(now, localeStore.current);
@@ -386,15 +399,12 @@
     selectedPrincipal = principal;
     untrack(() => {
       requestGeneration += 1;
-      readController?.abort(); readController = null; readSyncing = false; readSyncError = false; readSyncQueued = false; readRefreshQueued = false;
+      readController?.abort(); readController = null; readSyncing = false; readSyncError = false; readSyncQueued = false; readRefreshQueued = false; readSyncIds = null;
       requestController?.abort();
       requestController = null;
       loading = false;
       isOpen = false;
       adminNotifications = [];
-      firstOpen = true;
-      loadedForPrincipal = false;
-      loadedAt = 0;
       loadReadState();
       void fetchNotifications();
     });
@@ -417,8 +427,6 @@
         const data: AdminNotificationsResponse = await response.json();
         if (generation !== requestGeneration || controller.signal.aborted) return;
         adminNotifications = data.notifications || [];
-        loadedForPrincipal = true;
-        loadedAt = Date.now();
       }
     } catch (e) {
       if (!controller.signal.aborted) console.warn('Failed to fetch notifications:', e);
@@ -436,9 +444,7 @@
       isOpen = true;
       updatePopoverPosition();
       void syncReadState(true);
-      // Chỉ dùng lại lượt tải ban đầu trong 30 giây, không giữ thông báo cũ khi để app lâu.
-      if (!firstOpen || !loadedForPrincipal || Date.now() - loadedAt > 30_000) void fetchNotifications();
-      firstOpen = false;
+      void fetchNotifications();
       if (accountPrincipal) {
         const cached = queryClient.getQueryState(serverStateKeys.mindfulCommunity.notifications(accountPrincipal));
         if (cached?.status !== 'error' && cached?.fetchStatus !== 'fetching'
@@ -483,13 +489,16 @@
     if (accountPrincipal) { savePendingReadState(); void syncReadState(false, true); }
     closePopover();
     if (item.link) {
+      const current = new URL(window.location.href);
       let destination: URL;
-      try { destination = new URL(item.link, window.location.href); }
+      try { destination = new URL(item.link, current); }
       catch { return; }
-      if (destination.protocol !== 'http:' && destination.protocol !== 'https:') return;
-      if (item.type?.startsWith('mindful_') && destination.origin === window.location.origin
+      // WebView có thể trả về origin là "null" cho giao thức riêng của ứng dụng.
+      const internal = destination.protocol === current.protocol && destination.host === current.host;
+      if (destination.protocol !== 'http:' && destination.protocol !== 'https:'
+        && !(internal && destination.protocol === 'capacitor:')) return;
+      if (item.type?.startsWith('mindful_') && internal
         && destination.pathname === '/tu-tap' && destination.searchParams.has('communityPost')) {
-        const current = new URL(window.location.href);
         if (current.pathname === '/tu-tap') {
           current.searchParams.set('communityPost', destination.searchParams.get('communityPost')!);
           if (destination.searchParams.has('communityReaction')) current.searchParams.set('communityReaction', destination.searchParams.get('communityReaction')!);
@@ -497,7 +506,7 @@
         }
       }
       // Giữ root player và session khi thông báo dẫn tới một màn trong app.
-      if (destination.origin === window.location.origin) await goto(destination.href);
+      if (internal) await goto(destination.href);
       else window.location.assign(destination.href);
     }
   }
@@ -570,11 +579,10 @@
 
   onMount(() => {
     mounted = true;
-    const resume = () => { if (document.visibilityState !== 'hidden') void syncReadState(true); };
+    const resume = () => { if (document.visibilityState !== 'hidden') void syncReadState(); };
     document.addEventListener('visibilitychange', resume);
-    window.addEventListener('focus', resume);
     window.addEventListener('online', resume);
-    return () => { requestGeneration += 1; requestController?.abort(); readController?.abort(); document.removeEventListener('visibilitychange', resume); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); };
+    return () => { requestGeneration += 1; requestController?.abort(); readController?.abort(); document.removeEventListener('visibilitychange', resume); window.removeEventListener('online', resume); };
   });
 </script>
 
@@ -648,39 +656,26 @@
           </div>
         </header>
 
-        <div class="notification-filters" role="tablist" aria-label={isEn ? 'Filter notifications' : 'Lọc thông báo'}>
-          <button
-            type="button"
-            role="tab"
-            class="filter-chip"
-            class:selected={activeFilter === 'unread'}
-            aria-selected={activeFilter === 'unread'}
-            onclick={() => activeFilter = 'unread'}
-          >
-            {isEn ? 'Unread' : 'Chưa đọc'}{#if unreadCount > 0} <span class="filter-count">{unreadCount}</span>{/if}
-          </button>
-          {#if isAdmin}
-            <button
-              type="button"
-              role="tab"
-              class="filter-chip"
-              class:selected={activeFilter === 'admin'}
-              aria-selected={activeFilter === 'admin'}
-              onclick={() => activeFilter = 'admin'}
-            >
-              {isEn ? 'Admin' : 'Quản trị'}{#if adminUnreadCount > 0} <span class="filter-count">{adminUnreadCount}</span>{/if}
-            </button>
-          {/if}
-          <button
-            type="button"
-            role="tab"
-            class="filter-chip"
-            class:selected={activeFilter === 'all'}
-            aria-selected={activeFilter === 'all'}
-            onclick={() => activeFilter = 'all'}
-          >
-            {isEn ? 'All' : 'Tất cả'}
-          </button>
+        <div class="notification-filters">
+          <div class="seg-track" class:is-4={allowedTabs.length === 4} role="tablist" aria-label={isEn ? 'Filter notifications' : 'Lọc thông báo'}>
+            {#each allowedTabs as tab (tab)}
+              {@const count = tabUnreadCount(notifications, tab, readIds)}
+              {@const selected = effectiveFilter === tab}
+              <button
+                type="button"
+                role="tab"
+                class="seg-tab"
+                class:selected
+                aria-selected={selected}
+                onclick={() => (activeFilter = tab)}
+              >
+                <span class="seg-label">{notificationTabLabel(tab, isEn)}</span>
+                {#if count > 0}
+                  <span class="tab-ios-badge" aria-hidden="true">{count > 99 ? '99+' : count}</span>
+                {/if}
+              </button>
+            {/each}
+          </div>
         </div>
 
         <div class="notification-list" role="feed">
@@ -695,10 +690,10 @@
           {/if}
           {#if filteredNotifications.length === 0 && !(accountPrincipal && (accountInbox.isPending || accountInbox.isError))}
             <div class="notification-empty">
-              <div class="empty-icon">{activeFilter === 'unread' && notifications.length > 0 ? '✨' : '🔔'}</div>
-              <strong>{activeFilter === 'unread' && notifications.length > 0 ? (isEn ? 'All caught up' : 'Đã xem hết thông báo mới') : t.bellEmptyTitle}</strong>
-              <p>{activeFilter === 'unread' && notifications.length > 0 ? (isEn ? 'Notifications read on this device stay synced across web and mobile.' : 'Thông báo đã xem trên thiết bị này sẽ được đồng bộ để không hiện lại.') : (accountPrincipal ? t.mindfulEmpty : t.bellEmptyDesc)}</p>
-              {#if activeFilter === 'unread' && notifications.length > 0}
+              <div class="empty-icon">{emptyState.icon}</div>
+              <strong>{emptyState.title}</strong>
+              <p>{effectiveFilter === 'unread' && notifications.length === 0 && accountPrincipal ? t.mindfulEmpty : emptyState.description}</p>
+              {#if emptyState.showViewAll}
                 <button type="button" class="empty-history-btn" onclick={() => activeFilter = 'all'}>
                   {isEn ? `View all (${notifications.length})` : `Xem lại tất cả (${notifications.length})`}
                 </button>
@@ -707,6 +702,8 @@
           {:else}
             {#each filteredNotifications as item (item.id)}
               {@const isRead = readIds.has(item.id)}
+              {@const catKey = notificationCategoryForType(item.type)}
+              {@const catLabel = notificationCategoryLabel(item.type, isEn)}
               <button
                 class="notification-item"
                 class:unread={!isRead}
@@ -724,10 +721,11 @@
                   </span>
                 </div>
                 <div class="item-content-col">
-                    <div class="item-title-row">
-                      <strong class="item-title">{item.title}</strong>
+                    <div class="item-meta-row">
+                      <span class="item-cat-label cat-{catKey}">{catLabel}</span>
                       <time class="item-time" datetime={item.timestamp}>{formatRelativeTime(item.timestamp)}</time>
                     </div>
+                    <strong class="item-title">{item.title}</strong>
                     <p class="item-message">{item.message}</p>
                 </div>
                 {#if !isRead}
@@ -759,12 +757,12 @@
   .mark-all-btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     min-height: 44px;
-    padding: 0 12px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--gold-light);
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
     color: var(--brown);
     font-family: inherit;
     font-size: var(--font-size-meta);
@@ -772,43 +770,104 @@
     cursor: pointer;
     white-space: nowrap;
   }
+  .mark-all-btn:hover {
+    background: var(--gold-light);
+  }
   :global([data-theme='dark']) .mark-all-btn {
     color: var(--gold2);
   }
   .notification-filters {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
+    padding: 8px 12px 10px;
     border-bottom: 1px solid var(--border2);
-    background: var(--bg2);
-    overflow-x: auto;
+    background: var(--card);
   }
-  .filter-chip {
+  .seg-track {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 2px;
+    padding: 3px;
+    border-radius: 11px;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    overflow: visible;
+  }
+  .seg-tab {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 5px;
+    border: 0;
+    border-radius: 8.5px;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 11.5px;
+    font-weight: 700;
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    min-height: var(--touch-target-size);
-    padding: 0 12px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--card);
-    color: var(--text2);
-    font-family: inherit;
-    font-size: var(--font-size-meta);
-    font-weight: 600;
+    justify-content: center;
     cursor: pointer;
     white-space: nowrap;
+    transition: background 0.16s ease, box-shadow 0.16s ease, color 0.14s ease;
   }
-  .filter-chip.selected {
-    background: var(--gold);
-    border-color: var(--gold);
-    color: var(--on-gold);
+  .seg-tab::after {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+  }
+  .seg-track.is-4 .seg-tab {
+    font-size: 11px;
+    padding: 0 4px;
+  }
+  .seg-tab.selected {
+    background: linear-gradient(180deg, var(--card) 0%, color-mix(in srgb, var(--bg) 55%, var(--card)) 100%);
+    color: var(--text);
     font-weight: 700;
+    box-shadow:
+      0 1px 3px rgba(28, 20, 10, 0.10),
+      0 0 0 1px color-mix(in srgb, var(--gold) 32%, var(--border)),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
   }
-  .filter-count {
+  :global([data-theme='dark']) .seg-tab.selected,
+  :global(.dark) .seg-tab.selected {
+    background: color-mix(in srgb, var(--gold) 18%, var(--card));
+    box-shadow:
+      0 1px 4px rgba(0, 0, 0, 0.35),
+      0 0 0 1px color-mix(in srgb, var(--gold) 45%, var(--border)),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+  .seg-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tab-ios-badge {
+    position: absolute;
+    top: -6px;
+    right: 1px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4.5px;
+    border-radius: 999px;
+    background: #ff3b30;
+    color: #fff;
     font-variant-numeric: tabular-nums;
-    opacity: 0.9;
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid var(--bg2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+    pointer-events: none;
+    z-index: 2;
+  }
+  :global([data-theme='dark']) .tab-ios-badge,
+  :global(.dark) .tab-ios-badge {
+    background: #ff453a;
   }
   .empty-history-btn {
     margin-top: 10px;
@@ -823,12 +882,30 @@
     font-weight: 600;
     cursor: pointer;
   }
-  .item-title-row {
+  .item-meta-row {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 8px;
   }
+  .item-cat-label {
+    font-size: var(--font-size-meta);
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--brown);
+  }
+  .item-cat-label.cat-member { color: #2e5d88; }
+  .item-cat-label.cat-approval { color: #ab6214; }
+  .item-cat-label.cat-reminder { color: #2e6e49; }
+  .item-cat-label.cat-community { color: var(--brown); }
+  :global([data-theme='dark']) .item-cat-label.cat-member,
+  :global(.dark) .item-cat-label.cat-member { color: #82b8ea; }
+  :global([data-theme='dark']) .item-cat-label.cat-approval,
+  :global(.dark) .item-cat-label.cat-approval { color: #f0b565; }
+  :global([data-theme='dark']) .item-cat-label.cat-reminder,
+  :global(.dark) .item-cat-label.cat-reminder { color: #7ac497; }
+  :global([data-theme='dark']) .item-cat-label.cat-community,
+  :global(.dark) .item-cat-label.cat-community { color: var(--gold2); }
   .item-message {
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -1303,7 +1380,8 @@
   .notification-header-title { gap:calc(var(--space-page)*.4);flex-wrap:wrap; }
   .notification-header-count { padding:0;background:transparent;color:var(--muted);font-size:var(--font-size-meta);font-weight:400;white-space:nowrap; }
   .mark-all-text { display:inline; }
-  .notification-list { flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;border-radius:0 0 var(--radius-card) var(--radius-card); }
+  .notification-list { flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;-ms-overflow-style:none;border-radius:0 0 var(--radius-card) var(--radius-card); }
+  .notification-list::-webkit-scrollbar { display:none;width:0;height:0; }
   .notification-item,
   .notification-item.mindful-item { box-sizing:border-box;align-items:center;padding:calc(var(--space-page)*.6);gap:calc(var(--space-page)*.5);background:color-mix(in srgb,var(--card) 97%,transparent);border-bottom-color:var(--border2); }
   .notification-item.unread,

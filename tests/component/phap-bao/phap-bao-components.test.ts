@@ -42,7 +42,10 @@ describe('PhapBao component contracts', () => {
 
     it('handles guest data removal upon opening Shopee vs member history saving', () => {
       expect(modalSource).toContain('/api/phap-bao/claim');
-      expect(modalSource).toMatch(/\/api\/phap-bao\/claim[\s\S]{0,220}['"]X-CSRF-Token['"]\s*:\s*['"]public['"]/);
+      const claimSource = modalSource.slice(modalSource.indexOf('const principal = session.user.id;'), modalSource.indexOf('// Xoá bản nháp'));
+      expect(claimSource).toContain('await requireBrowserCsrf()');
+      expect(claimSource).toMatch(/['"]X-CSRF-Token['"]\s*:\s*csrf/u);
+      expect(claimSource).toContain('session.user?.id !== principal');
       expect(modalSource).toContain('clearDraft()');
       expect(modalSource).toContain('window.open(shopeeUrl');
     });

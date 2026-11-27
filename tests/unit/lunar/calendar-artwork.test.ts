@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DAILY_CALENDAR_ARTWORKS, FEAST_CALENDAR_ARTWORKS, getCalendarArtwork } from '$lib/components/lunar/calendar-artwork';
-import { getLunarEvent, localizeLunarEvent } from '$lib/components/lunar/lunar-events';
+import { DAILY_CALENDAR_ARTWORKS, FEAST_CALENDAR_ARTWORKS, THAP_TRAI_CALENDAR_ARTWORKS, getCalendarArtwork } from '$lib/components/lunar/calendar-artwork';
+import { getLunarEvent, getLunarEventForLunarDay, localizeLunarEvent } from '$lib/components/lunar/lunar-events';
 
 describe('Buddhist calendar artwork rules',()=>{
   it('ships ten compressed, nonfigurative ordinary-day artworks under 1 MiB total',()=>{
@@ -26,7 +26,8 @@ describe('Buddhist calendar artwork rules',()=>{
         expect(getCalendarArtwork(date,vi,0)).toEqual(art);
       }else{
         expect(art.feast).toBe(false);
-        expect(DAILY_CALENDAR_ARTWORKS).toContain(art.src);
+        const choices = vi.isThapTrai ? THAP_TRAI_CALENDAR_ARTWORKS : DAILY_CALENDAR_ARTWORKS;
+        expect(art.src).toBe(choices[4]);
       }
       if(vi.lunarLeap){
         expect(vi.viaName).toBeNull();
@@ -34,6 +35,22 @@ describe('Buddhist calendar artwork rules',()=>{
       }
     }
     expect([...seen].sort()).toEqual(Object.keys(FEAST_CALENDAR_ARTWORKS).sort());
+  });
+  it.each([
+    [29, [1, 8, 14, 15, 18, 23, 24, 27, 28, 29]],
+    [30, [1, 8, 14, 15, 18, 23, 24, 28, 29, 30]],
+  ] as const)('uses each local painting once for a %i-day lunar month and shuffles within that set', (length, days) => {
+    const date = new Date(2026, 0, 1);
+    const artworks = days.map((day, index) => {
+      const event = getLunarEventForLunarDay({ year: 2026, month: 3, day, leap: false }, length);
+      const art = getCalendarArtwork(date, event);
+      expect(art.feast).toBe(false);
+      expect(existsSync(`static${art.src}`)).toBe(true);
+      expect(getCalendarArtwork(date, event, art.nextIndex).src).toBe(THAP_TRAI_CALENDAR_ARTWORKS[(index + 1) % 10]);
+      return art.src;
+    });
+    expect(artworks).toEqual(THAP_TRAI_CALENDAR_ARTWORKS);
+    expect(new Set(artworks).size).toBe(10);
   });
   it('changes ordinary scenery each civil day without depending on clock time',()=>{
     const date=new Date(2026,1,18);const event=getLunarEvent(date);

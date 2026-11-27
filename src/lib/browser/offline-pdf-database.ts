@@ -77,7 +77,7 @@ export function openOfflinePdfDatabase(): Promise<IDBDatabase> {
   if (typeof indexedDB === 'undefined') return Promise.reject(new Error('offline_pdf_unavailable'));
   if (databasePromise) return databasePromise;
 
-  databasePromise = new Promise((resolve, reject) => {
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(OFFLINE_PDF_DATABASE, OFFLINE_PDF_DATABASE_VERSION);
     request.onupgradeneeded = () => {
       const database = request.result;
@@ -88,22 +88,27 @@ export function openOfflinePdfDatabase(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => {
       const database = request.result;
+      // A blocked open can complete after its caller already retried.
+      if (databasePromise !== opening) { database.close(); return; }
+      const release = () => { if (databasePromise === opening) databasePromise = undefined; };
+      database.onclose = release;
       database.onversionchange = () => {
         database.close();
-        databasePromise = undefined;
+        release();
       };
       resolve(database);
     };
     request.onerror = () => {
-      databasePromise = undefined;
+      if (databasePromise === opening) databasePromise = undefined;
       reject(request.error ?? new Error('offline_pdf_database_open_failed'));
     };
     request.onblocked = () => {
-      databasePromise = undefined;
+      if (databasePromise === opening) databasePromise = undefined;
       reject(new Error('offline_pdf_database_blocked'));
     };
   });
-  return databasePromise;
+  databasePromise = opening;
+  return opening;
 }
 
 async function rawOfflinePdf(key: string): Promise<unknown> {

@@ -81,6 +81,25 @@ describe('offline PDF storage', () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it('probes the successful direct fallback instead of the failed media proxy', async () => {
+    const sourceUrl = 'https://media.quangtu.vn/pdfs/fallback.pdf';
+    const workerUrl = 'https://quangtu-web.quangtu-ansitoanthu.workers.dev/api/media/pdfs/fallback.pdf';
+    const fetcher = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('Proxy unavailable'))
+      .mockResolvedValueOnce(pdfResponse())
+      .mockResolvedValueOnce(new Response(null, { headers: { 'content-length': '16' } }));
+    vi.stubGlobal('window', { dispatchEvent: vi.fn() });
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => true });
+    try {
+      const record = await downloadPdfForOffline({ documentId: 'direct-fallback', title: 'PDF', sourceUrl }, {
+        fetcher, estimateStorage: async () => ({}), checksumBlob: async () => 'a'.repeat(64), persistRecord: async () => {},
+      });
+      expect(fetcher.mock.calls.map(([url]) => url)).toEqual([workerUrl, sourceUrl, sourceUrl]);
+      expect(fetcher.mock.calls[2][1]).toMatchObject({ method: 'HEAD' });
+      expect(record.sourceUrl).toBe(sourceUrl);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('ignores unsuccessful HEAD and range response sizes', async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(null, { status: 404, headers: { 'content-length': '100' } }))

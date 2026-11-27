@@ -30,7 +30,7 @@ import { createHash } from 'node:crypto';
 
 const legacyScheduleHash = "2ae33219022cb23d78c58542310a3990ae1c95ded8ec33aabc59544d27f0d42b";
 const completionScheduleHash = 'b3cbd9f5d0b427efaea0c1e871b7ba10c458158d860bcbcf3443d67b28200e99';
-const patchedSchedule = String.raw`    @objc func schedule(_ call: CAPPluginCall) {
+const previousPatchedSchedule = String.raw`    @objc func schedule(_ call: CAPPluginCall) {
         guard let notifications = call.getArray("notifications", JSObject.self) else {
             call.reject("Must provide notifications array as notifications option")
             return
@@ -168,6 +168,62 @@ const patchedSchedule = String.raw`    @objc func schedule(_ call: CAPPluginCall
         }
     }`;
 
+const patchedSchedule = previousPatchedSchedule
+  .replace('        let affectedIds = Set(ids)\n        center.getPendingNotificationRequests { allPending in', String.raw`        let nextIds = Set(ids)
+        let requestedRemoval = Set((call.getArray("replaceReminderIds") as? [Int] ?? []).map { String($0) })
+        let reminderTypes: Set<String> = ["daily_schedule", "lunar_eve", "lunar_morning", "personal_eve", "personal_morning"]
+        center.getPendingNotificationRequests { allPending in
+            let obsoleteIds = Set(allPending.filter { request in
+                let extra = request.content.userInfo["cap_extra"] as? JSObject
+                return requestedRemoval.contains(request.identifier) && !nextIds.contains(request.identifier)
+                    && reminderTypes.contains(extra?["type"] as? String ?? "")
+            }.map { $0.identifier })
+            let retainedIds = Set(allPending.map { $0.identifier }).subtracting(obsoleteIds).union(nextIds)
+            guard retainedIds.count <= 64 else {
+                DispatchQueue.main.async { call.reject("Notification queue capacity exceeded") }
+                return
+            }
+            let affectedIds = nextIds.union(obsoleteIds)`)
+  .replace('                for pending in requests {', '                let enqueueRequests = {\n                if firstError == nil {\n                for pending in requests {')
+  .replace('                // Không trả promise', '                }\n                // Không trả promise')
+  .replace('                    call.resolve(["notifications": ret])\n                }\n            }', String.raw`                    for identifier in obsoleteIds {
+                        self.notificationDelegationHandler.notificationRequestLookup.removeValue(forKey: identifier)
+                    }
+                    call.resolve(["notifications": ret])
+                }
+                }
+                if obsoleteIds.isEmpty { enqueueRequests() }
+                else {
+                    center.removePendingNotificationRequests(withIdentifiers: Array(obsoleteIds))
+                    // Wait for the native queue to reflect removal before adding any new IDs.
+                    center.getPendingNotificationRequests { retained in
+                        DispatchQueue.main.async {
+                            if retained.contains(where: { obsoleteIds.contains($0.identifier) }) {
+                                firstError = NSError(domain: "TuTapLocalNotifications", code: 2,
+                                    userInfo: [NSLocalizedDescriptionKey: "Obsolete notification removal incomplete"])
+                            }
+                            enqueueRequests()
+                        }
+                    }
+                }
+            }`);
+
+const originalGetPending = String.raw`    @objc func getPending(_ call: CAPPluginCall) {
+        UNUserNotificationCenter.current().getPendingNotificationRequests(completionHandler: { (notifications) in
+            CAPLog.print("num of pending notifications \(notifications.count)")
+            CAPLog.print(notifications)
+
+            let ret = notifications.compactMap({ [weak self] (notification) -> JSObject? in
+                return self?.notificationDelegationHandler.makePendingNotificationRequestJSObject(notification)
+            })
+
+            call.resolve([
+                "notifications": ret
+            ])
+        })
+    }`;
+const replacementGetPending = originalGetPending.replace('"notifications": ret', '"notifications": ret,\n                "transactionalReplacement": true');
+
 const relativeSwift = 'ios/Sources/LocalNotificationsPlugin/LocalNotificationsPlugin.swift';
 const atomicScheduleHash = '7166240b5023fa27eb9aa20472377e21ab10eda4df308b0d8fb500b6ee9313d0';
 const originalCheckPermissions = String.raw`    @objc override public func checkPermissions(_ call: CAPPluginCall) {
@@ -234,7 +290,7 @@ function insertDebugLogs(value, sites) {
   return value;
 }
 
-const diagnosticSchedule = insertDebugLogs(patchedSchedule, [
+const scheduleDiagnosticSites = [
   ['    @objc func schedule(_ call: CAPPluginCall) {', 'schedule_entry', '', 'after', true],
   ['            call.reject("Must provide notifications array as notifications option")', 'schedule_invalid_batch'],
   ['                call.reject("Notification missing identifier")', 'schedule_invalid_id'],
@@ -251,7 +307,9 @@ const diagnosticSchedule = insertDebugLogs(patchedSchedule, [
   ['                                        call.reject("Notification rollback incomplete; original: \\(theError.localizedDescription)")', 'schedule_rollback_incomplete', ', error: theError'],
   ['                                        call.reject(theError.localizedDescription)', 'schedule_reject', ', error: theError'],
   ['                    call.resolve(["notifications": ret])', 'schedule_resolve'],
-]);
+];
+const previousDiagnosticSchedule = insertDebugLogs(previousPatchedSchedule, scheduleDiagnosticSites);
+const diagnosticSchedule = insertDebugLogs(patchedSchedule, scheduleDiagnosticSites);
 const diagnosticCheckPermissions = insertDebugLogs(originalCheckPermissions, [
   ['    @objc override public func checkPermissions(_ call: CAPPluginCall) {', 'check_entry', '', 'after', true],
   ['        self.notificationDelegationHandler.checkPermissions { status in', 'check_settings_callback', ', status: status.rawValue', 'after', true],
@@ -323,45 +381,56 @@ export function patchIosLocalNotifications(packageDirectory = path.resolve('node
   const source = original.replaceAll('\r\n', '\n');
   const method = scheduleMethod(source);
   const permissionMethod = checkPermissionsMethod(source);
-  const supportsDiagnosticHelper = (helper) => {
-    const remainder = source.replace(diagnosticSchedule, '').replace(diagnosticCheckPermissions, '').replace(helper, '');
-    return method.value === diagnosticSchedule && permissionMethod === diagnosticCheckPermissions &&
+  const supportsDiagnosticHelper = (helper, schedule = diagnosticSchedule) => {
+    const remainder = source.replace(schedule, '').replace(diagnosticCheckPermissions, '').replace(helper, '');
+    return method.value === schedule && permissionMethod === diagnosticCheckPermissions &&
       occurrences(source, helperAnchor + '\n' + helper + '\n') === 1 &&
       !remainder.includes('tuTapNotificationQA') && !remainder.includes('TUTAM_NOTIFICATION_QA') &&
       !remainder.includes('TuTapQANativeDiagnostic');
   };
   const previousDiagnosticPatch = supportsDiagnosticHelper(diagnosticHelper);
   const observedDiagnosticPatch = supportsDiagnosticHelper(observedDiagnosticHelper);
+  const upgradingDiagnosticPatch = supportsDiagnosticHelper(diagnosticHelper, previousDiagnosticSchedule)
+    || supportsDiagnosticHelper(observedDiagnosticHelper, previousDiagnosticSchedule);
   if (previousDiagnosticPatch || observedDiagnosticPatch) {
     if (occurrences(source, '    case triggerDateInPast\n') !== 1 ||
         occurrences(source, newPastDate) !== 1 || source.includes(oldPastDate)) {
       throw new Error('Unsupported partial LocalNotifications source patch');
     }
-    if (observedDiagnosticPatch) return false;
+    if (observedDiagnosticPatch) {
+      if (occurrences(source, replacementGetPending) !== 1) throw new Error('Unsupported partial LocalNotifications replacement patch');
+      return false;
+    }
   }
-  if (!previousDiagnosticPatch && (source.includes('tuTapNotificationQA') || source.includes('TUTAM_NOTIFICATION_QA') ||
+  if (!previousDiagnosticPatch && !upgradingDiagnosticPatch && (source.includes('tuTapNotificationQA') || source.includes('TUTAM_NOTIFICATION_QA') ||
       source.includes('TuTapQANativeDiagnostic') || permissionMethod !== originalCheckPermissions || occurrences(source, helperAnchor) !== 1)) {
     throw new Error('Unsupported partial or unexpected LocalNotifications diagnostic patch');
   }
   const methodHash = createHash('sha256').update(method.value).digest('hex');
   const upgradingCompletionPatch = methodHash === completionScheduleHash;
-  const upgradingAtomicPatch = methodHash === atomicScheduleHash && method.value === patchedSchedule;
-  const validDateSource = previousDiagnosticPatch || upgradingCompletionPatch || upgradingAtomicPatch
+  const upgradingAtomicPatch = methodHash === atomicScheduleHash && method.value === previousPatchedSchedule;
+  const upgradingReplacementPatch = method.value === patchedSchedule;
+  const validDateSource = previousDiagnosticPatch || upgradingDiagnosticPatch || upgradingCompletionPatch || upgradingAtomicPatch || upgradingReplacementPatch
     ? occurrences(source, '    case triggerDateInPast\n') === 1 && occurrences(source, newPastDate) === 1 && !source.includes(oldPastDate)
     : occurrences(source, oldEnum) === 1 && !source.includes('    case triggerDateInPast\n') && occurrences(source, oldPastDate) === 1 && !source.includes(newPastDate);
-  if ((!previousDiagnosticPatch && !upgradingCompletionPatch && !upgradingAtomicPatch && methodHash !== legacyScheduleHash) || !validDateSource) {
+  if ((!previousDiagnosticPatch && !upgradingDiagnosticPatch && !upgradingCompletionPatch && !upgradingAtomicPatch && !upgradingReplacementPatch && methodHash !== legacyScheduleHash) || !validDateSource) {
     throw new Error('Unsupported LocalNotifications SDK source; refusing partial or unexpected patch');
   }
 
   let updated;
   if (previousDiagnosticPatch) {
     updated = source.replace(diagnosticHelper, observedDiagnosticHelper);
+  } else if (upgradingDiagnosticPatch) {
+    updated = source.slice(0, method.start) + diagnosticSchedule + source.slice(method.end);
+    updated = updated.replace(diagnosticHelper, observedDiagnosticHelper);
   } else {
     updated = source.slice(0, method.start) + diagnosticSchedule + source.slice(method.end);
-    if (!upgradingCompletionPatch && !upgradingAtomicPatch) updated = updated.replace(oldEnum, newEnum).replace(oldPastDate, newPastDate);
+    if (!upgradingCompletionPatch && !upgradingAtomicPatch && !upgradingReplacementPatch) updated = updated.replace(oldEnum, newEnum).replace(oldPastDate, newPastDate);
     updated = updated.replace(originalCheckPermissions, diagnosticCheckPermissions)
       .replace(helperAnchor, helperAnchor + '\n' + observedDiagnosticHelper + '\n');
   }
+  if (occurrences(updated, originalGetPending) === 1) updated = updated.replace(originalGetPending, replacementGetPending);
+  else if (occurrences(updated, replacementGetPending) !== 1) throw new Error('Unsupported LocalNotifications pending-query source');
   if (crlf) updated = updated.replaceAll('\n', '\r\n');
   const temporary = swiftFile + '.tutam-schedule.tmp';
   if (fs.existsSync(temporary)) throw new Error('LocalNotifications patch temporary source already exists');

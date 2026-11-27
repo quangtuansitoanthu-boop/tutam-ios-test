@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { acknowledgeRestoredToolLogs, COMPLETED_LOG_OUTBOX_KEY, createCompletedLogSync, startCompletedPracticeLogSync } from '../../../src/lib/browser/practice-log-outbox';
 import { PRACTICE_LOG_CHANGED_EVENT } from '../../../src/lib/domain/practice/completed-logs';
 import { createPrincipalStorage } from '../../../src/lib/browser/principal-storage';
@@ -12,14 +12,80 @@ function memoryStorage() {
     setItem: (key: string, value: string) => { data.set(key, value); },
     removeItem: (key: string) => { data.delete(key); } };
 }
-const now = () => new Date('2026-10-28T00:00:00.000Z');
+let clock = Date.parse('2026-10-28T00:00:00.000Z');
+const now = () => new Date(clock);
 const session = (id = 'a') => ({ authenticated: true, csrfToken: `csrf-${id}`, user: { id } });
 const log = (id: number, type = 'Lễ Phật', created = '2026-10-28T00:00:01.000Z') => ({
   id, type, count: 108, created, date: '2026-10-28', note: 'Công phu',
 });
 
 describe('completed practice log sync', () => {
+  beforeEach(() => { clock = Date.parse('2026-10-28T00:00:00.000Z'); });
   afterEach(() => vi.unstubAllGlobals());
+  it('isolates only the rejected receipt from a rejected batch and drains valid neighbors', async () => {
+    const storage = memoryStorage();
+    const scoped = createPrincipalStorage(storage, 'a');
+    const fetcher = vi.fn(async (_path: RequestInfo | URL, init?: RequestInit) => {
+      const logs = JSON.parse(String(init?.body)).logs as Array<{ localLogId: number }>;
+      return logs.some(item => item.localLogId === 2) ? new Response(null, { status: 422 }) : Response.json({});
+    });
+    const sync = createCompletedLogSync(fetcher, storage, { now });
+    sync.setSession(session());
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs, JSON.stringify([log(1), log(2), log(3)]));
+    await expect(sync.flush()).resolves.toBe(2);
+    expect(JSON.parse(scoped.getItem(COMPLETED_LOG_OUTBOX_KEY)!).pending).toEqual([]);
+    const reloaded = createCompletedLogSync(fetcher, storage, { now });
+    reloaded.setSession(session());
+    expect(reloaded.rejected()).toEqual([expect.objectContaining({ status: 422,
+      operation: expect.objectContaining({ logId: 'log:2' }) })]);
+    const attempts = fetcher.mock.calls.length;
+    await reloaded.flush();
+    expect(fetcher).toHaveBeenCalledTimes(attempts);
+    expect(JSON.parse(scoped.getItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs)!)).toHaveLength(3);
+    fetcher.mockImplementation(async () => Response.json({ recorded: 1 }));
+    expect(reloaded.retryRejected('log:2')).toBe(true);
+    await expect(reloaded.flush()).resolves.toBe(1);
+    expect(reloaded.rejected()).toEqual([]);
+    expect(JSON.parse(String(fetcher.mock.calls.at(-1)![1]?.body)).logs[0].logId).toBe('log:2');
+  });
+
+  it.each([401, 403, 408, 429, 503])('retains HTTP %s completed batches without quarantining any receipt', async status => {
+    const storage = memoryStorage();
+    const scoped = createPrincipalStorage(storage, 'a');
+    const fetcher = vi.fn(async () => new Response(null, { status }));
+    const sync = createCompletedLogSync(fetcher, storage, { now });
+    sync.setSession(session());
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs, JSON.stringify([log(1), log(2)]));
+    await expect(sync.flush()).rejects.toThrow(`completed_log_sync_${status}`);
+    expect(JSON.parse(scoped.getItem(COMPLETED_LOG_OUTBOX_KEY)!).pending).toHaveLength(2);
+    expect(sync.rejected()).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('backs off repeated transient failures without changing receipts or blocking another principal', async () => {
+    let clock = now().getTime();
+    const storage = memoryStorage();
+    const scoped = createPrincipalStorage(storage, 'a');
+    const fetcher = vi.fn(async () => new Response(null, { status: 503 }));
+    const sync = createCompletedLogSync(fetcher, storage, { now: () => new Date(clock) });
+    sync.setSession(session());
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs, JSON.stringify([log(1)]));
+    await expect(sync.flush()).rejects.toThrow('completed_log_sync_503');
+    await expect(sync.flush()).rejects.toThrow('completed_log_sync_cooldown');
+    const reloaded = createCompletedLogSync(fetcher, storage, { now: () => new Date(clock) });
+    reloaded.setSession(session());
+    await expect(reloaded.flush()).rejects.toThrow('completed_log_sync_cooldown');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    clock += 1_000;
+    await expect(reloaded.flush()).rejects.toThrow('completed_log_sync_503');
+    clock += 1_000;
+    await expect(reloaded.flush()).rejects.toThrow('completed_log_sync_cooldown');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    reloaded.setSession(session('b'));
+    createPrincipalStorage(storage, 'b').setItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs, JSON.stringify([log(2, 'Lễ Phật', new Date(clock).toISOString())]));
+    await expect(reloaded.flush()).rejects.toThrow('completed_log_sync_503');
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
   it('adds zero requests on mount, batches only new missing producers and preserves old logs', async () => {
     const storage = memoryStorage();
     const scoped = createPrincipalStorage(storage, 'a');
@@ -57,6 +123,7 @@ describe('completed practice log sync', () => {
     scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs, JSON.stringify([log(1)]));
     await expect(sync.flush()).rejects.toThrow();
     fetcher.mockImplementation(async () => Response.json({ recorded: 1 }));
+    clock += 1_000;
     await sync.flush();
     const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
     expect(calls[0][0]).toBe(calls[1][0]);
@@ -96,11 +163,12 @@ describe('completed practice log sync', () => {
     // A stale local snapshot must not re-queue the explicitly deleted receipt.
     scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs, JSON.stringify([log(1), log(2)]));
     fetcher.mockImplementation(async () => Response.json({ recorded: 1 }));
+    clock += 1_000;
     await expect(sync.flush()).resolves.toBe(1);
     const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
     expect(JSON.parse(String(calls[1][1].body)).logs.map((entry: { localLogId: number }) => entry.localLogId)).toEqual([2]);
     sync.setSession(session('b'));
-    createPrincipalStorage(storage, 'b').setItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs, JSON.stringify([log(1)]));
+    createPrincipalStorage(storage, 'b').setItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs, JSON.stringify([log(1, 'Lễ Phật', now().toISOString())]));
     await expect(sync.flush()).resolves.toBe(1);
     expect(JSON.parse(String(calls[2][1].body)).logs[0].localLogId).toBe(1);
   });
@@ -135,6 +203,7 @@ describe('completed practice log sync', () => {
     scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs, '[]');
     if (markers !== null) scoped.setItem(DELETED_PRACTICE_LOGS_KEY, markers);
     fetcher.mockImplementation(async () => Response.json({ recorded: 1 }));
+    clock += 1_000;
     await expect(sync.flush()).resolves.toBe(1);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });

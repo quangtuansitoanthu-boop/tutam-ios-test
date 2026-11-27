@@ -77,4 +77,36 @@ describe('PDF gesture controller', () => {
     expect(target.style.transform).toBe('');
     expect(target.style.willChange).toBe('');
   });
+
+  it('keeps the original local pinch anchor when the transformed bounds move', () => {
+    const viewer = new FakeElement();
+    const target = new FakeElement();
+    const bounds = vi.spyOn(target, 'getBoundingClientRect');
+    installPdfGestures(viewer as unknown as HTMLElement, {
+      getTransformTarget: () => target as unknown as HTMLElement, getZoom: () => 1, setZoomAt: vi.fn(),
+    });
+    viewer.emit('touchstart', { touches: [touch(40, 50), touch(140, 50)], preventDefault: vi.fn() });
+    viewer.emit('touchmove', { touches: [touch(20, 50), touch(220, 50)], preventDefault: vi.fn() });
+    bounds.mockReturnValue({ left: -50, top: 10 } as DOMRect);
+    viewer.emit('touchmove', { touches: [touch(10, 50), touch(260, 50)], preventDefault: vi.fn() });
+    expect(target.style.transformOrigin).toBe('70px 20px');
+    expect(bounds).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes and clears a preview when a third finger interrupts a pinch', () => {
+    const viewer = new FakeElement();
+    const target = new FakeElement();
+    const setZoomAt = vi.fn();
+    installPdfGestures(viewer as unknown as HTMLElement, {
+      getTransformTarget: () => target as unknown as HTMLElement, getZoom: () => 1, setZoomAt,
+    });
+    viewer.emit('touchstart', { touches: [touch(40, 50), touch(140, 50)], preventDefault: vi.fn() });
+    viewer.emit('touchmove', { touches: [touch(20, 50), touch(220, 50)], preventDefault: vi.fn() });
+    viewer.emit('touchstart', { touches: [touch(20, 50), touch(220, 50), touch(300, 100)], preventDefault: vi.fn() });
+    expect(target.style.transform).toBe('');
+    expect(target.style.transformOrigin).toBe('');
+    expect(setZoomAt).toHaveBeenCalledExactlyOnceWith(2, 90, 50);
+    viewer.emit('touchend', { touches: [] });
+    expect(setZoomAt).toHaveBeenCalledTimes(1);
+  });
 });

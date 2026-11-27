@@ -1,5 +1,20 @@
-import { expect, test } from '@playwright/test';
-import { loginAsMember, settleClient, choosePdfOnline, openReaderTools, savePdfOffline } from './runtime-helpers';
+import { expect, test, type Page } from '@playwright/test';
+import { deferStartupNotification, loginAsMember, settleClient, choosePdfOnline, openReaderTools, savePdfOffline } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
+});
+
+function resolvedFontSize(page: Page, token: '--font-size-meta' | '--font-size-label'): Promise<string> {
+  return page.evaluate(name => {
+    const probe = document.createElement('span');
+    probe.style.fontSize = `var(${name})`;
+    document.body.append(probe);
+    const fontSize = getComputedStyle(probe).fontSize;
+    probe.remove();
+    return fontSize;
+  }, token);
+}
 
 test.describe('homepage and guide parity', () => {
   test('primary client navigation reuses the hydrated root session', async ({ page }) => {
@@ -31,75 +46,16 @@ test.describe('homepage and guide parity', () => {
     expect(sessionRequests).toEqual([]);
   });
 
-  test('shared footer matches the production desktop and mobile geometry', async ({ page }) => {
+  test('guide pages omit the legacy footer block on desktop and mobile', async ({ page }) => {
     await page.goto('/huong-dan');
     await settleClient(page);
 
-    const footer = page.getByRole('contentinfo');
-    const inner = footer.locator('.qts-footer__inner');
-    const logo = footer.locator('.qts-footer__brand img');
-    await footer.scrollIntoViewIfNeeded();
-    const paletteBackground = await page.locator('html').evaluate(root => getComputedStyle(root).backgroundColor);
-    await expect(footer).toHaveCSS('background-color', paletteBackground);
-    await expect(footer).toHaveCSS('border-top-width', '1px');
-    expect(await logo.boundingBox()).toMatchObject({ width: 36, height: 36 });
-
-    const width = page.viewportSize()?.width ?? 0;
-    const geometry = await footer.evaluate((element) => {
-      const inner = element.querySelector<HTMLElement>('.qts-footer__inner')!;
-      const brand = element.querySelector<HTMLElement>('.qts-footer__brand')!;
-      const legal = element.querySelector<HTMLElement>('.qts-footer__legal')!;
-      const footerStyle = getComputedStyle(element);
-      const innerStyle = getComputedStyle(inner);
-      const legalStyle = getComputedStyle(legal);
-      // Token giữ biểu thức calc(); lấy giá trị px do trình duyệt phân giải.
-      const tokenProbe = document.createElement('span');
-      tokenProbe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;font-size:var(--font-size-meta)';
-      element.append(tokenProbe);
-      const metaToken = parseFloat(getComputedStyle(tokenProbe).fontSize);
-      tokenProbe.remove();
-      const footerBox = element.getBoundingClientRect();
-      const innerBox = inner.getBoundingClientRect();
-      const brandBox = brand.getBoundingClientRect();
-      const legalBox = legal.getBoundingClientRect();
-      return {
-        footerHeight: footerBox.height,
-        innerHeight: innerBox.height,
-        contentHeight: innerStyle.flexDirection === 'row'
-          ? Math.max(brandBox.height, legalBox.height)
-          : brandBox.height + legalBox.height + parseFloat(innerStyle.rowGap),
-        verticalFrame: parseFloat(footerStyle.paddingTop) + parseFloat(footerStyle.paddingBottom)
-          + parseFloat(footerStyle.borderTopWidth) + parseFloat(footerStyle.borderBottomWidth),
-        fontSize: parseFloat(legalStyle.fontSize),
-        metaToken,
-        lineHeight: parseFloat(legalStyle.lineHeight),
-        fits: [innerBox, brandBox, legalBox].every((box) =>
-          box.left >= footerBox.left && box.right <= footerBox.right
-          && box.top >= footerBox.top && box.bottom <= footerBox.bottom),
-        overflows: [element, inner, brand, legal].some((node) => node.scrollWidth > node.clientWidth),
-      };
-    });
-    expect(Number.isFinite(geometry.metaToken)).toBe(true);
-    expect(geometry.fontSize).toBe(geometry.metaToken);
-    expect(geometry.lineHeight).toBeCloseTo(geometry.fontSize * 1.8, 2);
-    expect(geometry.innerHeight).toBeCloseTo(geometry.contentHeight, 2);
-    expect(geometry.footerHeight).toBeCloseTo(geometry.contentHeight + geometry.verticalFrame, 2);
-    expect(geometry.fits).toBe(true);
-    expect(geometry.overflows).toBe(false);
-    if (width > 768) {
-      const innerBox = await inner.boundingBox();
-      expect(innerBox?.width).toBeCloseTo(Math.min(1160, width - 56), 0);
-      await expect(inner).toHaveCSS('flex-direction', 'row');
-      await expect(footer.locator('.qts-footer__legal')).toHaveCSS('text-align', 'right');
-    } else {
-      await expect(footer).toHaveCSS('padding', '24px 16px');
-      await expect(inner).toHaveCSS('flex-direction', 'column');
-      await expect(inner).toHaveCSS('gap', '14px');
-      await expect(footer.locator('.qts-footer__legal')).toHaveCSS('text-align', 'left');
-    }
+    await expect(page.getByRole('navigation', { name: 'Tu Tập Phật Pháp' })).toBeVisible();
+    await expect(page.locator('.qts-footer')).toHaveCount(0);
+    await expect(page.getByRole('contentinfo')).toHaveCount(0);
   });
 
-  test('homepage exposes the shared shell, hero, search, public catalog and footer', async ({ page }) => {
+  test('homepage exposes the shared shell, hero, search and public catalog without guide footer', async ({ page }) => {
     await page.goto('/kinh-sach');
     await settleClient(page);
     await expect(page).toHaveURL(/\/kinh-sach$/);
@@ -108,7 +64,7 @@ test.describe('homepage and guide parity', () => {
     await expect(page.getByRole('searchbox', { name: 'Tìm kiếm bài viết' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Đọc ngay Bài viết kiểm thử E2E' })).toBeVisible();
     await page.goto('/huong-dan');
-    await expect(page.getByRole('contentinfo')).toContainText('Tu Tập Phật Pháp');
+    await expect(page.getByRole('contentinfo')).toHaveCount(0);
   });
 
   test('continue-reading shelf links to the private My Quotes screen', async ({ page }) => {
@@ -172,7 +128,7 @@ test.describe('homepage and guide parity', () => {
     expect(viewCounts).toHaveLength(await popularItems.count());
     expect(viewCounts.every(count => Number.isInteger(count) && count > 0)).toBe(true);
     expect(viewCounts).toEqual([...viewCounts].sort((a, b) => b - a));
-    await expect(firstPopular.locator('small')).toHaveCSS('font-size', '12px');
+    await expect(firstPopular.locator('small')).toHaveCSS('font-size', await resolvedFontSize(page, '--font-size-meta'));
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(trigger).toBeFocused();
@@ -186,7 +142,7 @@ test.describe('homepage and guide parity', () => {
     const cards = page.locator('.articles-grid .art-card');
     const tagButtons = cards.locator('.art-tag');
     expect(await tagButtons.count()).toBeGreaterThanOrEqual(4);
-    await expect(tagButtons.nth(0)).toHaveCSS('font-size', '13px');
+    await expect(tagButtons.first()).toHaveCSS('font-size', await resolvedFontSize(page, '--font-size-label'));
     await expect(tagButtons.nth(0)).toHaveCSS('padding', '2px 8px');
 
     const causalTag = cards.getByRole('button', { name: 'nhân quả', exact: true });

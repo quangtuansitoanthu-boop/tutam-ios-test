@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 describe('admin books legacy authoring parity', () => {
   const manager = readFileSync('src/lib/components/admin/books/BookManager.svelte', 'utf8');
   const chapters = readFileSync('src/lib/components/admin/books/ChapterEditor.svelte', 'utf8');
+  const upload = readFileSync('src/lib/browser/media-upload.ts', 'utf8');
   const composer = readFileSync('src/lib/components/admin/books/ChapterComposer.svelte', 'utf8');
   const imageDialog = readFileSync('src/lib/components/admin/books/ChapterImageInsertDialog.svelte', 'utf8');
   const articleModal = readFileSync('src/lib/components/admin/articles/ArticleAdminModal.svelte', 'utf8');
@@ -54,7 +55,12 @@ describe('admin books legacy authoring parity', () => {
     expect(chapters).toContain("format('insertUnorderedList')");
     expect(chapters).toContain('insertLink');
     expect(chapters).toContain('multiple accept="image/jpeg,image/png,image/webp,image/gif"');
-    expect(chapters).toMatch(/'x-content-sha256':\s*encoded/u);
+    expect(chapters).toContain("await uploadMediaFile(file, 'content', csrf)");
+    expect(upload).toContain("fetchWithSessionRefresh('/api/media'");
+    expect(upload).toContain("crypto.subtle.digest('SHA-256', await file.arrayBuffer())");
+    expect(upload).toContain("'x-content-sha256': hash");
+    expect(upload).toContain("'x-csrf-token': csrfToken");
+    expect(upload).toContain("'idempotency-key': createBrowserId()");
     expect(chapters).toContain('class="rte-preview"');
     expect(chapters).toContain('<ChapterComposer');
     expect(composer).toContain('<ProfessionalRichTextEditor');

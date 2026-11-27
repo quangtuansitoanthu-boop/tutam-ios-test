@@ -105,7 +105,7 @@ struct DharmaAudioWidgetView: View {
                 Image(systemName: "headphones").font(.system(size: 28)).foregroundColor(accent).accessibilityHidden(true)
                 Text(WidgetLocaleStore.text("Pháp thoại", "Dharma talks")).font(.system(size: 16, weight: .bold))
                 Text(WidgetLocaleStore.text("Chưa chọn bài nghe", "No talk selected")).font(.system(size: 12)).foregroundColor(secondary)
-                Link("Chọn bài nghe trong app", destination: appURL).font(.system(size: 12, weight: .semibold))
+                Link(WidgetLocaleStore.text("Chọn bài nghe trong app", "Choose a talk in the app"), destination: appURL).font(.system(size: 12, weight: .semibold))
                     .frame(minHeight: 44).foregroundColor(primary)
             }.padding(12).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -294,8 +294,8 @@ struct DharmaAudioWidget: Widget {
     var body: some WidgetConfiguration { configuration }
     var configuration: some WidgetConfiguration {
         StaticConfiguration(kind: DharmaAudioWidgetStore.kind, provider: DharmaAudioWidgetProvider()) { entry in DharmaAudioWidgetView(entry: entry) }
-            .configurationDisplayName("Pháp Thoại & Kinh Sách")
-            .description("Phát tiếp, tua và hẹn giờ trên iOS 17; iOS cũ mở trình phát trong app.")
+            .configurationDisplayName(WidgetLocaleStore.text("Pháp Thoại & Kinh Sách", "Dharma Talks & Scriptures"))
+            .description(WidgetLocaleStore.text("Phát tiếp, tua và hẹn giờ trên iOS 17; iOS cũ mở trình phát trong app.", "Resume, seek and set a sleep timer on iOS 17; earlier versions open the player in the app."))
             .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

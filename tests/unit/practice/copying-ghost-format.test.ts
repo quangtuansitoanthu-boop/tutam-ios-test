@@ -133,4 +133,25 @@ describe('nextGhostTraceText', () => {
   it('does not exceed canonical text length', () => {
     expect(nextGhostTraceText('A', 'A', { key: 'x' })).toBe('A');
   });
+
+  it('keeps remaining ghost words intact during longer Telex composition and word-skipped drafts', () => {
+    const titleRuns = formatGhostRuns(copyingSentences(['{align:center|**TỊNH KHẨU NGHIỆP CHƠN NGÔN**}'], 0));
+    const midWord = alignGhostRuns(titleRuns, 'TỊNH KHẨU nghieepj')!;
+    expect(midWord.map(r => r.text).join('')).toBe('TỊNH KHẨU nghieepj CHƠN NGÔN');
+
+    const ducRuns = formatGhostRuns(copyingSentences(['ĐỨC THẾ TÔN'], 0));
+    const ducComposing = alignGhostRuns(ducRuns, 'dduwc')!;
+    expect(ducComposing.map(r => r.text).join('')).toBe('dduwc THẾ TÔN');
+
+    const multiRuns = formatGhostRuns(copyingSentences([
+      '{align:center|**Nam mô A Di Đà Phật.**}\n{align:justify|Con thành tâm đảnh lễ.}',
+    ], 0));
+    const skippedWord = alignGhostRuns(multiRuns, 'Nam mô Di Đà ')!;
+    expect(skippedWord.map(r => r.text).join('')).toBe('Nam mô Di Đà Phật.\nCon thành tâm đảnh lễ.');
+
+    const multiParaNotes = alignGhostRuns(multiRuns, 'Nam mô A Di Đà Phật (3 lần).\nCon ')!;
+    expect(multiParaNotes.map(r => r.text).join('')).toBe('Nam mô A Di Đà Phật (3 lần).\nCon thành tâm đảnh lễ.');
+    expect(multiParaNotes[0]).toMatchObject({ bold: true, align: 'center', line: 0 });
+    expect(multiParaNotes.at(-1)).toMatchObject({ bold: false, align: 'justify', line: 1 });
+  });
 });

@@ -14,6 +14,7 @@ export interface CopyBookRunManifest {
   previousRuns: Array<{ runId: string; chapterRunIds: string[] }>;
   legacyCompleted?: boolean;
   activeVersion?: string;
+  unsentVersion?: string;
 }
 export interface CopyBookRunSnapshot extends CopyBookRunManifest {
   drafts: CopyDraft[];
@@ -102,6 +103,24 @@ export function createCopyBookRuns(store: CopyBookRunStore) {
       return { writes: new Map([[key, manifest]]), result: undefined };
     });
   }
+  async function rememberUnsentEdition(scope: string, current: CopyBook, version: string) {
+    if (typeof version !== 'string' || !version.trim()) throw new Error('invalid_copy_edition');
+    const key = copyBookRunKey(scope, current);
+    return store.atomic([key], values => {
+      const stored = values.get(key) as CopyBookRunManifest | undefined;
+      const manifest: CopyBookRunManifest = stored ? clone(stored) : { runId: createCopyId(), previousRuns: [] };
+      manifest.unsentVersion = version;
+      return { writes: new Map([[key, manifest]]), result: undefined };
+    });
+  }
+  async function readUnsentEdition(scope: string, current: CopyBook): Promise<string | null> {
+    const key = copyBookRunKey(scope, current);
+    return store.atomic([key], values => {
+      const stored = values.get(key) as CopyBookRunManifest | undefined;
+      const version = stored?.unsentVersion;
+      return { writes: new Map(), result: typeof version === 'string' && version.trim() ? version : null };
+    });
+  }
   async function startNewEdition(scope: string, previous: CopyBook, current: CopyBook) {
     if (previous.version === current.version) return (await operate(scope, current, 'restart'))!;
     const previousSnapshot = await operate(scope, previous, 'read');
@@ -140,7 +159,7 @@ export function createCopyBookRuns(store: CopyBookRunStore) {
     return (await operate(scope, current, 'read'))!;
   }
   return {
-    selectEdition, activateEdition, startNewEdition,
+    selectEdition, activateEdition, startNewEdition, rememberUnsentEdition, readUnsentEdition,
     async ensure(scope: string, book: CopyBook) { return (await operate(scope, book, 'ensure'))!; },
     read(scope: string, book: CopyBook) { return operate(scope, book, 'read'); },
     async startNewRun(scope: string, book: CopyBook) { return (await operate(scope, book, 'restart'))!; },

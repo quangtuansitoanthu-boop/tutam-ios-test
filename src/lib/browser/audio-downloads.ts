@@ -339,6 +339,7 @@ async function downloadAlbum(
     trackCount: album.tracks.length,
     downloadedAt: Date.now(), visibility: album.visibility, ownerId, trackUrls: album.tracks.map(track => track.url),
   };
+  throwIfAborted(options.signal);
   assertDownloadAccess(access);
   await putOfflineAlbum(record, access);
 }
@@ -352,6 +353,7 @@ export function downloadAlbumForOffline(
   options: DownloadOptions
 ): Promise<void> {
   try {
+    throwIfAborted(options.signal);
     assertAlbumDownloadAllowed(album.title, album.id);
   } catch (error) {
     return Promise.reject(error);
@@ -386,8 +388,9 @@ export async function authorizeDownload(
   if (!response.ok) throw new Error(`download_not_authorized:${response.status}`);
 }
 
-function inferAudioExtension(response: Response, url: string): string {
-  const contentType = (response.headers.get('content-type') || '').toLowerCase().split(';')[0].trim();
+function inferMediaExtension(rawType: string | null, url: string): string {
+  const contentType = (rawType || '').toLowerCase().split(';')[0].trim();
+  if (contentType === 'video/mp4') return '.mp4';
   if (contentType === 'audio/mp4' || contentType === 'audio/x-m4a' || contentType === 'audio/m4a') return '.m4a';
   if (contentType === 'audio/webm' || contentType === 'video/webm') return '.webm';
   if (contentType === 'audio/ogg' || contentType === 'application/ogg' || contentType === 'audio/opus') return '.ogg';
@@ -396,7 +399,7 @@ function inferAudioExtension(response: Response, url: string): string {
   if (contentType === 'audio/flac') return '.flac';
   if (contentType === 'audio/mpeg' || contentType === 'audio/mp3') return '.mp3';
 
-  const match = url.match(/\.(mp3|m4a|webm|ogg|opus|wav|flac|aac)(?:[?#]|$)/iu);
+  const match = url.split(/[?#]/u, 1)[0].match(/\.(mp3|mp4|m4a|webm|ogg|opus|wav|flac|aac)$/iu);
   if (match) return `.${match[1].toLowerCase()}`;
   return '.mp3';
 }
@@ -423,7 +426,8 @@ export async function downloadSingleTrackFile(
       bytesDownloaded: stored.blob.size,
       bytesTotal: stored.blob.size
     });
-    triggerBrowserDownload(stored.blob, options.fileName || safeFileName(track.title, '.mp3'));
+    const ext = inferMediaExtension(stored.blob.type, track.url);
+    triggerBrowserDownload(stored.blob, options.fileName || safeFileName(track.title, ext));
     return;
   }
 
@@ -471,7 +475,7 @@ export async function downloadSingleTrackFile(
     bytesDownloaded: blob.size,
     bytesTotal: blob.size
   });
-  const ext = inferAudioExtension(response, track.url);
+  const ext = inferMediaExtension(response.headers.get('content-type'), track.url);
   throwIfAborted(options.signal);
   assertDownloadAccess(access);
   triggerBrowserDownload(blob, options.fileName || safeFileName(track.title, ext));
@@ -528,7 +532,7 @@ export async function downloadAlbumAsZip(
     await assertMediaDownload(response, bytes);
     assertDownloadAccess(access);
     bytesDownloaded += bytes.byteLength;
-    const ext = inferAudioExtension(response, track.url);
+    const ext = inferMediaExtension(response.headers.get('content-type'), track.url);
     entries.push({ fileName: track.title, bytes, extension: ext });
     completed += 1;
     options.onProgress?.({

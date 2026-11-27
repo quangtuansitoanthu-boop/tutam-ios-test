@@ -1,10 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContentUpdateItem } from '../../src/lib/contracts/content-updates';
 import bundledArticles from '../../src/lib/data/offline-bundled-articles.json';
-import bundledTalks from '../../src/lib/data/offline-talks.json';
 import { contentVersion } from '../../src/lib/domain/content-update-model';
 
 const mocks = vi.hoisted(() => ({ saved: vi.fn(), save: vi.fn(), image: vi.fn(), book: vi.fn() }));
+const legacyBundle = vi.hoisted(() => ({ id: 'legacy-bundle', tieu_de: 'Tên album cũ' }));
+const legacyCoverBundle = vi.hoisted(() => ({
+  id: 'pt_1781800562343', tieu_de: 'Tên album có bìa cục bộ',
+  anh_dai_dien: 'covers/niem-phat-thap-yeu-phap-thoai.webp#pos=53%25%2014%25',
+}));
+const recordedBundle = vi.hoisted(() => ({
+  id: 'recorded-bundle', tieu_de: 'Tên trong bộ cài', bundled_content_version: 'c'.repeat(64),
+}));
+vi.mock('../../src/lib/data/offline-talks.json', () => ({ default: [legacyBundle, legacyCoverBundle, recordedBundle] }));
 vi.mock('../../src/lib/browser/offline-content-packages', () => ({ savedContentItems: mocks.saved, saveContentPackage: mocks.save }));
 vi.mock('../../src/lib/browser/session-cover', () => ({ saveCoverOffline: mocks.image, offlineImageRemoteSource: (source: string) => source }));
 vi.mock('../../src/lib/browser/offline-books-sync', () => ({ rememberCompletedBook: mocks.book }));
@@ -51,12 +59,53 @@ describe('manual update confirmation and download boundaries', () => {
   });
 
   it('does not offer an album update when the same web metadata is already bundled', async () => {
-    const row = bundledTalks[0];
+    const row = legacyBundle;
     const album = { ...item(row.id, 'talk'), row, version: await contentVersion(row, 'talk') };
     const fetcher = vi.fn(async () => json({ items: [album], articlesNext: null, talksNext: null }));
     expect((await checkContentUpdates(new AbortController().signal, fetcher)).items).toEqual([]);
     expect(fetcher).toHaveBeenCalledOnce();
   });
+  it('uses the recorded server version of a new bundle and notices when it changes', async () => {
+    const album = item(recordedBundle.id, 'talk');
+    album.version = recordedBundle.bundled_content_version;
+    const fetcher = vi.fn(async () => json({ items: [album], articlesNext: null, talksNext: null }));
+    expect((await checkContentUpdates(new AbortController().signal, fetcher)).items).toEqual([]);
+    expect(fetcher).toHaveBeenCalledOnce();
+    album.version = 'd'.repeat(64);
+    expect((await checkContentUpdates(new AbortController().signal, fetcher)).items).toEqual([album]);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it('recognizes a bundled cover replacement but offers a later editorial album change', async () => {
+    const bundled = legacyCoverBundle;
+    const row = {
+      ...bundled,
+      anh_dai_dien: 'https://i0.wp.com/tinhtan.org/wp-content/uploads/2019/08/HT.-Th%C3%ADch-H%E1%BA%A3i-Quang.jpg?ssl=1#pos=53%25%2014%25',
+    };
+    const album = { ...item(row.id, 'talk'), row, version: await contentVersion(row, 'talk') };
+    const fetcher = vi.fn(async () => json({ items: [album], articlesNext: null, talksNext: null }));
+    expect((await checkContentUpdates(new AbortController().signal, fetcher)).items).toEqual([]);
+    expect(fetcher).toHaveBeenCalledOnce();
+
+    album.row = { ...row, tieu_de: 'Tên album mới' };
+    album.version = await contentVersion(album.row, 'talk');
+    expect((await checkContentUpdates(new AbortController().signal, fetcher)).items).toEqual([album]);
+  });
+
+  it('does not offer a book already bundled when a previous version remains downloaded', async () => {
+    const bundled = bundledArticles.find(row => row.id === 'tt_1781274943336')!;
+    const ritual = { ...item(bundled.id, 'ritual'), row: { ...bundled, anh_url: '' } };
+    mocks.saved.mockResolvedValue([{
+      ...ritual, version: 'b'.repeat(64),
+      row: { ...ritual.row, updated_at: new Date(Date.parse(bundled.updated_at) - 1000).toISOString() },
+    }]);
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => json(String(input).includes('action=estimate')
+      ? [{ id: bundled.id, bytes: 100, chapters: 1, illustrated: false }]
+      : { items: [ritual], articlesNext: null, talksNext: null }));
+    expect((await checkContentUpdates(new AbortController().signal, fetcher)).items).toEqual([]);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
   it('does not ask to download an unchanged ritual already bundled with the app', async () => {
     const bundled = bundledArticles.find(row => row.id === 'tt_1781274943336')!;
     const ritual = { ...item(bundled.id, 'ritual'), row: { ...bundled, anh_url: '' } };

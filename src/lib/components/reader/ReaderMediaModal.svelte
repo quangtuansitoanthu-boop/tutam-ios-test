@@ -87,7 +87,7 @@
 
   <div class="modal-body">
     <div class="book-info">
-      <span class="book-badge">{mediaType === 'video' ? '🎬 Video' : '🖼️ Ảnh'}</span>
+      <span class="book-badge">{mediaType === 'video' ? '🎬 Video' : (isEn ? '🖼️ Image' : '🖼️ Ảnh')}</span>
       <strong class="book-title">{title}</strong>
     </div>
 
@@ -332,9 +332,9 @@
   .confirm-box {
     padding: 12px;
     border-radius: 10px;
-    background: #fef2f2;
-    border: 1px solid #fecaca;
-    color: #991b1b;
+    background: color-mix(in srgb,var(--danger-text) 10%,var(--card));
+    border: 1px solid var(--danger-text);
+    color: var(--danger-text);
     font-size: var(--font-size-body);
   }
   .confirm-box p {
@@ -368,12 +368,12 @@
     gap: 8px;
   }
   .btn-primary {
-    background: var(--gold, #d97706);
-    color: #fff;
+    background: var(--gold);
+    color: var(--on-gold);
     border: none;
   }
   .btn-primary:hover:not(:disabled) {
-    background: var(--brown, #b45309);
+    background: var(--gold2);
   }
   .btn-dismiss {
     background: var(--bg2, #faf7f2);
@@ -387,8 +387,8 @@
     min-height: 44px;
     padding: 10px 16px;
     border-radius: var(--radius-control, 12px);
-    background: var(--gold, #d97706);
-    color: #fff;
+    background: var(--gold);
+    color: var(--on-gold);
     font-size: var(--font-size-label);
     font-weight: 600;
     display: flex;
@@ -400,7 +400,7 @@
   .spinner-white {
     width: 18px;
     height: 18px;
-    border: 2px solid #fff;
+    border: 2px solid var(--on-gold);
     border-top-color: transparent;
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
@@ -409,9 +409,9 @@
     min-height: 44px;
     padding: 10px 16px;
     border-radius: var(--radius-control, 12px);
-    background: #ecfdf5;
-    border: 1px solid #a7f3d0;
-    color: #065f46;
+    background: color-mix(in srgb,var(--green-ok) 10%,var(--card));
+    border: 1px solid var(--border);
+    color: var(--text);
     font-size: 14px;
     font-weight: 600;
     display: flex;
@@ -432,15 +432,15 @@
     background: #dc2626;
     color: #fff;
     border: none;
-    min-height: 36px;
+    min-height: var(--touch-target-size);
     padding: 6px 14px;
     font-size: 12px;
   }
   .btn-cancel {
-    background: #fff;
-    border: 1px solid #d1d5db;
-    color: #374151;
-    min-height: 36px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    min-height: var(--touch-target-size);
     padding: 6px 14px;
     font-size: 12px;
   }

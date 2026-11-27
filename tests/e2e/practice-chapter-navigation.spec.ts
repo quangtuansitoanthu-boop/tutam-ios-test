@@ -121,3 +121,61 @@ for (const article of ['tt_1780910773084', 'tt_nghi_thuc_tri_chu_bao_khiep_an'])
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }
+
+test('opening practice sutra, mantra, or ritual with saved progress stays on TOC and respects explicit chapter choice', async ({ page }) => {
+  const progressKey = 'quangtu_principal_v1:anonymous:quangtu_reading_progress_v1';
+  const savedRows = [
+    {
+      contentKind: 'practice',
+      contentId: 'tt_1780910773084',
+      revision: 1,
+      epoch: 1,
+      percent: 30,
+      position: { chapterId: '4', scrollTop: 480 },
+      clientUpdatedAt: '2026-11-25T10:00:00.000Z',
+    },
+    {
+      contentKind: 'practice',
+      contentId: 'tt_nghi_thuc_tri_chu_bao_khiep_an',
+      revision: 1,
+      epoch: 1,
+      percent: 50,
+      position: { chapterId: '1', scrollTop: 240 },
+      clientUpdatedAt: '2026-11-25T10:00:00.000Z',
+    },
+  ];
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(({ key, rows }) => {
+    localStorage.setItem('tutam_locale', 'vi');
+    localStorage.setItem(key, JSON.stringify(rows));
+  }, { key: progressKey, rows: savedRows });
+  await page.route('**/api/**', route => route.abort('failed'));
+
+  // 1. Entering Kinh Địa Tạng normally must land on TOC, never auto-jump to Phẩm 4.
+  await page.goto('/tu-tap?article=tt_1780910773084');
+  await settleClient(page);
+  await expect(page.locator('.tt-preview__toc-list > button').first()).toBeVisible();
+  await expect(page.locator('.tt-reader-chapter-title')).toHaveCount(0);
+  await expect(page).not.toHaveURL(/chap=/);
+
+  // 2. Selecting Phẩm 1 explicitly and entering practice mode must keep Phẩm 1 at top (not jump back to Phẩm 4).
+  await page.locator('.tt-preview__toc-list > button').filter({ hasText: 'PHẨM 1:' }).click();
+  await expect(page.locator('.tt-reader-chapter-title')).toContainText('PHẨM 1:');
+  await page.locator('.tt-reader-practice-btn').click();
+  await page.locator('.practice-confirm__primary').click();
+  await expect(page.locator('.tt-practice .ttp-art-title')).toContainText('PHẨM 1:');
+
+  // 3. Entering Trì chú / Nghi thức normally also lands on TOC instead of auto-jumping.
+  await page.goto('/tu-tap?article=tt_nghi_thuc_tri_chu_bao_khiep_an');
+  await settleClient(page);
+  await expect(page.locator('.tt-preview__toc-list > button').first()).toBeVisible();
+  await expect(page.locator('.tt-reader-chapter-title')).toHaveCount(0);
+  await expect(page).not.toHaveURL(/chap=/);
+
+  // 4. Starting practice from TOC ("Bắt đầu tu tập") still resumes from saved progress (Phẩm 4).
+  await page.goto('/tu-tap?article=tt_1780910773084');
+  await settleClient(page);
+  await page.locator('.tt-preview__start').click();
+  await page.locator('.practice-confirm__primary').click();
+  await expect(page.locator('.tt-practice .ttp-art-title')).toContainText('PHẨM 4:');
+});

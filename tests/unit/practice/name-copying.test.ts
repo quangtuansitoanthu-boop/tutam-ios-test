@@ -475,6 +475,20 @@ describe('name copying drafts', () => {
   describe('reconcileNameCopyingInput (accent-forgiving auto-snap)', () => {
     const target = 'Nam mô A Di Đà Phật';
 
+    it.each(['phâ', 'phât', 'phát', 'phạt'])('keeps the final Telex syllable %s editable before its exact tone arrives', syllable => {
+      const incoming = `NAM MÔ A DI ĐÀ ${syllable}`;
+      const next = reconcileNameCopyingInput(target, incoming);
+      expect(next).toBe(incoming);
+      expect(matchesNameCopyingPhrase(next, target)).toBe(false);
+    });
+
+    it('preserves raw case and decomposed letters while a syllable is still being edited', () => {
+      expect(reconcileNameCopyingInput(target, 'n')).toBe('n');
+      const pending = 'NAM MÔ A DI ĐÀ ' + 'phât'.normalize('NFD');
+      expect(reconcileNameCopyingInput(target, pending)).toBe(pending);
+      expect(reconcileNameCopyingInput(target, 'nam mô a di đà phật'.normalize('NFD'))).toBe('NAM MÔ A DI ĐÀ PHẬT');
+    });
+
     it('snaps completed words followed by a space to canonical Vietnamese uppercase', () => {
       expect(reconcileNameCopyingInput(target, 'nam mo ')).toBe('NAM MÔ ');
       expect(reconcileNameCopyingInput(target, 'nam mo a di da ')).toBe('NAM MÔ A DI ĐÀ ');
@@ -482,13 +496,15 @@ describe('name copying drafts', () => {
     });
 
     it('preserves plain ASCII final word while typing so Telex tone keys can finish', () => {
-      expect(reconcileNameCopyingInput(target, 'NAM MÔ A DI ĐÀ phat', false)).toBe('NAM MÔ A DI ĐÀ PHAT');
+      expect(reconcileNameCopyingInput(target, 'NAM MÔ A DI ĐÀ phat', false)).toBe('NAM MÔ A DI ĐÀ phat');
       expect(reconcileNameCopyingInput(target, 'NAM MÔ A DI ĐÀ phat ', false)).toBe('NAM MÔ A DI ĐÀ PHẬT');
     });
 
-    it('auto-snaps final word immediately when a wrong Vietnamese diacritic was typed', () => {
-      expect(reconcileNameCopyingInput(target, 'NAM MÔ A DI ĐÀ phát', false)).toBe('NAM MÔ A DI ĐÀ PHẬT');
-      expect(reconcileNameCopyingInput(target, 'NAM MÔ A DI ĐÀ phạt', false)).toBe('NAM MÔ A DI ĐÀ PHẬT');
+    it('waits for a delimiter or explicit commit before correcting a final word with a wrong tone', () => {
+      expect(reconcileNameCopyingInput(target, 'NAM MÔ A DI ĐÀ phát', false)).toBe('NAM MÔ A DI ĐÀ phát');
+      expect(reconcileNameCopyingInput(target, 'NAM MÔ A DI ĐÀ phạt', false)).toBe('NAM MÔ A DI ĐÀ phạt');
+      expect(reconcileNameCopyingInput(target, 'NAM MÔ A DI ĐÀ phát ', false)).toBe('NAM MÔ A DI ĐÀ PHẬT');
+      expect(reconcileNameCopyingInput(target, 'NAM MÔ A DI ĐÀ phạt', true)).toBe('NAM MÔ A DI ĐÀ PHẬT');
     });
 
     it('auto-snaps full unaccented phrase on commit (Enter/Tab/blur)', () => {
@@ -497,8 +513,8 @@ describe('name copying drafts', () => {
     });
 
     it('does not snap words with wrong base letters', () => {
-      expect(reconcileNameCopyingInput(target, 'nam mo a di ba ', false)).toBe('NAM MÔ A DI BA ');
-      expect(reconcileNameCopyingInput(target, 'nam mo a di ba phat', true)).toBe('NAM MÔ A DI BA PHẬT');
+      expect(reconcileNameCopyingInput(target, 'nam mo a di ba ', false)).toBe('NAM MÔ A DI ba ');
+      expect(reconcileNameCopyingInput(target, 'nam mo a di ba phat', true)).toBe('NAM MÔ A DI ba PHẬT');
     });
   });
 });

@@ -80,7 +80,7 @@ export default defineConfig({
       enforce: 'pre',
       transform(code, id) {
         if (process.env.CAPACITOR_BUILD !== '1') return;
-        if (/\/src\/lib\/data\/(?:offline-books-(?:vi|en)|offline-bundled-articles|offline-talks|english-pack-manifest|chapters-en-availability)\.json$/u.test(id.replaceAll('\\', '/'))) {
+        if (/\/src\/lib\/data\/(?:offline-books-(?:vi|en)|offline-bundled-articles|offline-talks|english-pack-manifest|chapters-en-availability|default-views|offline-album-plays)\.json$/u.test(id.replaceAll('\\', '/'))) {
           return JSON.stringify(filterIosContent(JSON.parse(code)));
         }
       },

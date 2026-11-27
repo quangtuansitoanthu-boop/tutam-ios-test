@@ -57,7 +57,8 @@ export function watchNativeAppUpdates(
   const platform: UpdatePlatform = currentPlatform;
 
   let disposed = false;
-  let foreground = true;
+  const pageDocument = typeof document === 'undefined' ? undefined : document;
+  let foreground = pageDocument?.visibilityState !== 'hidden';
   let check: AbortController | undefined;
   const listeners: PluginListenerHandle[] = [];
 
@@ -103,17 +104,22 @@ export function watchNativeAppUpdates(
     } catch { /* Kiểm tra một lần khi mở nguội vẫn có thể chạy. */ }
   }
 
+  // Reserve update priority before permission listeners handle the DOM resume.
+  // Native resume can arrive later; both signals share the same opening guard.
+  const onVisibilityChange = () => changeForeground(pageDocument?.visibilityState !== 'hidden');
+  pageDocument?.addEventListener('visibilitychange', onVisibilityChange, true);
   if (platform === 'ios') {
     void track(App.addListener('pause', () => changeForeground(false)));
     void track(App.addListener('resume', () => changeForeground(true)));
   } else {
     void track(App.addListener('appStateChange', ({ isActive }) => changeForeground(isActive)));
   }
-  void checkOpening();
+  if (foreground) void checkOpening();
 
   return () => {
     disposed = true;
     check?.abort();
+    pageDocument?.removeEventListener('visibilitychange', onVisibilityChange, true);
     for (const listener of listeners) void listener.remove().catch(() => {});
   };
 }

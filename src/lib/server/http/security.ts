@@ -66,6 +66,7 @@ export function enforcePublicWriteOrigin(
   env: CloudflareEnvLike,
   requestId: string,
   session: { csrfToken?: string | null } | null = null,
+  allowLegacyPublicToken = false,
 ): Response | null {
   const origin = request.headers.get('origin');
   const fetchSite = request.headers.get('sec-fetch-site');
@@ -73,8 +74,12 @@ export function enforcePublicWriteOrigin(
     return apiError(403, 'invalid_origin', 'Nguồn yêu cầu không hợp lệ.', requestId);
   }
   const token = request.headers.get('x-csrf-token') || '';
+  // Chỉ endpoint opt-in mới giữ token public của app cũ, trên các origin cố định.
+  const legacyOrigin = allowLegacyPublicToken && origin !== null
+    && (origin === expectedOrigin(request, env) || NATIVE_ORIGINS.has(origin)
+      || (isWorkerWebOrigin(origin) && new URL(request.url).origin === origin));
   const validToken = session?.csrfToken
-    ? constantTimeEqual(token, session.csrfToken || '')
+    ? constantTimeEqual(token, session.csrfToken) || (legacyOrigin && constantTimeEqual(token, 'public'))
     : constantTimeEqual(token, 'public');
   if (!validToken) {
     return apiError(403, 'invalid_csrf', 'CSRF token công khai không hợp lệ.', requestId);

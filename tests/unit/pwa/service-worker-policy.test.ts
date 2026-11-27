@@ -24,7 +24,17 @@ describe('SvelteKit service worker policy', () => {
   });
 
   it('keeps route fallback explicit and excludes large practice audio from precache', () => {
-    expect([...OFFLINE_DOCUMENT_ROUTES]).toEqual(['/', '/huong-dan', '/phap-thoai', '/tu-tap', '/tu-tap/an-chay']);
+    expect([...OFFLINE_DOCUMENT_ROUTES]).toEqual([
+      '/',
+      '/huong-dan',
+      '/phap-thoai',
+      '/tu-tap',
+      '/tu-tap/an-chay',
+      '/tu-tap/quan-am-linh-xam',
+      '/tu-tap/moc-luan-chiem-sat',
+      '/tu-tap/nhip-sinh-hoc',
+      '/tu-tap/giai-mong',
+    ]);
     expect(shouldPrecachePath('/assets/audio/nhac-thien-01.mp3')).toBe(false);
     expect(shouldPrecachePath('/assets')).toBe(false);
     expect(shouldPrecachePath('/assets/branding/tu-tap-logo.png')).toBe(true);

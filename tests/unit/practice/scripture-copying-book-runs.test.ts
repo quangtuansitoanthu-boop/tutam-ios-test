@@ -40,6 +40,21 @@ it('creates one stable run per principal and edition without cross-account data'
   expect((await runs.ensure('guest', { ...book, version: 'v2' })).runId).not.toBe(first.runId);
 });
 
+it.each([['guest', 'account:A'], ['account:A', 'account:B'], ['account:A', 'guest']])(
+  'keeps a completed copy in %s when the active principal becomes %s',
+  async (previous, next) => {
+    const { entries, runs } = fixture();
+    await runs.ensure(previous, book);
+    complete(entries, previous);
+    expect((await runs.read(previous, book))?.complete).toBe(true);
+    expect(await runs.read(next, book)).toBeNull();
+    await runs.ensure(next, book);
+    const snapshot = await runs.read(next, book);
+    expect(snapshot?.complete).toBe(false);
+    expect(snapshot?.drafts.map(draft => draft.texts)).toEqual([[''], ['']]);
+  },
+);
+
 it('requires every chapter and archives all text before activating a new book run', async () => {
   const { runs, entries } = fixture();
   const first = await runs.ensure('guest', book);
@@ -98,6 +113,31 @@ it('rejects chapter drafts belonging to another active run', async () => {
   const key = copyDraftKey('guest', book.id, 1, book.version);
   entries.set(key, { ...entries.get(key) as CopyDraft, bookRunId: 'another-run' });
   await expect(runs.read('guest', book)).rejects.toThrow('invalid_copy_book_draft');
+});
+
+it('remembers an unsent edition on the account manifest without changing drafts or active history', async () => {
+  const { runs, entries } = fixture();
+  const scope = 'account:A';
+  expect(await runs.readUnsentEdition(scope, book)).toBeNull();
+  expect(entries.size).toBe(0);
+  const first = await runs.ensure(scope, book);
+  const key = copyBookRunKey(scope, book);
+  entries.set(key, { runId: first.runId, activeVersion: 'v2', legacyCompleted: true,
+    previousRuns: [{ runId: 'previous', chapterRunIds: ['chapter-one', 'chapter-two'] }] });
+  const before = structuredClone(entries);
+  await runs.rememberUnsentEdition(scope, book, 'v0');
+  expect(await runs.readUnsentEdition(scope, book)).toBe('v0');
+  expect(entries.get(key)).toEqual({ ...before.get(key) as object, unsentVersion: 'v0' });
+  for (const [entryKey, value] of before) if (entryKey !== key) expect(entries.get(entryKey)).toEqual(value);
+  await runs.activateEdition(scope, book, 'v1');
+  expect(await runs.readUnsentEdition(scope, book)).toBe('v0');
+  expect(entries.get(key)).toMatchObject({ runId: first.runId, activeVersion: 'v1', legacyCompleted: true,
+    previousRuns: [{ runId: 'previous', chapterRunIds: ['chapter-one', 'chapter-two'] }], unsentVersion: 'v0' });
+  expect(await runs.readUnsentEdition('account:B', book)).toBeNull();
+  expect(await runs.readUnsentEdition('guest', book)).toBeNull();
+  const saved = structuredClone(entries);
+  await expect(runs.rememberUnsentEdition(scope, book, ' ')).rejects.toThrow('invalid_copy_edition');
+  expect(entries).toEqual(saved);
 });
 
  it('continues a legacy draft and moves only explicit completed restart to the current edition', async () => {

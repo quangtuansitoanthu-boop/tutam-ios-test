@@ -1,13 +1,6 @@
 import { expect, test } from '@playwright/test';
 
 test('practice entry cards have distinct readable palettes in both themes and viewport sizes', async ({ page }, testInfo) => {
-  await page.goto('/');
-  const homeBanner = page.locator('.pbb-compact--vegan');
-  await expect(homeBanner).toBeVisible();
-  const bannerPalette = await homeBanner.evaluate(element => {
-    const style = getComputedStyle(element);
-    return { ink: style.color, stops: style.backgroundImage.match(/(?:rgba?|color)\([^)]*\)/g) };
-  });
   await page.goto('/tu-tap');
   await expect(page.locator('a[href="/tu-tap/chep-danh-hieu"]')).toBeVisible();
   await expect(page.locator('a.tt-mode-card--vegan[href="/tu-tap/an-chay"]')).toBeVisible();
@@ -48,7 +41,6 @@ test('practice entry cards have distinct readable palettes in both themes and vi
       });
     });
     expect(palettes.every(palette => palette.mode)).toBe(true);
-    expect(palettes.find(palette => palette.mode === 'vegan')).toMatchObject(bannerPalette);
     expect(new Set(palettes.map(palette => palette.mode)).size).toBe(17);
     const backgroundFamilies = new Map<string, string[]>();
     for (const palette of palettes) {
@@ -60,13 +52,7 @@ test('practice entry cards have distinct readable palettes in both themes and vi
       .filter(family => family.length > 1)
       .map(family => family.sort().join(','))
       .sort();
-    // Existing practice-theme.css uses gold-light → gold-muted for these
-    // three light cards (including eight-precepts through its base precepts class).
-    // The baseline ui-refresh.css dark rules give every action its own gradient.
-    // The approved four guide cards do not authorize changing these mode palettes.
-    expect(sharedFamilies, `${width}, ${theme}: unexpected shared card gradient`).toEqual(
-      theme === 'light' ? ['copying,eight-precepts,precepts,reflection'] : ['copying,reflection']
-    );
+    expect(sharedFamilies, `${width}, ${theme}: unexpected shared card gradient`).toEqual([]);
     for (const palette of palettes) expect(palette.contrast, `${palette.title} (${width}, ${theme})`).toBeGreaterThanOrEqual(4.5);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const mainModes = page.locator('.tt-modes-grid').filter({ has: page.locator('a[href="/tu-tap/chep-danh-hieu"]') });

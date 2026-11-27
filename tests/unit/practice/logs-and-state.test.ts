@@ -92,7 +92,7 @@ describe('practice logs and exit confirmation', () => {
   });
 
   it('identifies Kinh Dia Tang by title, id, or tags', () => {
-    expect(isDiaTangScripture({ title: 'KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN' })).toBe(true);
+    expect(isDiaTangScripture({ title: 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN' })).toBe(true);
     expect(isDiaTangScripture({ title: 'Kinh Địa Tạng' })).toBe(true);
     expect(isDiaTangScripture({ title: 'Kinh Thủ Lăng Nghiêm', tags: ['Địa Tạng'] })).toBe(true);
     expect(isDiaTangScripture({ title: 'Kinh Thủ Lăng Nghiêm', id: 'kinh-dia-tang' })).toBe(true);
@@ -102,18 +102,18 @@ describe('practice logs and exit confirmation', () => {
   it('always promotes Kinh Dia Tang to the first position in practice catalog', () => {
     const items = [
       { id: '1', title: 'Nghi thức sám hối', category: 'CÁC NGHI THỨC' as const, author: '', imageUrl: '', hasTableOfContents: false, tags: [], publishedAt: '2026-09-01', updatedAt: '2026-09-10' },
-      { id: '2', title: 'KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN', category: 'KINH PHẬT' as const, author: '', imageUrl: '', hasTableOfContents: false, tags: [], publishedAt: '2026-01-01', updatedAt: '2026-01-01' },
+      { id: '2', title: 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN', category: 'KINH PHẬT' as const, author: '', imageUrl: '', hasTableOfContents: false, tags: [], publishedAt: '2026-01-01', updatedAt: '2026-01-01' },
       { id: '3', title: 'Kinh Thủ Lăng Nghiêm', category: 'KINH PHẬT' as const, author: '', imageUrl: '', hasTableOfContents: false, tags: [], publishedAt: '2026-08-01', updatedAt: '2026-08-01' },
     ];
 
     const sorted = sortPracticeCatalog(items);
-    expect(sorted[0]?.title).toBe('KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN');
+    expect(sorted[0]?.title).toBe('KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN');
 
     const filteredAll = filterPracticeCatalog(items, '', 'all');
-    expect(filteredAll[0]?.title).toBe('KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN');
+    expect(filteredAll[0]?.title).toBe('KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN');
 
     const filteredKinh = filterPracticeCatalog(items, '', 'KINH PHẬT');
-    expect(filteredKinh[0]?.title).toBe('KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN');
+    expect(filteredKinh[0]?.title).toBe('KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN');
     expect(filteredKinh[1]?.title).toBe('Kinh Thủ Lăng Nghiêm');
   });
 
@@ -126,7 +126,7 @@ describe('practice logs and exit confirmation', () => {
   });
 
   it('ranks Kinh Duoc Su after Kinh Lang Nghiem in foundational sutras (#5)', () => {
-    expect(getSutraPriorityRank({ title: 'KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN' })).toBe(1);
+    expect(getSutraPriorityRank({ title: 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN' })).toBe(1);
     expect(getSutraPriorityRank({ title: 'Kinh Kim Cang' })).toBe(2);
     expect(getSutraPriorityRank({ title: 'Kinh Diệu Pháp Liên Hoa' })).toBe(3);
     expect(getSutraPriorityRank({ title: 'Kinh Thủ Lăng Nghiêm' })).toBe(4);
@@ -135,12 +135,12 @@ describe('practice logs and exit confirmation', () => {
     const items = [
       { id: '1', title: 'Kinh Dược Sư', category: 'KINH PHẬT' as const, author: '', imageUrl: '', hasTableOfContents: false, tags: [], publishedAt: '2026-09-01', updatedAt: '2026-09-10' },
       { id: '2', title: 'Kinh Thủ Lăng Nghiêm', category: 'KINH PHẬT' as const, author: '', imageUrl: '', hasTableOfContents: false, tags: [], publishedAt: '2026-08-01', updatedAt: '2026-08-01' },
-      { id: '3', title: 'KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN', category: 'KINH PHẬT' as const, author: '', imageUrl: '', hasTableOfContents: false, tags: [], publishedAt: '2026-01-01', updatedAt: '2026-01-01' },
+      { id: '3', title: 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN', category: 'KINH PHẬT' as const, author: '', imageUrl: '', hasTableOfContents: false, tags: [], publishedAt: '2026-01-01', updatedAt: '2026-01-01' },
     ];
 
     const sorted = sortPracticeCatalog(items);
     expect(sorted.map(s => s.title)).toEqual([
-      'KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN',
+      'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN',
       'Kinh Thủ Lăng Nghiêm',
       'Kinh Dược Sư'
     ]);

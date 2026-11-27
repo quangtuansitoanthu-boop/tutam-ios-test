@@ -26,8 +26,8 @@ const MONTH_NAMES_EN = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-export function getVietnamNow(): Date {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+export function getVietnamNow(at: Date = new Date()): Date {
+  return new Date(at.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
 }
 
 function pad(value: number): string {
@@ -266,8 +266,8 @@ export function buildWeekCalendar(anchorDate: Date, todayDate?: Date, locale: Ap
     ? `${MONTH_NAMES_EN[middleDay.solarMonth - 1]} ${middleDay.solarYear}`
     : `Tháng ${middleDay.solarMonth}, ${middleDay.solarYear}`;
   const lunarMonthTitle = locale === 'en'
-    ? `Lunar M${middleDay.lunar.month}`
-    : `Tháng ${middleDay.lunar.month} Âm lịch`;
+    ? `Lunar M${middleDay.lunar.month}${middleDay.lunar.leap ? ' (leap)' : ''}`
+    : `Tháng ${middleDay.lunar.month} Âm lịch${middleDay.lunar.leap ? ' (nhuận)' : ''}`;
   const sunday = days[6].date;
 
   return {
@@ -368,8 +368,8 @@ export function buildMonthCalendar(anchorDate: Date, todayDate?: Date, locale: A
     : `Tháng ${month + 1}, ${year}`;
   const midDay = days[Math.floor(days.length / 2)];
   const lunarMonthTitle = locale === 'en'
-    ? `Lunar M${midDay?.lunar.month ?? 1}`
-    : `Tháng ${midDay?.lunar.month ?? 1} Âm lịch`;
+    ? `Lunar M${midDay?.lunar.month ?? 1}${midDay?.lunar.leap ? ' (leap)' : ''}`
+    : `Tháng ${midDay?.lunar.month ?? 1} Âm lịch${midDay?.lunar.leap ? ' (nhuận)' : ''}`;
 
   return {
     days,

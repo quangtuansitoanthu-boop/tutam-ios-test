@@ -1,10 +1,10 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Tu tập</string>
-    <string name="title_activity_main">Tu tập</string>
-    <string name="startup_brand_title">Tu tập Phật pháp</string>
-    <string name="package_name">vn.quangtu.tutam</string>
-    <string name="custom_url_scheme">vn.quangtu.tutam</string>
-    <string name="server_client_id">18472854734-2hpib1tghifb2li4s42vqaqvthfbn1jp.apps.googleusercontent.com</string>
-    <string name="default_web_client_id">18472854734-2hpib1tghifb2li4s42vqaqvthfbn1jp.apps.googleusercontent.com</string>
+    <string name="app_name" translatable="false">Tu tập</string>
+    <string name="title_activity_main" translatable="false">Tu tập</string>
+    <string name="startup_brand_title" translatable="false">Tu tập Phật pháp</string>
+    <string name="package_name" translatable="false">vn.quangtu.tutam</string>
+    <string name="custom_url_scheme" translatable="false">vn.quangtu.tutam</string>
+    <string name="server_client_id" translatable="false">18472854734-2hpib1tghifb2li4s42vqaqvthfbn1jp.apps.googleusercontent.com</string>
+    <string name="default_web_client_id" translatable="false">18472854734-2hpib1tghifb2li4s42vqaqvthfbn1jp.apps.googleusercontent.com</string>
 </resources>

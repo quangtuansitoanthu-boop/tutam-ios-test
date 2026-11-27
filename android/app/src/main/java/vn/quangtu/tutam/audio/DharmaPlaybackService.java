@@ -37,7 +37,7 @@ public class DharmaPlaybackService extends MediaSessionService {
         @Override public void run() {
             tickSleep();
             if (player.isPlaying() && SystemClock.elapsedRealtime() - lastWidgetPublish >= 10000) publishWidget();
-            handler.postDelayed(this, 1000);
+            updateTicker();
         }
     };
 
@@ -67,7 +67,10 @@ public class DharmaPlaybackService extends MediaSessionService {
             player.setPauseAtEndOfMediaItems(sleepAtEnd);
         }
         player.addListener(new Player.Listener() {
-            @Override public void onTimelineChanged(androidx.media3.common.Timeline timeline, int reason) { DharmaAudioWidgetStore.invalidateQueue(); }
+            @Override public void onTimelineChanged(androidx.media3.common.Timeline timeline, int reason) {
+                DharmaAudioWidgetStore.invalidateQueue();
+                DharmaAudioPlugin.flushCacheEvictions(DharmaPlaybackService.this);
+            }
             @Override public void onPlaybackStateChanged(int state) {
                 // playWhenReady can remain true in STATE_ENDED. Publish a stopped
                 // final item and release active playback/foreground wake state.
@@ -77,6 +80,7 @@ public class DharmaPlaybackService extends MediaSessionService {
                 tickSleep();
                 wasPlaying = playing;
                 lastTick = SystemClock.elapsedRealtime();
+                updateTicker();
             }
             @Override public void onPlayWhenReadyChanged(boolean ready, int reason) {
                 if (!ready && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM && sleepAtEnd) {
@@ -113,7 +117,27 @@ public class DharmaPlaybackService extends MediaSessionService {
                 }
             }).build();
         lastTick = SystemClock.elapsedRealtime();
-        handler.post(ticker);
+        DharmaAudioPlugin.flushCacheEvictions(this);
+        updateTicker();
+    }
+
+    java.util.Set<String> cachedPaths() {
+        java.util.Set<String> paths = new java.util.HashSet<>();
+        for (int i = 0; player != null && i < player.getMediaItemCount(); i++) {
+            MediaItem.LocalConfiguration local = player.getMediaItemAt(i).localConfiguration;
+            if (local != null && "file".equals(local.uri.getScheme()) && local.uri.getPath() != null) paths.add(new java.io.File(local.uri.getPath()).getAbsolutePath());
+        }
+        return paths;
+    }
+
+    private void updateTicker() {
+        handler.removeCallbacks(ticker);
+        if (player != null && player.isPlaying()) handler.postDelayed(ticker, 1000);
+    }
+
+    boolean hasPendingWidgetPlayback() {
+        return player != null && player.getPlayWhenReady() && player.getPlayerError() == null
+            && (player.getPlaybackState() == Player.STATE_BUFFERING || player.getPlaybackState() == Player.STATE_READY);
     }
 
     /** PendingIntent nội bộ gọi cùng player; không mở Activity hoặc WebView. */
@@ -284,10 +308,11 @@ public class DharmaPlaybackService extends MediaSessionService {
         artworkDisposed = true;
         if (active == this) DharmaAudioWidgetArtwork.invalidate();
         handler.removeCallbacksAndMessages(null);
+        if (active == this) active = null;
         publishWidget();
-        active = null;
         if (session != null) session.release();
         if (player != null) player.release();
+        DharmaAudioPlugin.flushCacheEvictions(this);
         DharmaAudioWidgetProvider.updateAll(this);
         super.onDestroy();
     }

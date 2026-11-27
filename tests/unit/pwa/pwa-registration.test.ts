@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("$app/environment", () => ({
+const environment = vi.hoisted(() => ({
   dev: false,
   version: "pwa-test-version",
 }));
+vi.mock("$app/environment", () => environment);
 
 import { registerPwa } from "../../../src/lib/browser/pwa-registration";
 
@@ -25,6 +26,7 @@ class FakeRegistration extends EventTarget {
 }
 
 afterEach(() => {
+  environment.dev = false;
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -65,6 +67,31 @@ describe("PWA registration update lifecycle", () => {
     expect(unregister).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith('quangtu-sveltekit-old');
     expect(remove).not.toHaveBeenCalledWith('tutam-mission-images-v1');
+  });
+
+  it.each(['native', 'development', 'native-development', 'native-no-service-worker'] as const)("purges only shell caches during %s startup without deleting offline or unrelated data", async kind => {
+    environment.dev = kind.includes('development');
+    const native = kind.startsWith('native');
+    const unregister = vi.fn(async () => true);
+    const remove = vi.fn(async () => true);
+    const register = vi.fn();
+    const reload = vi.fn();
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => native });
+    vi.stubGlobal('location', { reload });
+    vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
+    vi.stubGlobal('navigator', kind === 'native-no-service-worker' ? {} : {
+      serviceWorker: { getRegistrations: async () => [{ unregister }], register, controller: native ? {} : null },
+    });
+    const cacheNames = ['quangtu-sveltekit-old', 'quangtu-sveltekit-new',
+      'tutam-api-v2-public', 'tutam-practice-audio-v1', 'tutam_quangtu_videos_cache_v1', 'tutam-public-comments-v2',
+      'tutam-content-packages-v1', 'tutam-public-covers-v1', 'tutam-english-chapters-v2', 'tutam-mission-images-v1',
+      'unrelated-cache', 'stale-shell', 'quangtu-sveltekit'];
+    vi.stubGlobal('caches', { keys: async () => cacheNames, delete: remove });
+    expect(await registerPwa()).toBeNull();
+    expect(remove.mock.calls.map(([name]) => name)).toEqual(['quangtu-sveltekit-old', 'quangtu-sveltekit-new']);
+    expect(unregister).toHaveBeenCalledTimes(kind === 'native-no-service-worker' ? 0 : 1);
+    expect(register).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
   });
   it("silently activates a waiting worker that already matches the loaded client build", async () => {
     vi.useFakeTimers();

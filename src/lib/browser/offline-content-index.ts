@@ -1,11 +1,14 @@
 import type { ContentRow, ContentUpdateItem } from '$lib/contracts/content-updates';
 
 export const CONTENT_INDEX_DATABASE = 'tutam_content_package_index';
-export const CONTENT_INDEX_VERSION = 1;
+export const CONTENT_INDEX_VERSION = 2;
 export type SavedContentItem = ContentUpdateItem & { packageKey: string };
 export type IndexedContentItem = SavedContentItem & { itemKey: string; chapterData: Blob; revision: number };
 interface IndexState { key: 'state'; revision: number; legacyFingerprint?: string; }
 export interface ContentIndexSnapshot { items: IndexedContentItem[]; state: IndexState; }
+export interface CachedContentResponse {
+  cacheName: string; url: string; body: Blob; status: number; statusText: string; headers: [string, string][];
+}
 let databasePromise: Promise<IDBDatabase> | undefined;
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
@@ -29,11 +32,17 @@ async function openDatabase(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains('items')) request.result.createObjectStore('items', { keyPath: 'itemKey' });
       if (!request.result.objectStoreNames.contains('meta')) request.result.createObjectStore('meta', { keyPath: 'key' });
+      if (!request.result.objectStoreNames.contains('responses')) {
+        request.result.createObjectStore('responses', { keyPath: ['cacheName', 'url'] }).createIndex('cacheName', 'cacheName');
+      }
     };
     request.onsuccess = () => {
       const database = request.result;
       if (failed) { database.close(); return; }
-      database.onversionchange = () => { database.close(); databasePromise = undefined; };
+      const opened = databasePromise;
+      const forget = () => { if (databasePromise === opened) databasePromise = undefined; };
+      database.onclose = forget;
+      database.onversionchange = () => { database.close(); forget(); };
       resolve(database);
     };
     request.onerror = () => { failed = true; reject(request.error ?? new Error('offline_content_index_unavailable')); };
@@ -41,6 +50,30 @@ async function openDatabase(): Promise<IDBDatabase> {
   });
   const pending = databasePromise;
   return pending.catch(cause => { if (databasePromise === pending) databasePromise = undefined; throw cause; });
+}
+export async function ensureResponseStorage(): Promise<void> { await openDatabase(); }
+export async function readCachedContentResponses(cacheName: string, url?: string): Promise<CachedContentResponse[]> {
+  const database = await openDatabase();
+  const transaction = database.transaction('responses', 'readonly');
+  const done = transactionDone(transaction);
+  const store = transaction.objectStore('responses');
+  const request = (url ? store.get([cacheName, url]) : store.index('cacheName').getAll(cacheName)) as IDBRequest<CachedContentResponse | CachedContentResponse[] | undefined>;
+  const [result] = await Promise.all([requestResult(request), done]);
+  return Array.isArray(result) ? result : result ? [result] : [];
+}
+export async function putCachedContentResponse(record: CachedContentResponse): Promise<void> {
+  const database = await openDatabase();
+  const transaction = database.transaction('responses', 'readwrite');
+  const done = transactionDone(transaction);
+  transaction.objectStore('responses').put(record);
+  await done;
+}
+export async function deleteCachedContentResponse(cacheName: string, url: string): Promise<void> {
+  const database = await openDatabase();
+  const transaction = database.transaction('responses', 'readwrite');
+  const done = transactionDone(transaction);
+  transaction.objectStore('responses').delete([cacheName, url]);
+  await done;
 }
 export async function readContentIndex(): Promise<ContentIndexSnapshot> {
   const database = await openDatabase();

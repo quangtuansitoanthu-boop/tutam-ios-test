@@ -20,6 +20,8 @@ export function installPdfGestures(viewer: HTMLElement, options: PdfGestureOptio
   let previewZoom = 1;
   let centerX = 0;
   let centerY = 0;
+  let originX = 0;
+  let originY = 0;
 
   const clearPreview = () => {
     const target = options.getTransformTarget();
@@ -48,7 +50,7 @@ export function installPdfGestures(viewer: HTMLElement, options: PdfGestureOptio
 
   const onTouchStart = (event: TouchEvent) => {
     if (event.touches.length !== 2) {
-      active = false;
+      finishPinch(0);
       return;
     }
     event.preventDefault();
@@ -58,18 +60,21 @@ export function installPdfGestures(viewer: HTMLElement, options: PdfGestureOptio
     previewZoom = startZoom;
     centerX = (first.clientX + second.clientX) / 2;
     centerY = (first.clientY + second.clientY) / 2;
+    const rect = options.getTransformTarget()?.getBoundingClientRect();
+    originX = centerX - (rect?.left ?? 0);
+    originY = centerY - (rect?.top ?? 0);
     active = startDistance > 0;
   };
 
   const onTouchMove = (event: TouchEvent) => {
-    if (!active || event.touches.length !== 2 || startDistance <= 0) return;
+    if (event.touches.length !== 2) { finishPinch(0); return; }
+    if (!active || startDistance <= 0) return;
     event.preventDefault();
     const [first, second] = [event.touches[0], event.touches[1]];
     previewZoom = clampZoom(startZoom * (distance(first, second) / startDistance));
     const target = options.getTransformTarget();
     if (target) {
-      const rect = target.getBoundingClientRect();
-      target.style.transformOrigin = `${centerX - rect.left}px ${centerY - rect.top}px`;
+      target.style.transformOrigin = `${originX}px ${originY}px`;
       target.style.transform = `scale(${previewZoom / options.getZoom()})`;
       target.style.willChange = 'transform';
     }

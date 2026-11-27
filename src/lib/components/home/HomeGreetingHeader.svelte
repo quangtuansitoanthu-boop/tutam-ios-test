@@ -1,5 +1,6 @@
 <script lang="ts">
   import { browser } from '$app/environment';
+  import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
   import { getSessionContext } from '$lib/stores/session.svelte';
@@ -29,6 +30,15 @@
   const avatarUrl = $derived(sessionStore.value.user?.avatarUrl?.trim() || null);
   const avatarKey = $derived(`${sessionStore.value.user?.id ?? ''}:${avatarUrl ?? ''}`);
   const userAvatar = $derived(failedAvatarKey === avatarKey ? null : avatarUrl);
+  const avatarAttempt = $derived(userAvatar ? { key: avatarKey, url: userAvatar } : null);
+
+  onMount(() => {
+    const retryAvatar = () => {
+      failedAvatarKey = null;
+    };
+    window.addEventListener('online', retryAvatar);
+    return () => window.removeEventListener('online', retryAvatar);
+  });
 
   const displayName = $derived.by(() => {
     const user = sessionStore.value.user;
@@ -42,19 +52,21 @@
   <div class="greeting-top-row">
     <div class="greeting-user">
       <div class={`greeting-avatar avatar-ring ${avatarBadge ? `avatar-ring--${avatarBadge.id}` : ''}`} class:greeting-avatar--member={sessionStore.value.authenticated} aria-hidden="true">
-        {#if userAvatar}
+        {#each avatarAttempt ? [avatarAttempt] : [] as avatar (avatar)}
           <img
-            src={userAvatar}
+            src={avatar.url}
             alt=""
             class="avatar-photo"
             referrerpolicy="no-referrer"
-            onerror={() => { failedAvatarKey = avatarKey; }}
+            onerror={() => { if (avatar === avatarAttempt) failedAvatarKey = avatar.key; }}
           />
-        {:else if sessionStore.value.authenticated}
-          <span class="avatar-initial">{displayName.slice(0, 1).toLocaleUpperCase()}</span>
         {:else}
-          <span class="avatar-lotus">🪷</span>
-        {/if}
+          {#if sessionStore.value.authenticated}
+            <span class="avatar-initial">{displayName.slice(0, 1).toLocaleUpperCase()}</span>
+          {:else}
+            <span class="avatar-lotus">🪷</span>
+          {/if}
+        {/each}
         {#if rank}
           <span class="greeting-badge"><PracticeBadgeIcon badgeId={avatarBadge?.id} /></span>
         {/if}

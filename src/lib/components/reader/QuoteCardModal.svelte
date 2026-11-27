@@ -166,9 +166,10 @@
     try {
       isGenerating = true;
       const saved = await savePngImage(await exportBlob(), `trich-dan-quangtu-${Date.now()}.png`);
-      if (saved) showToast(isNativeApp() ? 'Đã lưu ảnh PNG vào máy.' : 'Đã bắt đầu tải ảnh PNG.');
+      const isEn = locale.current === 'en';
+      if (saved) showToast(isNativeApp() ? (isEn ? 'Saved PNG image to your device.' : 'Đã lưu ảnh PNG vào máy.') : (isEn ? 'Started downloading PNG image.' : 'Đã bắt đầu tải ảnh PNG.'));
     } catch {
-      showToast('Không thể tải ảnh. Vui lòng thử lại.');
+      showToast(locale.current === 'en' ? 'Unable to download image. Please try again.' : 'Không thể tải ảnh. Vui lòng thử lại.');
     } finally {
       isGenerating = false;
     }
@@ -184,7 +185,7 @@
           await navigator.clipboard.write([
             new ClipboardItem({ 'image/png': blob }),
           ]);
-          showToast('Đã sao chép ảnh vào bộ nhớ tạm! (Bạn có thể dán ngay vào Zalo, Facebook)');
+          showToast(locale.current === 'en' ? 'Copied image to clipboard!' : 'Đã sao chép ảnh vào bộ nhớ tạm! (Bạn có thể dán ngay vào Zalo, Facebook)');
         } else {
           await downloadImage();
         }
@@ -192,7 +193,7 @@
         await downloadImage();
       }
     } catch {
-      showToast('Không thể sao chép ảnh.');
+      showToast(locale.current === 'en' ? 'Unable to copy image.' : 'Không thể sao chép ảnh.');
     } finally {
       isGenerating = false;
     }
@@ -203,14 +204,15 @@
     try {
       isGenerating = true;
       const blob = await exportBlob();
-      const title = sourceTitle ? `Trích dẫn: ${sourceTitle}` : 'Trích dẫn hay';
-      const text = `“${quoteText}” — ${sourceTitle || 'Tu Tập Phật Pháp (quangtu.vn)'}`;
+      const isEn = locale.current === 'en';
+      const title = sourceTitle ? (isEn ? `Quote: ${sourceTitle}` : `Trích dẫn: ${sourceTitle}`) : (isEn ? 'Featured Quote' : 'Trích dẫn hay');
+      const text = `“${quoteText}” — ${sourceTitle || (isEn ? 'Tu Tam Buddhist Library (quangtu.vn)' : 'Tu Tập Phật Pháp (quangtu.vn)')}`;
       const shared = await sharePngImage(blob, 'trich-dan-quangtu.png', { title, text });
       if (!shared && !isNativeApp()) {
         await copyImage();
       }
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) showToast('Không thể chia sẻ ảnh. Vui lòng thử lại.');
+      if (!(error instanceof DOMException && error.name === 'AbortError')) showToast(locale.current === 'en' ? 'Unable to share image. Please try again.' : 'Không thể chia sẻ ảnh. Vui lòng thử lại.');
     } finally {
       isGenerating = false;
     }
@@ -283,7 +285,7 @@
           class="quote-btn copy-btn"
           onclick={copyImage}
           disabled={isGenerating}
-          title="Sao chép ảnh để dán thẳng vào Zalo/Messenger/FB"
+          title={locale.current === 'en' ? 'Copy image to paste into messaging apps' : 'Sao chép ảnh để dán thẳng vào Zalo/Messenger/FB'}
         >
           <span>📋</span>
           <span>{copy.copy}</span>
@@ -294,7 +296,7 @@
           class="quote-btn download-btn"
           onclick={downloadImage}
           disabled={isGenerating}
-          title="Tải ảnh PNG độ nét cao về máy"
+          title={locale.current === 'en' ? 'Download high-resolution PNG image' : 'Tải ảnh PNG độ nét cao về máy'}
         >
           <span>📥</span>
           <span>{copy.save}</span>
@@ -305,7 +307,7 @@
           class="quote-btn share-btn"
           onclick={shareImage}
           disabled={isGenerating}
-          title="Chia sẻ lên mạng xã hội"
+          title={locale.current === 'en' ? 'Share to social media' : 'Chia sẻ lên mạng xã hội'}
         >
           <span>📤</span>
           <span>{copy.share}</span>
@@ -438,25 +440,28 @@
 
   /* Action Buttons */
   .quote-card-actions {
-    display: flex;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .quote-btn {
-    flex: 1;
+    min-width: 0;
     min-height: var(--touch-target-size);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 10px 12px;
-    border-radius: 12px;
+    gap: 4px;
+    padding: 8px 6px;
+    border-radius: var(--radius);
     font-family: inherit;
-    font-size:var(--font-size-label);
+    font-size: var(--font-size-meta);
     font-weight: 700;
+    line-height: 1.25;
+    text-align: center;
     cursor: pointer;
     transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
-    white-space: nowrap;
+    overflow-wrap: break-word;
     -webkit-tap-highlight-color: transparent;
   }
 
@@ -532,13 +537,6 @@
     .quote-card-dialog {
       padding: 16px;
     }
-    .quote-card-actions {
-      flex-direction: column;
-    }
-    .quote-btn {
-      width: 100%;
-      padding: 11px;
-    }
   }
   @media (min-width: 900px) {
     .quote-card-modal { width:min(860px,calc(100% - var(--space-page)*2)); }
@@ -546,6 +544,5 @@
     .quote-card-header { grid-column:1/-1; margin-bottom:0; }
     .quote-canvas-preview-wrap { grid-column:1; grid-row:2/4; margin-bottom:0; }
     .quote-card-themes { margin-bottom:0; }
-    .quote-card-actions { flex-wrap:wrap; }
   }
 </style>

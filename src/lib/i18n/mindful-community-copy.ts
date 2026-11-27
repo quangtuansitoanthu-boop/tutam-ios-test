@@ -12,6 +12,10 @@ export const mindfulCommunityCopy = {
     select: 'Chọn lời mẫu', send: 'Gửi', cancel: 'Hủy', nickname: 'Biệt danh cộng đồng', noNickname: 'Hãy đặt biệt danh trong Sổ quán chiếu để tùy hỷ hoặc gửi lời nguyện.',
     once: 'Mỗi người chỉ gửi một lần trên mỗi bài. Không có bình luận tự do.', delete: 'Gỡ bài', deleteTitle: 'Gỡ bài của tôi?',
     deleteDescription: 'Bài này sẽ không còn hiển thị trên bảng tin. Nhật ký riêng trên máy được giữ nguyên.', close: 'Đóng',
+    deleteRejectedDescription: 'Bài bị từ chối sẽ được gỡ khỏi Bài của tôi. Nhật ký riêng trên máy được giữ nguyên.',
+    withdraw: 'Rút bài', withdrawTitle: 'Rút bài đang chờ duyệt?',
+    withdrawDescription: 'Bài sẽ rời hàng chờ duyệt. Nhật ký riêng trên máy được giữ nguyên.',
+    removeUnavailable: 'Bài này không còn ở trạng thái có thể rút hoặc gỡ.',
     noReactions: 'Chưa có lời nguyện.', hidden: 'Bài đã được ẩn.',
   },
   en: {
@@ -27,6 +31,10 @@ export const mindfulCommunityCopy = {
     select: 'Choose a prayer', send: 'Send', cancel: 'Cancel', nickname: 'Community nickname', noNickname: 'Choose a nickname in your personal journal to rejoice or send a prayer.',
     once: 'Each person can respond once per post. Free-text comments are not available.', delete: 'Remove post', deleteTitle: 'Remove my post?',
     deleteDescription: 'This post will no longer appear in the feed. Your private journal on this device is kept.', close: 'Close',
+    deleteRejectedDescription: 'The rejected post will be removed from My posts. Your private journal on this device is kept.',
+    withdraw: 'Withdraw post', withdrawTitle: 'Withdraw this pending post?',
+    withdrawDescription: 'The post will leave the review queue. Your private journal on this device is kept.',
+    removeUnavailable: 'This post can no longer be withdrawn or removed.',
     noReactions: 'No prayers yet.', hidden: 'This post is hidden.',
   },
 } as const;

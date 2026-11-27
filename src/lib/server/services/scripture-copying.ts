@@ -9,7 +9,8 @@ interface CopyRow {
   run_id: string; source_version: string; texts_json: string; revision: number;
   mutation_id: string; payload_hash: string; saved_at: string; completed_blocks: number; complete: number;
 }
-const ack = (row: CopyRow) => ({ revision: row.revision, savedAt: row.saved_at, completedBlocks: row.completed_blocks, complete: row.complete === 1 });
+interface LatestCopyRow extends Omit<CopyRow, 'mutation_id' | 'payload_hash'> { sutra_id: string; chapter: number }
+const ack = (row: Pick<CopyRow, 'revision' | 'saved_at' | 'completed_blocks' | 'complete'>) => ({ revision: row.revision, savedAt: row.saved_at, completedBlocks: row.completed_blocks, complete: row.complete === 1 });
 export function createCopyingService(env: CloudflareEnvLike, owner: string | null) {
   const requireOwner = () => { if (!owner) throw new ServerInputError(401, 'authentication_required', 'Vui lòng đăng nhập để lưu lên hệ thống.'); return owner; };
   const chapterFor = (sutraId: unknown, chapter: unknown) => {
@@ -18,6 +19,15 @@ export function createCopyingService(env: CloudflareEnvLike, owner: string | nul
     return { book, source: book.chapters[Number(chapter) - 1] };
   };
   return {
+    async latest() {
+      const userId = requireOwner();
+      const row = await env.DB.prepare(`SELECT sutra_id, chapter, run_id, source_version, texts_json,
+        revision, saved_at, completed_blocks, complete FROM scripture_copy_chapters
+        WHERE user_id = ? ORDER BY saved_at DESC, run_id DESC LIMIT 1`)
+        .bind(userId).first<LatestCopyRow>();
+      return row ? { sutraId: row.sutra_id, chapter: row.chapter, runId: row.run_id,
+        sourceVersion: row.source_version, texts: JSON.parse(row.texts_json) as string[], ...ack(row) } : null;
+    },
     async save(input: Record<string, unknown>) {
       const userId = requireOwner();
       chapterFor(input.sutraId, input.chapter);

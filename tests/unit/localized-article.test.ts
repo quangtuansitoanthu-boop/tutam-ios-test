@@ -6,7 +6,8 @@ import {
   prepareLocalizedReadingContent,
   ENGLISH_TRANSLATION_NOTICE,
   hasEnglishChapters,
-  hasEnglishReadingContent
+  hasEnglishReadingContent,
+  isMachineTranslatedEnglish
 } from '../../src/lib/domain/library/localized-article';
 import type { LibraryArticle } from '../../src/lib/components/library/article';
 
@@ -21,6 +22,18 @@ describe('localized-article domain', () => {
       const vietnamese = getLocalizedArticle(english, 'vi');
       expect(vietnamese.summary).toContain('nhóm chị Hoa');
       expect(vietnamese.summary).toContain('không khẳng định');
+    }
+  });
+
+  it('uses canonical Kinh Dia Tang title with Bo Tat even when cached/D1 row carries old Bo Tat typo', () => {
+    for (const id of ['tt_1780910773084', 'book_tt_1780910773084']) {
+      const stale = {
+        id,
+        title: 'KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN',
+        originalTitle: 'KINH ĐỊA TẠNG BỒ TẤT BỔN NGUYỆN'
+      } as LibraryArticle;
+      const resolved = getLocalizedArticle(stale, 'vi');
+      expect(resolved.title).toBe('KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN');
     }
   });
 
@@ -155,5 +168,99 @@ describe('localized-article domain', () => {
     expect(viArticle.title).toBe('Tiêu Đề Gốc Tiếng Việt');
     expect(viArticle.summary).toBe('Mô Tả Gốc Tiếng Việt');
     expect(viArticle.author).toBe('Tác Giả Gốc');
+  });
+
+  it('serves English content instead of Vietnamese chapters for single-article books in articles-en.json', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { vi } = await import('vitest');
+    const articlesEn = readFileSync('static/offline-data/articles-en.json', 'utf8');
+    const bundled = readFileSync('static/offline-bundled-articles.json', 'utf8');
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => key === 'tutam_locale' ? 'en' : null,
+      setItem: () => {},
+      removeItem: () => {},
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/offline-bundled-articles.json')) return new Response(bundled, { headers: { 'content-type': 'application/json' } });
+      if (url.includes('/offline-data/articles-en.json')) return new Response(articlesEn, { headers: { 'content-type': 'application/json' } });
+      return new Response('null', { status: 404 });
+    }));
+    const { resolveOfflineBundledResponse } = await import('../../src/lib/browser/offline-bundled-resolver');
+    const res = await resolveOfflineBundledResponse('/api/articles/book_1788147908838_8001cf50/chapters');
+    const rows = await res?.json();
+    expect(Array.isArray(rows)).toBe(true);
+    expect(rows[0]?.noi_dung).toContain('BUDDHISM OF WISDOM AND FAITH');
+    expect(rows[0]?.noi_dung).not.toContain('PHẬT PHÁP VỚI ĐỜI SỐNG');
+    vi.unstubAllGlobals();
+  });
+
+  it.each(['luong-hoang-sam', 'tu-bi-thuy-sam-phap'])('keeps the full chapter structure and verified English pack for %s', async (id) => {
+    const { readFileSync } = await import('node:fs');
+    const { createHash } = await import('node:crypto');
+    type Chapter = { id: string; bai_viet_id: string; so_thu_tu: number; tieu_de: string; noi_dung: string };
+    const original = JSON.parse(readFileSync(`static/offline-data/chapters/${id}.json`, 'utf8')) as Chapter[];
+    const bytes = readFileSync(`static/offline-data/chapters-en/${id}.json`);
+    const english = JSON.parse(bytes.toString('utf8')) as Chapter[];
+    const manifest = JSON.parse(readFileSync('src/lib/data/english-pack-manifest.json', 'utf8')) as {
+      entries: Array<{ file: string; bytes: number; sha256: string }>;
+    };
+    expect(getEnglishBookMeta(id)?.title).toMatch(/REPENTANCE/);
+    expect(getEnglishBookMeta(`book_${id}`)).toEqual(getEnglishBookMeta(id));
+    expect(hasEnglishChapters(id)).toBe(true);
+    expect(isMachineTranslatedEnglish(id)).toBe(true);
+    expect(english.map(row => [row.id, row.bai_viet_id, row.so_thu_tu])).toEqual(
+      original.map(row => [row.id, row.bai_viet_id, row.so_thu_tu])
+    );
+    for (const [index, chapter] of english.entries()) {
+      expect(chapter.tieu_de).not.toBe(original[index].tieu_de);
+      expect(chapter.noi_dung).not.toBe(original[index].noi_dung);
+      // Không mất khổ kệ, chỉ dẫn in nghiêng hoặc căn lề khi tạo bản dịch.
+      expect(chapter.noi_dung.match(/<[^>]+>/gu)).toEqual(original[index].noi_dung.match(/<[^>]+>/gu));
+      // Chân ngôn giữ âm tụng gốc, tránh dịch nhầm "Án" thành nghĩa thông thường.
+      for (const mantra of original[index].noi_dung.matchAll(/>(Án[^<]+)</gu)) {
+        expect(chapter.noi_dung).toContain(mantra[1]);
+      }
+    }
+    expect(manifest.entries.find(entry => entry.file === `${id}.json`)).toEqual({
+      file: `${id}.json`, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex')
+    });
+    expect(readFileSync('static/offline-data/english-pack-manifest.json', 'utf8')).toBe(
+      readFileSync('src/lib/data/english-pack-manifest.json', 'utf8')
+    );
+  });
+
+  it('provides English metadata and reading content for every non-comic bundled book, sutra, and ritual', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const bundled = JSON.parse(readFileSync('static/offline-bundled-articles.json', 'utf8')) as Array<{
+      id: string;
+      tieu_de: string;
+      has_muc_luc?: number;
+      so_tap?: number;
+    }>;
+    const articlesEn = JSON.parse(readFileSync('static/offline-data/articles-en.json', 'utf8')) as Record<string, { noi_dung?: string; content?: string }>;
+    const missingMeta: string[] = [];
+    const missingContent: string[] = [];
+
+    for (const item of bundled) {
+      if (!getEnglishBookMeta(item.id)) {
+        missingMeta.push(`${item.id} (${item.tieu_de})`);
+      }
+      const isPdfComic = /^tt_17832635/.test(item.id) || (
+        (item.has_muc_luc ?? 0) === 0
+        && (item.so_tap ?? 0) === 0
+        && !existsSync(`static/offline-data/chapters/${item.id}.json`)
+      );
+      if (isPdfComic) continue;
+      const hasChaptersFile = existsSync(`static/offline-data/chapters-en/${item.id}.json`);
+      const single = articlesEn[item.id];
+      const hasSingleArticle = Boolean((single?.noi_dung ?? single?.content)?.trim());
+      if (!hasChaptersFile && !hasSingleArticle) {
+        missingContent.push(`${item.id} (${item.tieu_de})`);
+      }
+    }
+
+    expect(missingMeta).toEqual([]);
+    expect(missingContent).toEqual([]);
   });
 });

@@ -53,6 +53,20 @@ const legacyCheckPermissions = String.raw`    @objc override public func checkPe
 const legacySource = "import Foundation\nimport Capacitor\nimport UserNotifications\n\nenum LocalNotificationError: LocalizedError {\n    case triggerConstructionFailed\n}\n\nclass Fixture {\n    @objc func schedule(_ call: CAPPluginCall) {\n        guard let notifications = call.getArray(\"notifications\", JSObject.self) else {\n            call.reject(\"Must provide notifications array as notifications option\")\n            return\n        }\n        var ids = [String]()\n\n        for notification in notifications {\n            guard let identifier = notification[\"id\"] as? Int else {\n                call.reject(\"Notification missing identifier\")\n                return\n            }\n\n            // let extra = notification[\"options\"] as? JSObject ?? [:]\n\n            var content: UNNotificationContent\n            do {\n                content = try makeNotificationContent(notification)\n            } catch {\n                CAPLog.print(error.localizedDescription)\n                call.reject(\"Unable to make notification\", nil, error)\n                return\n            }\n\n            var trigger: UNNotificationTrigger?\n\n            do {\n                if let schedule = notification[\"schedule\"] as? JSObject {\n                    try trigger = handleScheduledNotification(call, schedule)\n                }\n            } catch {\n                call.reject(\"Unable to create notification, trigger failed\", nil, error)\n                return\n            }\n\n            // Schedule the request.\n            let request = UNNotificationRequest(identifier: \"\\(identifier)\", content: content, trigger: trigger)\n\n            self.notificationDelegationHandler.notificationRequestLookup[request.identifier] = notification\n\n            let center = UNUserNotificationCenter.current()\n            center.add(request) { (error: Error?) in\n                if let theError = error {\n                    CAPLog.print(theError.localizedDescription)\n                    call.reject(theError.localizedDescription)\n                }\n            }\n\n            ids.append(request.identifier)\n        }\n\n        let ret = ids.map({ (id) -> JSObject in\n            return [\n                \"id\": Int(id) ?? -1\n            ]\n        })\n        call.resolve([\n            \"notifications\": ret\n        ])\n    }\n\n\n    func handleScheduledNotification(_ call: CAPPluginCall, _ schedule: JSObject) throws -> UNNotificationTrigger? {\n            if dateInfo.date! < Date() {\n                call.reject(\"Scheduled time must be *after* current time\")\n                return nil\n            }\n\n        return nil\n    }\n\n    func untouchedMarker() { print(\"preserve unrelated code\") }\n}\n".replace('    func untouchedMarker()', legacyCheckPermissions + '\n\n    func untouchedMarker()');
 
 const roots: string[] = [];
+const legacyGetPending = String.raw`    @objc func getPending(_ call: CAPPluginCall) {
+        UNUserNotificationCenter.current().getPendingNotificationRequests(completionHandler: { (notifications) in
+            CAPLog.print("num of pending notifications \(notifications.count)")
+            CAPLog.print(notifications)
+
+            let ret = notifications.compactMap({ [weak self] (notification) -> JSObject? in
+                return self?.notificationDelegationHandler.makePendingNotificationRequestJSObject(notification)
+            })
+
+            call.resolve([
+                "notifications": ret
+            ])
+        })
+    }`;
 const relativeSwift = 'ios/Sources/LocalNotificationsPlugin/LocalNotificationsPlugin.swift';
 const pluginName = '@capacitor/local-notifications';
 const license = 'Copyright 2020-present Ionic\nMIT License fixture retained verbatim\n';
@@ -66,7 +80,8 @@ function fixture(outside = false, crlf = false) {
   fs.mkdirSync(path.dirname(swift), { recursive: true });
   fs.writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: pluginName, version: '7.0.7' }));
   fs.writeFileSync(path.join(directory, 'LICENSE'), license);
-  fs.writeFileSync(swift, crlf ? legacySource.replaceAll('\n', '\r\n') : legacySource);
+  const source = legacySource.replace('    func untouchedMarker()', legacyGetPending + '\n\n    func untouchedMarker()');
+  fs.writeFileSync(swift, crlf ? source.replaceAll('\n', '\r\n') : source);
   return { root, directory, swift };
 }
 async function patch() {
@@ -143,7 +158,7 @@ it('rolls back mixed native acceptance before rejecting, retaining old requests 
   const remove = method.indexOf('center.removePendingNotificationRequests(withIdentifiers: createdIds)');
   const restore = method.indexOf('center.add(restoreRequest)');
   const rollbackSettled = method.indexOf('rollback.notify(queue: .main)');
-  const verifyRemoval = method.indexOf('center.getPendingNotificationRequests', snapshot + 1);
+  const verifyRemoval = method.indexOf('center.getPendingNotificationRequests', rollbackSettled);
   const reject = method.indexOf('call.reject(', settled);
   expect(snapshot).toBeLessThan(add);
   expect(add).toBeLessThan(settled);
@@ -162,7 +177,27 @@ it('rolls back mixed native acceptance before rejecting, retaining old requests 
   expect(method).toContain('UNTimeIntervalNotificationTrigger(timeInterval: remaining, repeats: false)');
   expect(method).toContain('Previous notification deadline expired or unavailable');
   expect(method).not.toContain('removeAllPendingNotificationRequests');
-  expect(method.match(/removePendingNotificationRequests\(/gu)).toHaveLength(1);
+  expect(method.match(/removePendingNotificationRequests\(/gu)).toHaveLength(2);
+});
+
+it('snapshots obsolete reminder requests and cancels them before adding replacement IDs within the iOS budget', async () => {
+  const value = fixture();
+  (await patch())(value.directory);
+  const source = fs.readFileSync(value.swift, 'utf8');
+  const method = schedule(source);
+  expect(source).toContain('"transactionalReplacement": true');
+  expect(method).toContain('call.getArray("replaceReminderIds")');
+  expect(method).toContain('let affectedIds = nextIds.union(obsoleteIds)');
+  expect(method).toContain('reminderTypes.contains(extra?["type"] as? String ?? "")');
+  expect(method.indexOf('retainedIds.count <= 64')).toBeLessThan(method.indexOf('let enqueueRequests'));
+  const remove = method.indexOf('center.removePendingNotificationRequests(withIdentifiers: Array(obsoleteIds))');
+  const verify = method.indexOf('center.getPendingNotificationRequests { retained in', remove);
+  const enqueue = method.indexOf('enqueueRequests()', verify);
+  expect(remove).toBeGreaterThan(0);
+  expect(verify).toBeGreaterThan(remove);
+  expect(enqueue).toBeGreaterThan(verify);
+  expect(method).toContain('Obsolete notification removal incomplete');
+  expect(method).toContain('center.add(restoreRequest)');
 });
 
 it('upgrades the exact previous completion patch and remains idempotent', async () => {
@@ -185,7 +220,7 @@ it('erases every diagnostic effect from Release while retaining exact atomic sch
   (await patch())(value.directory);
   const source = fs.readFileSync(value.swift, 'utf8');
   const release = withoutDebug(source);
-  expect(createHash('sha256').update(schedule(release)).digest('hex')).toBe('7166240b5023fa27eb9aa20472377e21ab10eda4df308b0d8fb500b6ee9313d0');
+  expect(createHash('sha256').update(schedule(release)).digest('hex')).toBe('b127db28fca1b8e4be880f1a630091925e26430a9614dc35d2a72bc3bd48d0cd');
   expect(swiftMethod(release, '    @objc override public func checkPermissions(_ call: CAPPluginCall) {')).toBe(legacyCheckPermissions);
   expect(release).not.toContain('tuTapNotificationQA');
   expect(release).not.toContain('TUTAM_NOTIFICATION_QA');

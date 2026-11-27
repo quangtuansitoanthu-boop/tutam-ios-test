@@ -58,6 +58,12 @@ public final class ReminderSchedule {
     public static int personalDaysBefore(JSONObject plan) throws JSONException {
         return plan.has("personalTiming")?plan.getJSONObject("personalTiming").getInt("daysBefore"):1;
     }
+
+    static boolean matchesLunarDate(int expectedDay, int expectedMonth, boolean monthly, int[] lunar, boolean shortMonthEnd) {
+        boolean everyMonth=monthly||expectedMonth==0;
+        boolean dayMatches=expectedDay==lunar[0] || expectedDay==30 && lunar[0]==29 && shortMonthEnd;
+        return dayMatches && (everyMonth || lunar[3]==0 && expectedMonth==lunar[1]);
+    }
     private static List<Occurrence> personalOnDate(JSONObject plan,Calendar date,int[] lunar) throws JSONException {
         List<Occurrence> result=new ArrayList<>();
         JSONArray personal=plan.getJSONArray("personal"); List<String> titles=new ArrayList<>();
@@ -65,7 +71,15 @@ public final class ReminderSchedule {
             JSONObject event=personal.getJSONObject(i); boolean monthly="monthly".equals(event.optString("frequency"));
             boolean match;
             if("solar".equals(event.optString("calendarMode"))) match=event.optInt("solarDay")==date.get(Calendar.DAY_OF_MONTH) && (monthly||event.optInt("solarMonth")==date.get(Calendar.MONTH)+1);
-            else match=event.getInt("lunarDay")==lunar[0] && (monthly||event.optInt("lunarMonth")==0||event.optInt("lunarMonth")==lunar[1]);
+            else {
+                int expectedDay=event.getInt("lunarDay");
+                boolean shortMonthEnd=false;
+                if(expectedDay==30 && lunar[0]==29) {
+                    Calendar following=(Calendar)date.clone(); following.add(Calendar.DATE,1);
+                    shortMonthEnd=lunar(following)[0]==1;
+                }
+                match=matchesLunarDate(expectedDay,event.optInt("lunarMonth"),monthly,lunar,shortMonthEnd);
+            }
             if(match) titles.add(event.getString("title"));
         }
         JSONObject timing=plan.optJSONObject("personalTiming");

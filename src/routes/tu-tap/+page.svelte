@@ -45,7 +45,8 @@
     hasEnglishReadingContent,
     ENGLISH_TRANSLATION_NOTICE,
     prepareLocalizedReadingContent,
-    localizeChapterTitle
+    localizeChapterTitle,
+    resolveVietnameseArticleTitle
   } from '$lib/domain/library/localized-article';
 
   import PracticeCatalog from '$lib/components/practice/catalog/PracticeCatalog.svelte';
@@ -608,7 +609,7 @@
     }
     return articles.map((art) => {
       const viMeta = getCanonicalVietnameseArticle(art.id);
-      const originalTitle = art.originalTitle || viMeta?.title;
+      const originalTitle = resolveVietnameseArticleTitle(art.id, art.title, art.originalTitle);
       const originalAuthor = (art as any).originalAuthor || viMeta?.author;
       if (!originalTitle && !originalAuthor) return art;
       if (originalTitle === art.title && (!originalAuthor || originalAuthor === art.author)) return art;
@@ -633,7 +634,7 @@
       };
     }
     const viMeta = getCanonicalVietnameseArticle(currentArticle.id);
-    const originalTitle = currentArticle.originalTitle || viMeta?.title;
+    const originalTitle = resolveVietnameseArticleTitle(currentArticle.id, currentArticle.title, currentArticle.originalTitle);
     const originalAuthor = (currentArticle as any).originalAuthor || viMeta?.author;
     if (!originalTitle && !originalAuthor) return currentArticle;
     if (originalTitle === currentArticle.title && (!originalAuthor || originalAuthor === currentArticle.author)) return currentArticle;
@@ -1294,7 +1295,7 @@
       await tick();
       if (disposed) return;
       document.dispatchEvent(new CustomEvent('qts:practice-header', {
-        detail: { active: true, title, preserveTitleCase: showingRoutine, onBack: () => {
+        detail: { active: true, owner: 'practice-catalog', title, preserveTitleCase: showingRoutine, onBack: () => {
           if (showingRoutine) setCatalogOverlay('thoi-khoa', false);
           else if (upgradeTab !== 'catalog') void selectUpgradeTab('catalog');
           else handleBackToHub();
@@ -1304,7 +1305,7 @@
     })();
     return () => {
       disposed = true;
-      if (published) document.dispatchEvent(new CustomEvent('qts:practice-header', { detail: { active: false } }));
+      if (published) document.dispatchEvent(new CustomEvent('qts:practice-header', { detail: { active: false, owner: 'practice-catalog' } }));
     };
   });
 
@@ -2277,7 +2278,7 @@
     const tool = toolFromUrl(initialUrl);
     const params = initialUrl.searchParams;
     const targetId = params.get('article') || params.get('book') || params.get('id') || params.get('sach');
-    if (!tool && targetId && catalogLoading && !articles.length) return;
+    if (targetId && catalogLoading && !articles.length) return;
     checkedInitialUrl = true;
     if (tool) {
       initialToolRestoring = true;
@@ -2376,9 +2377,6 @@
       void readerProgress?.load(cached.detail.id).then((resume) => {
         if (requestSequence === articleRequestSequence && currentArticle?.id === cached.detail.id) {
           pendingPracticeBookmark = resume;
-          if (resume?.chapIdx !== null && resume?.chapIdx !== undefined && resume.chapIdx >= 0 && currentChapterIndex === null) {
-            void loadChapter(resume.chapIdx);
-          }
           if (autoStart) {
             confirmation = 'start-practice';
           }
@@ -2513,9 +2511,6 @@
       const resume = await resumePromise;
       if (requestSequence === articleRequestSequence && currentArticle?.id === detail.id) {
         pendingPracticeBookmark = resume ?? null;
-        if (resume?.chapIdx !== null && resume?.chapIdx !== undefined && resume.chapIdx >= 0 && currentChapterIndex === null) {
-          void loadChapter(resume.chapIdx);
-        }
         if (autoStart) {
           confirmation = 'start-practice';
         }
@@ -2551,9 +2546,11 @@
       }
       if (!ownsPractice()) return;
       const savedChapter = pendingPracticeBookmark?.chapIdx;
-      const chapterIndex = savedChapter !== null && savedChapter !== undefined && savedChapter < chapters.length
-        ? savedChapter
-        : currentChapterIndex ?? orderPracticeChapters(chapters, article.category)[0]?.index ?? 0;
+      const hasSavedChapter = savedChapter !== null && savedChapter !== undefined && savedChapter >= 0 && savedChapter < chapters.length;
+      const chapterIndex = currentChapterIndex
+        ?? (hasSavedChapter ? savedChapter : undefined)
+        ?? orderPracticeChapters(chapters, article.category)[0]?.index
+        ?? 0;
       await loadChapter(chapterIndex);
       if (routineReading && ownsPractice() && (articleLoadError || currentChapterIndex === null)) {
         backToCatalog(true);
@@ -2574,7 +2571,8 @@
       || currentArticle !== article
       || screen !== 'practice'
     ) return;
-    if (pendingPracticeBookmark && pendingPracticeBookmark.scrollTop > 0) {
+    const sameResumedChapter = !currentArticle.hasTableOfContents || (pendingPracticeBookmark?.chapIdx ?? null) === currentChapterIndex;
+    if (pendingPracticeBookmark && pendingPracticeBookmark.scrollTop > 0 && sameResumedChapter) {
       const articleId = currentArticle.id;
       restorePracticeWindowScroll(
         pendingPracticeBookmark.scrollTop,
@@ -4019,6 +4017,7 @@
     };
 
     const popState = () => {
+      handledHistoryBackPending = false;
       toolNavigationGeneration += 1;
       if (ignoreNextHandledPopState) { ignoreNextHandledPopState = false; return; }
       const targetUrl = new URL(window.location.href);
@@ -4205,6 +4204,9 @@
       const action = toolFromUrl(target);
       const section = sectionFromUrl(target);
       if (!action && !section) return;
+      upgradeTab = 'catalog';
+      const { tuTapUpgradeTab: _previousUpgradeTab, ...catalogHistory } = window.history.state ?? {};
+      window.history.replaceState(catalogHistory, '', window.location.href);
       checkedInitialUrl = true;
       toolNavigationGeneration += 1;
       if (action) {
@@ -4306,7 +4308,7 @@
   class="tt-page"
 >
       {#if communityPostId && communityTargetReady && screen !== 'catalog'}
-        <MindfulCommunity principalId={sessionPrincipalId(syncSession)} active={true} targetOnly={true}
+        <MindfulCommunity principalId={sessionPrincipalId(syncSession)} canModerate={clientRole === 'admin'} active={true} targetOnly={true}
           targetPostId={communityPostId} targetReactionId={communityReactionId} targetIntent={communityPostIntent} targetVisible={communityPostVisible} onTargetClose={closeCommunityNotification} />
       {/if}
       {#if articleLoadError}
@@ -4397,7 +4399,7 @@
           <PersonalPracticePanel bind:this={personalPanel} storage={personalPracticeStorage} onShare={sessionPrincipalId(syncSession) ? shareReflection : undefined} onSignIn={() => window.dispatchEvent(new CustomEvent('quangtu:login-required'))} initialCommunity={upgradeTab === 'community'}>
             {#snippet community()}
               {#if !communityPostId || communityTargetReady}
-              <MindfulCommunity principalId={sessionPrincipalId(syncSession)} nickname={personalPracticeStorage?.getNickname() ?? ''} active={true}
+              <MindfulCommunity principalId={sessionPrincipalId(syncSession)} canModerate={clientRole === 'admin'} nickname={personalPracticeStorage?.getNickname() ?? ''} active={true}
                 onSignIn={returnFocusTo => window.dispatchEvent(new CustomEvent('quangtu:login-required', { detail: { returnFocusTo } }))}
                 targetPostId={communityPostId} targetReactionId={communityReactionId} targetIntent={communityPostIntent} targetVisible={communityPostVisible} onTargetClose={closeCommunityNotification} />
               {/if}
@@ -4662,6 +4664,7 @@
           const currentSession = meditationSession;
           const evidenceHandle = meditationEvidenceHandle;
           await audio?.setMeditationTrack(track, {
+            autoplay: currentSession.phase !== 'paused',
             remainingMs: Math.max(1_000, (currentSession.preparationSeconds + currentSession.targetSeconds) * 1_000 - (currentSession.preparationElapsedMs + currentSession.activeElapsedMs)),
             title: localeStore.t.practice.meditationTitle,
             onNativeState: (state) => {
@@ -4677,14 +4680,24 @@
                 && ['active', 'preparing'].includes(meditationSession.phase)) pauseGuidedMeditation();
             },
           });
-          if (currentSession.phase === 'paused') {
+          if (meditationEvidenceHandle !== evidenceHandle || !meditationSession
+            || meditationSession.phase === 'completed' || meditationSession.phase === 'cancelled') {
+            if (!meditationSession && meditationEvidenceHandle === null) audio?.stopAll();
+            return;
+          }
+          if (meditationSetup.musicTrack !== track) return;
+          if (audio?.hasNativeMeditation()) stopMeditationTickers();
+          else if (['preparing', 'active'].includes(meditationSession.phase)) startMeditationTickers();
+          if (meditationSession.phase === 'paused') {
             audio?.pauseMeditation();
           }
         } else {
           await audio?.setMeditationTrack(track);
         }
       } else {
+        const evidenceHandle = meditationEvidenceHandle;
         await audio?.setMeditationTrack(null);
+        if (meditationEvidenceHandle !== evidenceHandle || meditationSetup.musicTrack !== track) return;
         if (meditationSession && ['preparing', 'active'].includes(meditationSession.phase) && !audio?.hasNativeMeditation()) {
           startMeditationTickers();
         }
@@ -4720,7 +4733,7 @@
   .tt-admin-notice{position:fixed;z-index:960;left:50%;bottom:max(84px,calc(env(safe-area-inset-bottom,0px) + 76px));max-width:min(480px,calc(100% - 32px));margin:0;padding:12px 18px;transform:translateX(-50%);border-radius:999px;background:#3a2a19;color:#fff;box-shadow:0 12px 36px rgba(0,0,0,.24);font-size:var(--font-size-label);font-weight:700;text-align:center}
   .tt-load-error{display:flex;width:min(700px,calc(100% - 32px));align-items:center;justify-content:space-between;gap:12px;margin:16px auto;padding:12px 14px;border:1px solid color-mix(in srgb,var(--red) 45%,var(--border));border-radius:12px;background:color-mix(in srgb,var(--red) 8%,var(--white));color:var(--text2);font-size:var(--font-size-body)}.tt-load-error button{min-height:44px;flex-shrink:0;padding:0 14px;border:0;border-radius:18px;background:var(--gold);color:var(--on-gold);font-family:inherit;font-size:var(--font-size-label);font-weight:700}
   .tt-rosary-feedback{position:fixed;z-index:960;left:50%;bottom:max(84px,calc(env(safe-area-inset-bottom,0px) + 76px));max-width:min(420px,calc(100% - 32px));margin:0;padding:12px 18px;transform:translateX(-50%);border:1px solid rgba(255,255,255,.18);border-radius:999px;background:#3a2a19;color:#fff;box-shadow:0 12px 36px rgba(0,0,0,.28);font-size:var(--font-size-label);font-weight:700;text-align:center;pointer-events:none;animation:tt-feedback-in .18s ease-out}
-  .tt-page{width:100%;margin:0 auto;padding:calc(var(--practice-topbar-height,calc(64px + var(--app-safe-top,env(safe-area-inset-top,0px)))) + 16px) 0 var(--space-page)}
+  .tt-page{width:100%;margin:0 auto;padding:calc(var(--practice-topbar-height,0px) + 16px) 0 var(--space-page)}
   .tt-page--preview{padding:0}
   .tt-page--practice{padding:0}
   @keyframes tt-feedback-in{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}

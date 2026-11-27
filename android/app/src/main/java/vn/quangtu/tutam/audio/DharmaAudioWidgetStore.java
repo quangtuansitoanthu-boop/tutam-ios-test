@@ -69,7 +69,7 @@ final class DharmaAudioWidgetStore {
                     || !("https".equals(scheme) || "asset".equals(scheme) || "file".equals(scheme))) {
                     tracks = new JSONArray(); break;
                 }
-                if ("file".equals(scheme) && !new File(uri.getPath()).getCanonicalPath().startsWith(context.getApplicationInfo().dataDir + File.separator)) { tracks = new JSONArray(); break; }
+                if ("file".equals(scheme) && !new File(uri.getPath()).getCanonicalPath().startsWith(new File(context.getApplicationInfo().dataDir).getCanonicalPath() + File.separator)) { tracks = new JSONArray(); break; }
                 JSONObject row = new JSONObject(); row.put("uri", item.mediaId); row.put("title", String.valueOf(item.mediaMetadata.title));
                 row.put("album", String.valueOf(item.mediaMetadata.albumTitle)); row.put("artist", String.valueOf(item.mediaMetadata.artist));
                 String artwork = DharmaAudioWidgetArtwork.safeUri(context, item.mediaMetadata.artworkUri == null ? "" : item.mediaMetadata.artworkUri.toString());

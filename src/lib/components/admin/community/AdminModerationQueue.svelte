@@ -72,6 +72,7 @@
       queryKey: pageKey(principal ?? '', requestedKind, after, requestedState, requestedPostKind),
       queryFn: ({ signal }) => fetchModerationQueue(requestedKind, after, signal, requestedKind === 'mindful' ? { state: requestedState, ...(requestedPostKind === 'all' ? {} : { postKind: requestedPostKind }) } : undefined),
       enabled: browser && Boolean(principal), staleTime: 30_000, retry: false,
+      refetchOnMount: requestedKind === 'mindful' && routePage.url.searchParams.get('moderation') === 'mindful' ? 'always' : true,
       refetchOnWindowFocus: false, refetchOnReconnect: false,
     };
   }, () => queryClient);
@@ -90,11 +91,27 @@
   $effect(() => {
     if (principal && queue.error instanceof ModerationApiError && [401, 403].includes(queue.error.status)) clearPrivate(GUEST_SESSION);
   });
-  afterNavigate(({ to }) => {
+  afterNavigate(({ to, type }) => {
     if (!to || to.url.pathname !== '/admin/community') return;
     const next = queueFromUrl(to.url);
+    if (type === 'goto' && to.url.searchParams.get('moderation') === 'mindful' && principal && !locked) {
+      const showingPending = kind === 'mindful' && reviewState === 'pending' && postKind === 'all' && page === 0;
+      if (showingPending) {
+        void refreshVisibleQueue();
+      } else {
+        // A notification can arrive while the cached first page is still fresh.
+        void queryClient.invalidateQueries({ queryKey: pageKey(principal, 'mindful', null, 'pending', 'all'), exact: true, refetchType: 'none' });
+        if (kind !== 'mindful') changeQueue('mindful', false);
+        changeFilter('pending', 'all');
+      }
+      return;
+    }
     if (kind !== next) changeQueue(next, false);
   });
+  export async function refreshVisibleQueue(): Promise<void> {
+    if (!principal || locked) return;
+    await queue.refetch({ cancelRefetch: false });
+  }
   onMount(() => {
     const changed = (event: Event) => {
       const next = (event as CustomEvent<PageSessionDTO>).detail;
@@ -107,8 +124,7 @@
     if (locked) return;
     if (updateUrl && browser) {
       const url = new URL(window.location.href);
-      if (next === 'mindful') url.searchParams.set('moderation', 'mindful');
-      else url.searchParams.delete('moderation');
+      url.searchParams.set('moderation', next);
       if (url.href !== window.location.href) replaceState(url, routePage.state);
     }
     kind = next; cursors = [null]; page = 0; selected = null; expandedId = null; notice = ''; error = '';
@@ -745,7 +761,7 @@
     justify-content: center;
     gap: 6px;
     min-inline-size: 0;
-    min-height: 42px;
+    min-height: var(--touch-target-size);
     padding: 8px 8px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -795,7 +811,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 38px;
+    min-height: var(--touch-target-size);
     min-width: 0;
     padding: 6px 14px;
     border: 1px solid var(--border);

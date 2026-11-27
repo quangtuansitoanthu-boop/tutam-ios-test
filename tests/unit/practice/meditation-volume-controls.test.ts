@@ -129,6 +129,7 @@ describe('Meditation Volume Controls', () => {
       peek: vi.fn(async () => ({})),
       cacheStatus: vi.fn(async () => ({ bytes: 0 })),
       cacheChunk: vi.fn(async () => {}),
+      evictCache: vi.fn(async () => {}),
       backgroundStatus: vi.fn(async () => ({ restricted: false, batteryOptimized: false })),
       openBackgroundSettings: vi.fn(async () => {}),
       addListener: vi.fn(async () => ({ remove: async () => {} }))

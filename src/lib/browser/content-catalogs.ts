@@ -14,6 +14,8 @@ import { normalizeCoverSrc } from '$lib/domain/cover-url';
 import { resolvePdfUrl } from '$lib/utils/pdf-url';
 import { isNativeApp } from './native-platform';
 import { isHtmlResponse, resolveApiUrl } from './native-api';
+import { NATIVE_BACKEND_ORIGINS } from './native-backend-origin';
+import type { AudioAlbum, AudioPlayerSession } from './audio-player-controller';
 import { getOfflineTalks, resolveOfflineBundledResponse } from './offline-bundled-resolver';
 import { getBrowserSessionSnapshot } from '$lib/stores/session.svelte';
 import type { PageSessionDTO } from '$lib/server/auth/types';
@@ -26,6 +28,7 @@ import {
   getTalkCatalogMeta,
   recordTalkCatalogSyncTime,
   captureTalkCatalogScope,
+  currentTalkCatalogScope,
   assertTalkCatalogScope,
   type TalkCatalogScope,
   type CachedTalkAlbumRow,
@@ -94,7 +97,6 @@ export type TalkFormatFilter = 'all' | 'video' | 'audio';
 
 const VIEWS_CACHE_KEY = 'quangtu_views_cache';
 const VIEWS_SYNC_TIME_KEY = 'quangtu_views_last_sync_time';
-const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 export function talkSpeaker(album: TalkAlbum): string {
   return String(album.dien_gia ?? '').trim() || LEGACY_TALK_SPEAKER;
@@ -198,26 +200,6 @@ export async function fetchHomepageArticles(
         }
       } catch {}
 
-      // Nếu có mạng trên native app và đã qua 3 ngày kể từ lần cập nhật trước, tải lượt xem ngầm
-      try {
-        if (typeof navigator !== 'undefined' && navigator.onLine) {
-          const lastSync = Number(typeof localStorage !== 'undefined' ? localStorage.getItem(VIEWS_SYNC_TIME_KEY) || 0 : 0);
-          if (Date.now() - lastSync > THREE_DAYS_MS) {
-            void fetcher(api('/api/data/luot_xem?select=bai_viet_id,so_luot'), {
-              headers: { accept: 'application/json' }
-            }).then(async (res) => {
-              if (res.ok && !isHtmlResponse(res)) {
-                const data = await res.json();
-                if (Array.isArray(data) && typeof localStorage !== 'undefined') {
-                  localStorage.setItem(VIEWS_CACHE_KEY, JSON.stringify(data));
-                  localStorage.setItem(VIEWS_SYNC_TIME_KEY, String(Date.now()));
-                }
-              }
-            }).catch(() => null);
-          }
-        }
-      } catch {}
-
       return offlineRows
         .filter((row) => isHomepageArticleVisible(row, role))
         .map((row) => {
@@ -267,6 +249,13 @@ export async function fetchHomepageArticles(
       : [])
       .catch(() => [])
   ]);
+  // Dùng response lượt xem của chính lần tải online; không tạo request nền trùng lặp.
+  try {
+    if (viewRows.length && typeof localStorage !== 'undefined') {
+      localStorage.setItem(VIEWS_CACHE_KEY, JSON.stringify(viewRows));
+      localStorage.setItem(VIEWS_SYNC_TIME_KEY, String(Date.now()));
+    }
+  } catch { /* Catalog vẫn đọc được nếu storage đầy hoặc bị chặn. */ }
   const views = new Map(viewRows.map((row) => [String(row.bai_viet_id ?? ''), Number(row.so_luot ?? 0)]));
 
   return (await mergeUpdatedArticleRows(articleRows))
@@ -347,6 +336,23 @@ function mapTalkAlbum(row: TalkAlbumRow): TalkAlbum {
     created_at: row.created_at == null ? null : String(row.created_at),
     tracks: normalizeTracks(id, row.tracks)
   };
+}
+
+/** Native keeps transport URLs. Restore catalog metadata only for the same complete playlist. */
+export async function restoreLocalTalkAlbum(queue: AudioAlbum, session: AudioPlayerSession): Promise<AudioAlbum | undefined> {
+  const scope = currentTalkCatalogScope(session.user?.id ?? null, session.user?.role ?? 'guest');
+  const cached = await readCachedTalkCatalog(scope);
+  const row = cached?.rows.find(item => item.id === queue.id)
+    ?? (await getOfflineTalks()).find(item => item.id === queue.id && item.visibility === 'public');
+  if (!row || !isContentAvailable(row) || (row.visibility !== 'public' && !(row.visibility === 'private' && scope?.role === 'admin'))) return;
+  const tracks = normalizeTracks(queue.id, row.tracks);
+  if (!tracks.length || tracks.length !== queue.tracks.length) return;
+  const matches = tracks.every((track, index) => {
+    const url = queue.tracks[index].url;
+    return url === track.url || (track.url.startsWith('/api/') && NATIVE_BACKEND_ORIGINS.some(origin => url === origin + track.url));
+  });
+  if (!matches) return;
+  return markVerifiedTalkCatalog<AudioAlbum>({ ...queue, visibility: row.visibility, tracks }, session);
 }
 
 async function fetchTalkAlbumRows(fetcher: typeof fetch, signal?: AbortSignal): Promise<TalkAlbumRow[]> {

@@ -36,10 +36,15 @@ describe('complete offline package storage', () => {
     await expect(saveContentPackage(selected, row, [])).rejects.toThrow('not_public');
     expect(await savedContentItems()).toEqual([]);
   });
-  it('does not break catalog reads when Cache Storage is blocked, while writes still fail', async () => {
+  it.each(['missing', 'blocked'])('commits and restores packages through IndexedDB when Cache Storage is %s', async mode => {
+    if (mode === 'missing') vi.stubGlobal('caches', undefined);
+    else
     vi.stubGlobal('caches', { open: async () => { throw new DOMException('Denied', 'SecurityError'); } });
     expect(await mergeUpdatedArticleRows([{ id: 'remote' }])).toEqual([{ id: 'remote' }]);
-    await expect(saveContentPackage(item, item.row, [])).rejects.toThrow();
+    await saveContentPackage(item, item.row, [{ id: 'one', noi_dung: 'Saved chapter' }]);
+    expect((await savedContentItems(true))[0].version).toBe('one');
+    expect(await (await readUpdatedContentResponse(new URL('https://test/api/articles/new/chapters')))?.json())
+      .toEqual([{ id: 'one', noi_dung: 'Saved chapter' }]);
   });
   it('preserves a corrupt index for recovery and refuses to overwrite it', async () => {
     responses.set('https://tutam-cache.local/content-packages/index', new Response('{broken'));

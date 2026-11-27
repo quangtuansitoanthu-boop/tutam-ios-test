@@ -4,7 +4,7 @@ vi.mock('$lib/stores/session.svelte', () => ({ getBrowserSessionSnapshot: mocks.
 vi.mock('$lib/browser/session-csrf', () => ({ fetchWithSessionRefresh: mocks.fetch, requireBrowserCsrf: mocks.csrf }));
 vi.mock('$lib/browser/native-api', () => ({ fetchNativeJsonMutation: mocks.native }));
 import { loadPersonalLunarEvents, savePersonalLunarEvents, syncPersonalLunarEventsWithServer, pullPersonalLunarEventsFromServer, resolvePersonalEventsConflict } from '../../src/lib/browser/personal-lunar-events';
-import { startPersonalEventsSync } from '../../src/lib/browser/personal-events-sync';
+import { getPersonalEventsSyncStatus, startPersonalEventsSync } from '../../src/lib/browser/personal-events-sync';
 let storage: Map<string, string>;
 let session: any;
 const event = (id: string) => ({ id, title: id, lunarDay: 15, lunarMonth: 7, type: 'gia-dinh' as const, createdAt: '2026-10-22' });
@@ -22,6 +22,31 @@ beforeEach(() => {
 });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 describe('personal event principal and outbox protection', () => {
+  it('derives syncing only from the active principal request while persisting recoverable pending state', async () => {
+    let release!: (response: Response) => void;
+    mocks.fetch.mockImplementation(async (_url, init) => init?.method === 'POST'
+      ? await new Promise<Response>(resolve => { release = resolve; }) : Response.json({ events: [], revision: 0 }));
+    savePersonalLunarEvents([event('pending')]);
+    const syncing = syncPersonalLunarEventsWithServer();
+    for (let index = 0; index < 20 && !release; index++) await Promise.resolve();
+    expect(release).toBeTypeOf('function');
+    expect(getPersonalEventsSyncStatus()).toBe('syncing');
+    expect(JSON.parse(storage.get('tutam_personal_lunar_events:v2:user:A')!).status).toBe('pending');
+    session = { authenticated: true, user: { id: 'B' }, csrfToken: 'csrf-B' };
+    expect(getPersonalEventsSyncStatus()).toBe('local');
+    session = { authenticated: true, user: { id: 'A' }, csrfToken: 'csrf-A' };
+    expect(getPersonalEventsSyncStatus()).toBe('pending');
+    release(Response.json({ ok: true, revision: 1 }));
+    await syncing;
+    expect(getPersonalEventsSyncStatus()).toBe('pending');
+  });
+
+  it('recovers a legacy persisted syncing status as pending after a terminated process', () => {
+    storage.set('tutam_personal_lunar_events:v2:user:A', JSON.stringify({ version: 2,
+      events: [event('recover')], base: [], revision: 0, pending: true, status: 'syncing' }));
+    expect(getPersonalEventsSyncStatus()).toBe('pending');
+    expect(loadPersonalLunarEvents()).toEqual([event('recover')]);
+  });
   it('imports guest events on restored login offline and keeps a recovery copy', () => {
     session = { authenticated: false, user: null };
     savePersonalLunarEvents([event('guest-login')]);

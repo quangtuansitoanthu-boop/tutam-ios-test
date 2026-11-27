@@ -52,6 +52,7 @@ export interface PracticeAudioController {
 }
 
 export interface MeditationPlaybackOptions {
+  autoplay?: boolean;
   remainingMs: number;
   title: string;
   onNativeState: (state: NativeAudioState) => void;
@@ -195,8 +196,9 @@ export function createPracticeAudioController(): PracticeAudioController {
     nativeMeditation = null;
     oldLease?.stop();
     backgroundMeditation = Boolean(options);
-    musicDeadline = options ? Date.now() + options.remainingMs : 0;
-    pausedRemaining = 0;
+    const autoplay = options?.autoplay !== false;
+    musicDeadline = options && autoplay ? Date.now() + options.remainingMs : 0;
+    pausedRemaining = options && !autoplay ? options.remainingMs : 0;
     state = { ...state, selectedTrack: track };
     try {
       const playableUrl = getPlayablePracticeAudioUrl(track);
@@ -212,7 +214,7 @@ export function createPracticeAudioController(): PracticeAudioController {
         const lease = await player.beginPracticePlayback({
           id: MEDITATION_AUDIO_ALBUM_ID, title: options.title, description: '',
           tracks: [{ title: options.title, url: nativeUrl }],
-        }, Math.max(1, musicDeadline - Date.now()), (nativeState) => {
+        }, Math.max(1, autoplay ? musicDeadline - Date.now() : pausedRemaining), (nativeState) => {
           if (destroyed || generation !== meditationGeneration) return;
           state = { ...state, meditationActive: nativeState.playWhenReady && !nativeState.ended && !nativeState.error };
           options.onNativeState(nativeState);
@@ -221,19 +223,24 @@ export function createPracticeAudioController(): PracticeAudioController {
           nativeMeditation = null;
           state = { ...state, meditationActive: false };
           options.onInterrupted();
-        }, request.signal, { volume: currentMeditationVolume });
+        }, request.signal, { volume: currentMeditationVolume, autoplay });
         if (destroyed || generation !== meditationGeneration) { lease?.stop(); return false; }
         if (!lease) return false;
         nativeMeditation = lease;
         lease.setVolume?.(currentMeditationVolume);
         nativeRequest = null;
         musicDeadline = 0;
-        state = { ...state, meditationActive: true };
+        state = { ...state, meditationActive: autoplay };
         return true;
       }
       meditation.src = playableUrl;
       meditation.volume = currentMeditationVolume;
       meditation.loop = true;
+      if (!autoplay) {
+        meditation.pause();
+        state = { ...state, meditationActive: false };
+        return true;
+      }
       await meditation.play();
       if (destroyed || generation !== meditationGeneration) return false;
       state = { ...state, meditationActive: true };

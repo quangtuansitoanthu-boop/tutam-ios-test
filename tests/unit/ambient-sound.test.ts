@@ -47,10 +47,45 @@ describe('ambient-sound engine', () => {
     expect(nativeSounds.play).toHaveBeenCalledTimes(2);
     controller.stop();
     expect(vi.getTimerCount()).toBe(0);
-    expect(nativeSounds.play).toHaveBeenLastCalledWith({ channel: 'ambient', stop: true });
+    expect(nativeSounds.play).toHaveBeenLastCalledWith({ channel: 'cue', stop: true });
     controller.destroy();
     vi.advanceTimersByTime(90_000);
     expect(nativeSounds.play).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops fallback ambient output while hidden and resumes only the still-selected sound', () => {
+    const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('document', document);
+    const pause = vi.fn(), play = vi.fn(async () => undefined);
+    vi.stubGlobal('Audio', class { pause = pause; play = play; currentTime = 0; });
+    const controller = createAmbientSoundController();
+    controller.start('rain');
+    expect(play).toHaveBeenCalledTimes(1);
+    document.visibilityState = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(pause).toHaveBeenCalledOnce();
+    document.visibilityState = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(play).toHaveBeenCalledTimes(2);
+    controller.stop();
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(play).toHaveBeenCalledTimes(2);
+    controller.destroy();
+  });
+
+  it('hands the same ambient sound to the Android mixer when native meditation starts', () => {
+    nativeSounds.enabled = true;
+    let mixing = false;
+    const pause = vi.fn();
+    vi.stubGlobal('Audio', class { pause = pause; play = vi.fn(async () => undefined); currentTime = 0; });
+    const controller = createAmbientSoundController(() => mixing);
+    try {
+      controller.start('rain');
+      mixing = true;
+      controller.start('rain');
+      expect(pause).toHaveBeenCalledOnce();
+      expect(nativeSounds.play).toHaveBeenCalledWith({ channel: 'ambient', source: AMBIENT_SOUND_TRACKS.rain, volume: 0.5 });
+    } finally { controller.destroy(); }
   });
 
   it('passes the bundled ambient path to Android even after a WebView download', async () => {

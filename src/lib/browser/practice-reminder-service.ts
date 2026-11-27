@@ -334,7 +334,7 @@ export function buildUpcomingNotificationBatch(
         continue;
       }
 
-      const lunarDayStr = `${lunarInfo.lunarDay}/${lunarInfo.lunarMonth} Âm lịch`;
+      const lunarDayStr = `${lunarInfo.lunarDay}/${lunarInfo.lunarMonth} ${isEn ? 'lunar' : 'Âm lịch'}`;
       const viaTitle = isViaPhat ? lunarInfo.viaName || '' : '';
 
       // (A) Eve Before Notification (19:30 on the evening before)
@@ -622,11 +622,11 @@ async function performReminderSync(
       batch = [...recurring, ...upcoming.slice(0, capacity - recurring.length)];
     }
   }
-  const success = await scheduleUnifiedNotifications(batch);
-  if (success) {
-    const nextIds = new Set(batch.map(item => item.id));
-    await cancelUnifiedNotifications(pending.filter(item => !nextIds.has(item.id)).map(item => item.id), true);
-  }
+  const nextIds = new Set(batch.map(item => item.id));
+  const obsoleteIds = pending.filter(item => !nextIds.has(item.id)).map(item => item.id);
+  const success = await scheduleUnifiedNotifications(batch, ios
+    ? { obsoleteIds, pendingIds: allPending.map(item => item.id) } : undefined);
+  if (success && !ios) await cancelUnifiedNotifications(obsoleteIds, true);
   const acceptedOneOffTimes = success && ios && batch.length < requestedCount
     ? batch.filter(item => !item.schedule?.repeats).map(item => item.schedule?.at?.getTime() ?? Number.NaN).filter(Number.isFinite)
     : [];

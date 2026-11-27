@@ -83,6 +83,23 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
   let currentVolume = 0.5;
   let audioElement: HTMLAudioElement | null = null;
   let nativeActive = false;
+  let hiddenType: AmbientSoundType = 'none';
+  let destroyed = false;
+
+  function syncVisibility(): void {
+    if (nativeActive) return;
+    if (document.visibilityState === 'hidden') {
+      if (currentType === 'none') return;
+      const selected = currentType;
+      stop();
+      hiddenType = selected;
+    } else if (hiddenType !== 'none') {
+      const selected = hiddenType;
+      hiddenType = 'none';
+      start(selected);
+    }
+  }
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', syncVisibility);
 
   function initContext(): AudioContext | null {
     if (context && context.state !== 'closed') return context;
@@ -160,6 +177,7 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
 
     const strikeMaster = ctx.createGain();
     strikeMaster.connect(destination);
+    const group: typeof activeNodes = [strikeMaster];
 
     // Slow pulsation (theta-wave beat at 3.5Hz)
     const lfo = ctx.createOscillator();
@@ -167,6 +185,7 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
     const lfoGain = ctx.createGain();
     lfoGain.gain.setValueAtTime(0.08, now);
     lfo.connect(lfoGain.gain);
+    group.push({ disconnect: () => lfo.disconnect() }, lfoGain);
 
     for (const h of harmonics) {
       const osc = ctx.createOscillator();
@@ -181,6 +200,7 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
 
       osc.connect(gain);
       gain.connect(strikeMaster);
+      group.push(osc, gain);
 
       osc.start(now);
       osc.stop(now + h.decay);
@@ -192,8 +212,13 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
         } catch {
           // ignore
         }
+        if (h.decay === 10) {
+          for (const node of group) { try { node.disconnect(); } catch { /* Node đã dọn khi dừng. */ } }
+          activeNodes = activeNodes.filter(node => !group.includes(node));
+        }
       };
     }
+    activeNodes.push(...group);
   }
 
   function startBowl(ctx: AudioContext, destination: GainNode): void {
@@ -206,13 +231,15 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
   }
 
   function start(type: AmbientSoundType): void {
-    if (type === currentType && (nativeActive || audioElement || activeNodes.length > 0 || bowlTimer !== null)) return;
+    if (destroyed) return;
+    const track = AMBIENT_SOUND_TRACKS[type];
+    const useNative = nativeMixing() && hasNativePracticeSounds() && Boolean(track || type === 'bowl');
+    if (type === currentType && nativeActive === useNative && (nativeActive || audioElement || activeNodes.length > 0 || bowlTimer !== null)) return;
     stop();
     currentType = type;
     if (type === 'none') return;
 
-    const track = AMBIENT_SOUND_TRACKS[type];
-    if (nativeMixing() && hasNativePracticeSounds() && (track || type === 'bowl')) {
+    if (useNative) {
       nativeActive = true;
       if (track) {
         // Android bridge reads bundled assets only, not WebView blob URLs.
@@ -221,6 +248,11 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
         playNativePracticeSound({ channel: 'cue', cue: 'bowl' });
         bowlTimer = setInterval(() => playNativePracticeSound({ channel: 'cue', cue: 'bowl' }), 90_000);
       }
+      return;
+    }
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      hiddenType = type;
+      currentType = 'none';
       return;
     }
     if (track) {
@@ -234,7 +266,7 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
       if (!ctx || !masterGain) return;
 
       if (ctx.state === 'suspended') {
-        void ctx.resume();
+        void ctx.resume().catch(() => undefined);
       }
 
       startBowl(ctx, masterGain);
@@ -242,12 +274,14 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
   }
 
   function stop(): void {
+    hiddenType = 'none';
     if (nativeActive) {
-      playNativePracticeSound({ channel: 'ambient', stop: true });
+      playNativePracticeSound({ channel: currentType === 'bowl' ? 'cue' : 'ambient', stop: true });
       nativeActive = false;
     }
     stopAudio();
     cleanupNodes();
+    if (context?.state === 'running') void context.suspend().catch(() => undefined);
     currentType = 'none';
   }
 
@@ -271,6 +305,8 @@ export function createAmbientSoundController(nativeMixing: () => boolean = () =>
   }
 
   function destroy(): void {
+    destroyed = true;
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', syncVisibility);
     stop();
     if (context && context.state !== 'closed') {
       void context.close().catch(() => undefined);

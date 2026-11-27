@@ -30,6 +30,7 @@ beforeEach(() => {
     play: returnsState(), pause: returnsState(), stop: returnsState(), seek: returnsState(),
     options: returnsState(), sleep: returnsState(),
     cacheStatus: vi.fn(async () => ({ bytes: 0 })), cacheChunk: vi.fn(async () => undefined),
+    evictCache: vi.fn(async () => undefined),
     backgroundStatus: vi.fn(async () => ({ restricted: false, batteryOptimized: false })),
     openBackgroundSettings: vi.fn(async () => undefined),
   };

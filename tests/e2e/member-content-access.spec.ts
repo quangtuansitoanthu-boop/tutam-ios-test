@@ -5,6 +5,8 @@ test('guest notice banner displays for unauthenticated visitors and re-appears o
   await page.goto('/');
   await settleClient(page);
 
+  const deferPermission = page.getByRole('dialog', { name: 'Thông báo tu tập', exact: true }).getByRole('button', { name: 'Để sau', exact: true });
+  await deferPermission.click();
   const banner = page.locator('[data-guest-notice-banner]');
   await expect(banner).toBeVisible();
   await expect(banner).toContainText('Đăng nhập để lưu tiến độ');
@@ -17,6 +19,7 @@ test('guest notice banner displays for unauthenticated visitors and re-appears o
   // Re-accessing web displays it again
   await page.reload();
   await settleClient(page);
+  await deferPermission.click();
   await expect(page.locator('[data-guest-notice-banner]')).toBeVisible();
 });
 

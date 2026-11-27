@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { UI_MOTION_STORAGE_KEY } from '../../src/lib/browser/ui-motion';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
 
 for (const width of [375, 1440]) {
   for (const dark of [false, true]) {
@@ -91,7 +92,7 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 667, height: 375 }
       const picker = page.getByRole('dialog', { name: field.title, exact: true });
       const choice = picker.getByRole('button', { name: field.choice, exact: true });
       await expect(choice).toBeVisible();
-      expect(await choice.evaluate(element => {
+      await expect.poll(() => choice.evaluate(element => {
         const r = element.getBoundingClientRect();
         return r.height >= 44 && r.x >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
       })).toBe(true);
@@ -104,6 +105,7 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 667, height: 375 }
 
 for (const platform of ['ios', 'android'] as const) {
   test(`${platform} lifts the picker from the bottom in landscape and respects reduced motion`, async ({ page }) => {
+    await deferStartupNotification(page);
     await page.setViewportSize({ width: 844, height: 390 });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.addInitScript(platform => {
@@ -145,5 +147,18 @@ for (const platform of ['ios', 'android'] as const) {
     await page.keyboard.press('Escape');
     await expect(picker).toHaveCount(0);
     await expect(trigger).toContainText('54 hạt');
+
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.evaluate(key => {
+      localStorage.setItem(key, '0');
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue: '0' }));
+    }, UI_MOTION_STORAGE_KEY);
+    await expect(page.locator('html')).toHaveAttribute('data-ui-motion', 'off');
+    await trigger.click();
+    await expect(panel).toHaveCSS('animation-name', 'none');
+    await expect.poll(bottomGap).toBeLessThanOrEqual(1);
+    await picker.getByRole('button', { name: '27 hạt', exact: true }).click();
+    await expect(picker).toHaveCount(0);
+    await expect(trigger).toContainText('27 hạt');
   });
 }

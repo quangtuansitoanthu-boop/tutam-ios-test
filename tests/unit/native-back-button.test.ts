@@ -17,6 +17,54 @@ vi.mock('@capacitor/app', () => ({
 beforeEach(() => { vi.resetModules(); navigateHome.mockClear(); platform.mockReturnValue('android'); });
 afterEach(() => vi.unstubAllGlobals());
 
+it('returns home at the first managed iOS entry even when the forward history remains', async () => {
+  platform.mockReturnValue('ios');
+  const dom = new JSDOM('<main>Deep link</main>', { url: 'https://localhost/ca-nhan' });
+  const host = dom.window;
+  vi.stubGlobal('window', host); vi.stubGlobal('document', host.document);
+  vi.stubGlobal('Element', host.Element); vi.stubGlobal('CustomEvent', host.CustomEvent);
+  vi.stubGlobal('getComputedStyle', host.getComputedStyle.bind(host));
+  host.history.replaceState({ routerState: { keep: true } }, '', '/ca-nhan');
+  const swipe = () => {
+    for (const type of ['touchstart', 'touchend']) {
+      const point = { identifier: 1, clientX: type === 'touchstart' ? 4 : 110, clientY: 20 };
+      const event = new host.Event(type, { bubbles: true });
+      Object.defineProperties(event, { touches: { value: type === 'touchstart' ? [point] : [] }, changedTouches: { value: [point] } });
+      host.document.querySelector('main')!.dispatchEvent(event);
+    }
+  };
+  try {
+    const { initializeNativeBackButton } = await import('$lib/browser/native-back-button');
+    await initializeNativeBackButton();
+    host.history.pushState({ routerState: { keep: 'child' } }, '', '/privacy-policy');
+    expect(host.history.state.routerState).toEqual({ keep: 'child' });
+    const popped = new Promise<void>(resolve => host.addEventListener('popstate', () => resolve(), { once: true }));
+    host.history.back(); await popped;
+    expect(host.location.pathname).toBe('/ca-nhan');
+    expect(host.history.length).toBe(2);
+    const back = vi.spyOn(host.history, 'back');
+    swipe();
+    expect(back).not.toHaveBeenCalled();
+    expect(navigateHome).toHaveBeenCalledExactlyOnceWith('/');
+    expect(host.history.state.routerState).toEqual({ keep: true });
+  } finally { host.close(); }
+});
+
+it('dismisses the highest visible legacy overlay before a later lower layer', async () => {
+  const dom = new JSDOM('<div class="modal-backdrop" style="z-index:900"><button class="btn-cancel">High</button></div><div class="modal-backdrop" style="z-index:100"><button class="btn-cancel">Low</button></div>', { url: 'https://localhost/tu-tap' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const buttons = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')];
+  for (const button of buttons) Object.defineProperty(button, 'offsetParent', { value: {} });
+  const high = vi.fn(), low = vi.fn(); buttons[0].addEventListener('click', high); buttons[1].addEventListener('click', low);
+  let handler: (value: { canGoBack: boolean }) => void = () => {};
+  Object.assign(dom.window, { Capacitor: { Plugins: { App: { addListener: async (_name: string, callback: typeof handler) => { handler = callback; } } } } });
+  try {
+    const { initializeNativeBackButton } = await import('$lib/browser/native-back-button');
+    await initializeNativeBackButton(); handler({ canGoBack: true });
+    expect(high).toHaveBeenCalledOnce(); expect(low).not.toHaveBeenCalled();
+  } finally { dom.window.close(); }
+});
+
 it('commits one iOS Back from the edge and ignores canceled, vertical, and PDF gestures', async () => {
   platform.mockReturnValue('ios');
   const dom = new JSDOM('<main>Page<div class="pdf-shell">PDF</div></main>', { url: 'https://localhost/tu-tap' });
@@ -133,7 +181,8 @@ it.each([
   '.tt-section-view .tt-back-btn',
   '#copy-options .panel-heading button',
   '.copy-writing .issues-heading button',
-  '.copy-writing .writing-back, .copy-writing .writing-bar > .icon-button',
+  '.copy-writing .writing-back',
+  '.copy-writing .writing-bar > .icon-button',
   '.tt-topbar .tt-back-btn',
 ])('hardware Back activates the visible practice control %s before history', async (selector) => {
   let handler: (value: {canGoBack:boolean}) => void = () => {};
@@ -196,6 +245,34 @@ it.each([
     expect(dismiss).toHaveBeenCalledOnce();
     expect(parentClose).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
+    expect(historyBack).not.toHaveBeenCalled();
+  } finally { dom.window.close(); }
+});
+
+
+it.each([
+  ['narrow copying editor with its desktop toolbar hidden', '/tu-tap/chep-kinh', '<div class="copy-writing"><header class="writing-bar" hidden><button class="icon-button">Back</button></header><button class="writing-back" data-target>Đổi kinh hoặc phẩm</button></div>'],
+  ['practice chapter reader', '/tu-tap', '<nav class="qts-nav qts-nav--subpage"><button class="nav-back-circle-btn" data-custom-back="1">Back</button></nav><div class="tt-preview"><div class="tt-chapter-reader"><button class="tt-reader-back-btn" data-target>Quay lại</button></div></div>'],
+  ['practice preview unified header', '/tu-tap', '<nav class="qts-nav qts-nav--subpage"><button class="nav-back-circle-btn" data-custom-back="1" data-target>Back</button></nav><div class="tt-preview"></div>'],
+  ['practice route back unified header', '/tu-tap', '<nav class="qts-nav qts-nav--subpage"><button class="nav-back-circle-btn" data-custom-back="1" data-target>Back</button></nav><section data-practice-route-back></section>'],
+  ['personal subtab unified header', '/ca-nhan', '<nav class="qts-nav qts-nav--subpage"><button class="nav-back-circle-btn" data-custom-back="1" data-target>Back</button></nav><main></main>'],
+])('hardware Back activates %s instead of exiting via history.back', async (_name, pathname, html) => {
+  const dom = new JSDOM(html);
+  const target = dom.window.document.querySelector<HTMLButtonElement>('[data-target]')!;
+  dom.window.document.querySelectorAll('button').forEach(btn => Object.defineProperty(btn, 'offsetParent', { value: btn.closest('[hidden]') ? null : {} }));
+  const click = vi.fn(), historyBack = vi.fn();
+  target.addEventListener('click', click);
+  let handler: (value: { canGoBack: boolean }) => void = () => {};
+  vi.stubGlobal('document', dom.window.document);
+  vi.stubGlobal('window', {
+    Capacitor: { Plugins: { App: { addListener: async (_name: string, callback: typeof handler) => { handler = callback; } } } },
+    location: { pathname, search: '' }, history: { back: historyBack }, dispatchEvent: () => true,
+  });
+  const { initializeNativeBackButton } = await import('$lib/browser/native-back-button');
+  try {
+    await initializeNativeBackButton();
+    handler({ canGoBack: true });
+    expect(click).toHaveBeenCalledOnce();
     expect(historyBack).not.toHaveBeenCalled();
   } finally { dom.window.close(); }
 });

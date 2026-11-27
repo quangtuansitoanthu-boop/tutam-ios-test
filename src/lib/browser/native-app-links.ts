@@ -40,7 +40,9 @@ const WARM_CONSUMED_KEY = 'tutam_native_warm_consumed_url';
 function isLaunchUrlConsumed(path: string): boolean {
   try {
     const storage = window.sessionStorage;
-    return storage.getItem(LAUNCH_CONSUMED_KEY) === path || storage.getItem(WARM_CONSUMED_KEY) === path;
+    // Bản app cũ lưu cả URL vào khóa ghi nhận liên kết lúc khởi động.
+    return resolveNativeAppPath(storage.getItem(LAUNCH_CONSUMED_KEY)) === path
+      || storage.getItem(WARM_CONSUMED_KEY) === path;
   } catch {
     // A restricted browsing session must still be able to open native links.
     return false;
@@ -126,10 +128,11 @@ export function startNativeAppLinks(navigate: (path: string) => Promise<unknown>
       if (disposed) { await handle.remove(); return; }
       appHandle = handle;
       const launch = resolveNativeAppPath((await App.getLaunchUrl())?.url);
-      if (!disposed && launch && !isLaunchUrlConsumed(launch)) {
-        // Ghi nhận cả URL cũ trả về muộn để WebView tải lại không mở lại URL đó.
+      if (!disposed && launch) {
+        const shouldOpen = !receivedWarmUrl && !isLaunchUrlConsumed(launch);
+        // Lưu riêng URL khởi động vì liên kết kế tiếp khi app đang mở sẽ ghi đè khóa của nó.
         markUrlConsumed(LAUNCH_CONSUMED_KEY, launch);
-        if (!receivedWarmUrl) await open(launch);
+        if (shouldOpen) await open(launch);
       }
     } catch {
       console.warn('Không thể đăng ký liên kết native.');

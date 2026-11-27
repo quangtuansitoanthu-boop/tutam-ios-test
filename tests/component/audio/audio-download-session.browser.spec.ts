@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { dismissTopModal } from '$lib/browser/modal-dialog';
 import Harness from './audio-download-session-harness.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -18,10 +19,10 @@ vi.mock('$lib/browser/audio-downloads', async importOriginal => {
     return mocks.singleTrackGate;
   } };
 });
-vi.mock('$lib/browser/modal-dialog', () => ({ modalDialog: () => ({ destroy() {} }) }));
 vi.mock('$lib/browser/native-platform', () => ({ isNativeApp: () => mocks.native, nativePlatform: () => mocks.native ? 'android' : 'web' }));
 vi.mock('$lib/browser/native-api', () => ({ resolveApiUrl: (url: string) => url, resolvePublicUrl: (url: string) => url, isHtmlResponse: () => false, fetchNativeJsonMutation: async () => null }));
-vi.mock('$lib/browser/offline-audio-database', () => ({
+vi.mock('$lib/browser/offline-audio-database', async importOriginal => ({
+  ...await importOriginal<typeof import('$lib/browser/offline-audio-database')>(),
   getOfflineTrack: async (url: string) => mocks.tracks.get(url) ?? null,
   putOfflineTrack: async (track: typeof mocks.tracks extends Map<string, infer T> ? T : never) => { mocks.tracks.set(track.url, track); },
   putOfflineAlbum: async (album: { id: string }) => { mocks.albums.set(album.id, album); },
@@ -29,7 +30,15 @@ vi.mock('$lib/browser/offline-audio-database', () => ({
   deleteOfflineAlbum: mocks.remove,
   readOfflineLibrarySnapshot: async () => {
     await mocks.snapshotGate;
-    return { albums: [...mocks.albums.values()], bytes: 0, trackCounts: { 'pending-private': mocks.tracks.size } };
+    const albums = [...mocks.albums.values()];
+    const trackUrlsByAlbum = new Map(albums.map(album => [album.id,
+      new Set(['/audio/first-private.mp3', '/audio/pending-private.mp3'])]));
+    for (const track of mocks.tracks.values()) {
+      const urls = trackUrlsByAlbum.get(track.albumId) ?? new Set<string>();
+      urls.add(track.url);
+      trackUrlsByAlbum.set(track.albumId, urls);
+    }
+    return { albums, bytes: 0, trackUrlsByAlbum, trackCounts: { 'pending-private': mocks.tracks.size } };
   },
 }));
 vi.mock('$lib/stores/audio-player.svelte', async () => {
@@ -98,6 +107,21 @@ it('does not recommend downloading an album already saved offline', async () => 
   flushSync();
   await vi.waitFor(() => expect(document.querySelector('.pt-as-btn-offline')?.textContent).toContain('Xóa'));
   expect(document.querySelector('.album-offline-notice')).toBeNull();
+});
+
+it('continues an offline album when a catalog track was replaced at the same track count', async () => {
+  const id = 'pending-private';
+  mocks.albums.set(id, { id });
+  component = mount(Harness, { target: document.body });
+  flushSync();
+  await vi.waitFor(() => expect(document.querySelector('.pt-as-btn-offline')?.textContent).toContain('Xóa'));
+  component.replaceTrack();
+  flushSync();
+  await vi.waitFor(() => expect(document.querySelector('.pt-as-btn-offline')?.textContent).toContain('Tải tiếp'));
+  (document.querySelector('.pt-as-btn-offline') as HTMLButtonElement).click();
+  flushSync();
+  expect(mocks.remove).not.toHaveBeenCalled();
+  expect(document.querySelector('.pt-card-meta-offline')).toBeNull();
 });
 
 const dreamStoryAlbumIds = [
@@ -196,6 +220,24 @@ async function beginTransfer() {
   expect(document.querySelector('.audio-offline-modal-sub')?.textContent).toContain('Owner A private album');
   expect(mocks.tracks.size).toBe(1);
 }
+
+it.each(['back', 'escape'] as const)('cancels the top download on %s and keeps its album open for resume', async mode => {
+  await beginTransfer();
+  if (mode === 'back') {
+    expect(dismissTopModal()).toBe(true);
+  } else {
+    const cancel = document.querySelector<HTMLButtonElement>('.audio-offline-modal-actions button')!;
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    cancel.dispatchEvent(escape);
+    // Browsers with native <dialog> dispatch cancel after an unhandled Escape.
+    if (!escape.defaultPrevented) cancel.closest('dialog')?.dispatchEvent(new Event('cancel', { cancelable: true }));
+  }
+  await vi.waitFor(() => expect(mocks.pendingSignal?.aborted).toBe(true));
+  expect(document.querySelector('.audio-offline-modal-backdrop')).toBeNull();
+  expect(document.querySelector('#album-title')?.textContent).toBe('Owner A private album');
+  expect(mocks.tracks.size).toBe(1);
+  expect(mocks.albums.size).toBe(0);
+});
 
 it.each(['logout', 'account', 'role'] as const)('aborts and closes private transfer UI immediately after session %s while retaining partial bytes', async mode => {
   await beginTransfer();

@@ -3,10 +3,17 @@ import { readFileSync } from 'node:fs';
 import { copySourceText } from '../../src/lib/domain/practice/copying-formatting';
 import { normalizeCopyText } from '../../src/lib/domain/practice/scripture-copying';
 import { copyingBlockCompleted, copyingTextCompletion } from '../../src/lib/domain/practice/copying-completion-progress';
-import { beginScriptureCopying, loginAsAdmin } from './runtime-helpers';
+import { beginScriptureCopying, deferStartupNotification, loginAsAdmin } from './runtime-helpers';
 const book = JSON.parse(readFileSync(new URL('../../src/lib/data/scripture-copying/dia-tang.json', import.meta.url), 'utf8'));
 
 const editorFor = (page: Page) => page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true });
+test.beforeEach(async ({ page }) => {
+  await deferStartupNotification(page);
+  page.on('dialog', dialog => dialog.accept());
+  // Các bài hồi quy cũ giữ nháp local khi quay lại; hành vi xác nhận được kiểm tra riêng.
+  await page.addLocatorHandler(page.getByRole('dialog', { name: /^(Lưu bản chép trước khi rời\?|Save your copy before leaving\?)$/ }), dialog =>
+    dialog.getByRole('button', { name: /^(Rời không lưu|Leave without saving)$/ }).click());
+});
 
 function longImperfectDraft(): string {
   const source = normalizeCopyText(book.chapters[0].blocks[0]);
@@ -197,7 +204,7 @@ test('switching from a late passage to a shorter chapter never mixes old draft l
   expect(errors).toEqual([]);
 });
 
-test('a locally saved copy does not block any main navigation tab', async ({ page }) => {
+test('a locally saved copy can leave through every main navigation tab after confirmation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page);
   await editorFor(page).pressSequentially('Nam mô Phật');
@@ -211,6 +218,7 @@ test('a locally saved copy does not block any main navigation tab', async ({ pag
   page.on('dialog', async dialog => { dialogs.push(dialog.type()); await dialog.dismiss(); });
   for (const [name, path] of [['Kinh sách', '/kinh-sach'], ['Tu tập', '/tu-tap'], ['Pháp thoại', '/phap-thoai'], ['Cá nhân', '/ca-nhan'], ['Trang chủ', '/']]) {
     await page.getByRole('navigation', { name: 'Điều hướng nhanh' }).getByRole('link', { name, exact: true }).click();
+    await expect(page.locator('.copy-page')).toHaveCount(0);
     await expect.poll(() => new URL(page.url()).pathname).toBe(path);
     await expect(page.locator('dialog[data-app-message]')).toHaveCount(0);
   }
@@ -295,7 +303,7 @@ test('administrator can copy and paste the entire reference into its matching pa
   await page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true }).click();
   await page.getByRole('button', { name: 'Sao chép toàn bộ kinh mẫu', exact: true }).click();
   const copyStatus = page.getByRole('dialog', { name: 'Cài đặt chép kinh', exact: true })
-    .locator('.mobile-save-feedback[role="status"]');
+    .getByRole('status').filter({ hasText: 'Đã sao chép toàn bộ kinh mẫu của phẩm/quyển.' });
   await expect(copyStatus).toHaveText('Đã sao chép toàn bộ kinh mẫu của phẩm/quyển.');
   await expect(copyStatus).toBeVisible();
   const closeOptions = page.getByRole('button', { name: 'Đóng tùy chọn', exact: true });
@@ -334,10 +342,14 @@ test('ghost input without keyup follows the committed caret and backward correct
   const editor = editorFor(page);
   await editor.click();
   // Touch keyboards may deliver beforeinput without a physical keyup event.
-  for (const expected of ['T', 'TỊ', 'TỊN', 'TỊNH', 'TỊNH ', 'TỊNH K']) {
-    await editor.evaluate(node => node.dispatchEvent(new InputEvent('beforeinput', {
-      inputType: 'insertText', data: 'x', bubbles: true, cancelable: true
-    })));
+  const typeWithoutKeyup = (data: string) => editor.evaluate((node, key) => node.dispatchEvent(new InputEvent('beforeinput', {
+    inputType: 'insertText', data: key, bubbles: true, cancelable: true,
+  })), data);
+  for (let index = 0; index < 6; index++) await typeWithoutKeyup('x');
+  await expect(editor).toHaveText('');
+  await expect(page.getByRole('status').filter({ hasText: 'Cần gõ:' })).toContainText('TỊNH');
+  for (const [key, expected] of [['t', 'T'], ['i', 'TỊ'], ['n', 'TỊN'], ['h', 'TỊNH'], [' ', 'TỊNH '], ['k', 'TỊNH K']]) {
+    await typeWithoutKeyup(key);
     await expect(editor).toHaveText(expected);
   }
   const activeWord = page.locator('#copy-source-text .source-word--current');
@@ -347,6 +359,78 @@ test('ghost input without keyup follows the committed caret and backward correct
   await editor.press('End');
   await expect(activeWord).toHaveText('KHẨU');
   await expect.poll(() => localText(page)).toBe('TỊNH K');
+  expect(requests).toEqual([]);
+});
+
+test('reference follows selection-only caret corrections without editing or cloud writes', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/practice/copying') requests.push(request.method()); });
+  await page.goto('/tu-tap/chep-kinh');
+  await beginScriptureCopying(page);
+  const editor = editorFor(page);
+  const text = 'TỊNH K';
+  await editor.pressSequentially(text);
+  const activeWord = page.locator('#copy-source-text .source-word--current');
+  await expect(activeWord).toHaveText('KHẨU');
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  // Native selection controls can move the range without input, keyup or click.
+  await editor.evaluate(node => {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    const first = walker.nextNode()!;
+    const range = document.createRange(); range.setStart(first, 0); range.collapse(true);
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  });
+  await expect(activeWord).toHaveText('TỊNH');
+  await expect(editor).toHaveText(text);
+  await expect.poll(() => localText(page)).toBe(text);
+  expect(requests).toEqual([]);
+});
+
+for (const form of ['NFC', 'NFD'] as const) test(`plain-text IME keeps the caret after consecutive Enter edits (${form})`, async ({ page }) => {
+  await page.goto('/tu-tap/chep-kinh');
+  await beginScriptureCopying(page);
+  const editor = editorFor(page);
+  await editor.focus();
+  const raw = 'Nam mô'.normalize(form);
+  await editor.evaluate((node, raw) => {
+    node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    node.textContent = raw;
+    const range = document.createRange(); range.selectNodeContents(node); range.collapse(false);
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+    node.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', bubbles: true }));
+    node.dispatchEvent(new CompositionEvent('compositionend', { data: 'mô', bubbles: true }));
+    for (const inputType of ['insertParagraph', 'insertLineBreak']) {
+      node.dispatchEvent(new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true }));
+    }
+  }, raw);
+  await expect.poll(() => editor.textContent()).toBe(raw + '\n\n');
+  await editor.pressSequentially('Phật');
+  await expect.poll(() => editor.textContent()).toBe(raw + '\n\nPhật');
+  await expect.poll(() => localText(page)).toBe(raw + '\n\nPhật');
+});
+
+test('ghost copying keeps typed optional notes through reload and resumes with the next canonical letter', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/practice/copying') requests.push(request.method()); });
+  await open(page);
+  const toggle = page.getByRole('button', { name: 'Chữ mờ', exact: true });
+  await toggle.click();
+  const editor = editorFor(page);
+  await editor.focus();
+  await editor.pressSequentially('tinh (3 lần) ');
+  const first = 'TỊNH (3 lần) ';
+  await expect(editor).toHaveText(first, { useInnerText: false });
+  await expect(editor.locator('em')).toHaveText('(3 lần)');
+  await expect.poll(() => localText(page)).toBe(first);
+  await page.reload();
+  await beginScriptureCopying(page);
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(editor.locator('em')).toHaveText('(3 lần)');
+  await editor.press('Control+End');
+  await editor.press('k');
+  await expect.poll(() => localText(page)).toBe(first + 'K');
+  await expect(editor).toHaveText(first + 'K');
   expect(requests).toEqual([]);
 });
 
@@ -392,13 +476,14 @@ test('ghost text tracing preserves reference visibility and synchronizes font ch
   // Verify font change synchronizes to ghost layer
   await page.locator('.editor-tools-trigger').click();
   const display = page.locator('.compact-editor-display');
-  await display.getByRole('combobox', { name: 'Phông chữ', exact: true }).selectOption('mali');
+  await display.getByRole('button', { name: 'Phông chữ: Bookerly', exact: true }).click();
+  await page.getByRole('listbox', { name: 'Danh sách phông chữ' }).getByRole('option', { name: 'Mali (viết tay)', exact: true }).click();
   await expect(ghostLayer).toHaveCSS('font-family', /CopyMali/);
 
-  // Type keys: automatically advances canonical scripture letters
+  // Trace the heading with unaccented letters, then compare the actual ink and ghost glyphs.
   const editor = page.locator('#copy-text');
   await editor.click();
-  await editor.pressSequentially('abc');
+  await editor.pressSequentially('tin');
   await expect(editor).toHaveText(/^TỊN/);
   await page.evaluate(() => document.fonts.ready);
   const glyphDisplacement = () => page.evaluate(() => {
@@ -476,4 +561,50 @@ test('review keeps both actions visible while ten issues scroll on a phone', asy
   await dialog.getByRole('button', { name: 'Về chỗ cần sửa', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(editorFor(page)).toBeFocused();
+});
+
+test('reference highlights and scrolls along typed IME words after switching from ghost mode to normal text', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page);
+  const ghostBtn = page.getByRole('button', { name: 'Chữ mờ', exact: true });
+  await ghostBtn.click();
+  await expect(ghostBtn).toHaveAttribute('aria-pressed', 'true');
+
+  const editor = editorFor(page);
+  await editor.click();
+  await editor.pressSequentially('TỊNH KHẨU NGHIỆP CHƠN NGÔN');
+  await expect(editor).toHaveText('TỊNH KHẨU NGHIỆP CHƠN NGÔN');
+
+  // Switch from Chữ mờ to normal text (Chữ thường)
+  await ghostBtn.click();
+  await expect(ghostBtn).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.rich-copy-ghost')).toHaveCount(0);
+
+  // Type subsequent words continuously in IME composition mode (without idle gaps resetting composing=false)
+  const words = normalizeCopyText(book.chapters[0].blocks[0]).split(' ').slice(5, 72);
+  await editor.evaluate((node, additions) => {
+    node.focus();
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    const chunk = ' ' + additions.join(' ');
+    const targetNode = node.querySelector('span')?.lastChild ?? node;
+    if (targetNode.nodeType === 3) (targetNode as Text).appendData(chunk);
+    else targetNode.appendChild(document.createTextNode(chunk));
+    const endRange = document.createRange();
+    endRange.selectNodeContents(node);
+    endRange.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(endRange);
+    node.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: chunk, bubbles: true }));
+  }, words);
+
+  const source = page.locator('#copy-source-text');
+  const lastWord = words.at(-1)!;
+  await expect(source.locator('.source-word--current')).toContainText(new RegExp(lastWord, 'i'));
+  await expect.poll(() => source.evaluate(node => node.scrollTop)).toBeGreaterThan(20);
 });

@@ -191,8 +191,8 @@ struct PracticeHomeWidget: Widget {
         StaticConfiguration(kind: PracticeWidgetStore.widgetKind, provider: PracticeWidgetProvider()) { entry in
             PracticeWidgetView(entry: entry)
         }
-        .configurationDisplayName("Tu Tập Hằng Ngày")
-        .description("Mở nhanh thiền định, lần tràng hạt, tụng kinh và trì chú; không tự ghi nhận hoàn thành.")
+        .configurationDisplayName(WidgetLocaleStore.text("Tu Tập Hằng Ngày", "Daily Practice"))
+        .description(WidgetLocaleStore.text("Mở nhanh thiền định, lần tràng hạt, tụng kinh và trì chú; không tự ghi nhận hoàn thành.", "Quickly open meditation, rosary, sutras and mantras; opening a tool does not record completion."))
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

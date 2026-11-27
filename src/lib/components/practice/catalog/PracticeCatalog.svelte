@@ -28,6 +28,8 @@
   import { veganUi } from '$lib/i18n/vegan-ui';
   import PracticeCatalogSkeleton from './PracticeCatalogSkeleton.svelte';
   import { NAME_COPYING_COPY } from '$lib/domain/practice/name-copying-copy';
+  import DivinationArtwork from '$lib/components/practice/divination/DivinationArtwork.svelte';
+  import { getDivinationCopy } from '$lib/i18n/divination-ui';
 
   const localeStore = getLocaleContext();
   const localizeUi = createInterfaceTranslator();
@@ -36,6 +38,7 @@
   const isEn = $derived(localeStore.current === 'en');
   const entryCopy = $derived(getPracticeEntryCopy(isEn));
   const preceptCopy = $derived(getPreceptPracticeCopy(isEn));
+  const divCopy = $derived(getDivinationCopy(isEn));
 
   export type PracticeSection = 'KINH PHẬT' | 'TRÌ CHÚ' | 'NGHI THỨC KHÁC';
 
@@ -333,7 +336,7 @@
           {@render tracker()}
         {/if}
         {#if onReflectionOpen}
-          <button type="button" class="tt-mode-card tt-mode-card--reflection tt-mode-card--copying" aria-label={entryCopy.reflection} onclick={onReflectionOpen}>
+          <button type="button" class="tt-mode-card tt-mode-card--reflection" aria-label={entryCopy.reflection} onclick={onReflectionOpen}>
             <div class="tt-mode-icon-wrap" aria-hidden="true"><span class="reflection-entry-icon"><HeartHandshake size={32} strokeWidth={1.8} /></span></div>
             <div class="tt-mode-body"><span class="tt-mode-title">{entryCopy.reflection}</span><span class="tt-mode-desc">{entryCopy.reflectionDescription}</span></div>
             <span class="tt-mode-arrow" aria-hidden="true">→</span>
@@ -504,6 +507,50 @@
             </button>
           </div>
         </div>
+
+        <!-- Nhóm 5: Cảm ứng tâm linh -->
+        <div class="tt-group-block">
+          <div class="tt-group-header">
+            <h3 class="tt-group-title">{divCopy.groupTitle}</h3>
+          </div>
+          <div class="tt-modes-grid tt-modes-grid--2">
+            <!-- Quan Âm Linh Xăm -->
+            <a href="/tu-tap/quan-am-linh-xam" class="tt-mode-card tt-mode-card--quan-am" style="text-decoration: none;">
+              <div class="tt-mode-icon-wrap" aria-hidden="true"><DivinationArtwork kind="quan-am" size={48} /></div>
+              <div class="tt-mode-body">
+                <span class="tt-mode-title">{divCopy.hubQuanAmTitle}</span>
+                <span class="tt-mode-desc">{divCopy.hubQuanAmDesc}</span>
+              </div>
+              <span class="tt-mode-arrow" aria-hidden="true">→</span>
+            </a>
+
+            <!-- Mộc Luân Chiêm Sát -->
+            <a href="/tu-tap/moc-luan-chiem-sat" class="tt-mode-card tt-mode-card--moc-luan" style="text-decoration: none;">
+              <div class="tt-mode-icon-wrap" aria-hidden="true"><DivinationArtwork kind="moc-luan" size={48} /></div>
+              <div class="tt-mode-body">
+                <span class="tt-mode-title">{divCopy.hubMocLuanTitle}</span>
+                <span class="tt-mode-desc">{divCopy.hubMocLuanDesc}</span>
+              </div>
+              <span class="tt-mode-arrow" aria-hidden="true">→</span>
+            </a>
+            <a href="/tu-tap/nhip-sinh-hoc" class="tt-mode-card tt-mode-card--biorhythm">
+              <div class="tt-mode-icon-wrap" aria-hidden="true"><DivinationArtwork kind="biorhythm" size={48} /></div>
+              <div class="tt-mode-body">
+                <span class="tt-mode-title">{divCopy.hubBiorhythmTitle}</span>
+                <span class="tt-mode-desc">{divCopy.hubBiorhythmDesc}</span>
+              </div>
+              <span class="tt-mode-arrow" aria-hidden="true">→</span>
+            </a>
+            <a href="/tu-tap/giai-mong" class="tt-mode-card tt-mode-card--dream">
+              <div class="tt-mode-icon-wrap" aria-hidden="true"><DivinationArtwork kind="dream" size={48} /></div>
+              <div class="tt-mode-body">
+                <span class="tt-mode-title">{divCopy.hubDreamTitle}</span>
+                <span class="tt-mode-desc">{divCopy.hubDreamDesc}</span>
+              </div>
+              <span class="tt-mode-arrow" aria-hidden="true">→</span>
+            </a>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -571,25 +618,74 @@
 <style>
   .reflection-entry-icon { display:flex; color:var(--practice-meditation-ink); }
   .tt-entry-cards { display:flex; flex-direction:column; gap:calc(var(--space-page) * .7); }
-  .tt-entry--newbie { --entry-tint:var(--gold-muted); }
-  .tt-entry--study { --entry-tint:var(--practice-name-copy-card-start); }
-  .tt-entry-cards :global(.dharma-giving-banner-wrap) { --entry-tint:var(--practice-scripture-copy-card-end); }
-  .tt-entry-cards .tt-event-banner { --entry-tint:var(--practice-meditation-tint); }
+  .tt-entry--newbie { --entry-tint:#fff0b3; --entry-mid:#ffe078; --entry-end:#f5c945; --entry-ink:#3f2800; --entry-glow:rgba(214,160,24,.35); }
+  .tt-entry-cards :global(.dharma-giving-banner-wrap) { --entry-tint:#ffdbc2; --entry-mid:#ffbc91; --entry-end:#f79b65; --entry-ink:#4c1b06; --entry-glow:rgba(224,114,58,.35); }
+  .tt-entry--study { --entry-tint:#c8f5c4; --entry-mid:#9be897; --entry-end:#71d66d; --entry-ink:#0e3b10; --entry-glow:rgba(68,173,66,.34); }
+  .tt-entry-cards .tt-event-banner { --entry-tint:#e6d4ff; --entry-mid:#ceb0fc; --entry-end:#b48ef7; --entry-ink:#260b4e; --entry-glow:rgba(138,92,224,.35); }
+
+  :global([data-theme='dark']) .tt-entry--newbie { --entry-tint:#574212; --entry-mid:#42310b; --entry-end:#2e2106; --entry-ink:#fef3c7; --entry-glow:rgba(0,0,0,.55); }
+  :global([data-theme='dark']) .tt-entry-cards :global(.dharma-giving-banner-wrap) { --entry-tint:#66341c; --entry-mid:#4f2613; --entry-end:#38190b; --entry-ink:#ffeadc; --entry-glow:rgba(0,0,0,.55); }
+  :global([data-theme='dark']) .tt-entry--study { --entry-tint:#1e4f23; --entry-mid:#153b19; --entry-end:#0d2910; --entry-ink:#defce0; --entry-glow:rgba(0,0,0,.55); }
+  :global([data-theme='dark']) .tt-entry-cards .tt-event-banner { --entry-tint:#432c6b; --entry-mid:#322052; --entry-end:#22153b; --entry-ink:#f0e7ff; --entry-glow:rgba(0,0,0,.55); }
+
   .tt-entry-cards :global(:is(.tt-beginner-guide-wrap,.dharma-giving-banner-wrap,.tt-event-banner)) {
     width:calc(100% - var(--space-page) * 1.6); max-width:968px; margin:0 auto;
   }
   .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner)) {
+    position:relative;
+    overflow:hidden;
+    isolation:isolate;
     box-sizing:border-box;
     min-height:calc(var(--space-page) * 4.8);
     margin:0;
     padding:calc(var(--space-page) * .8);
-    border:1px solid color-mix(in srgb,var(--card) 80%,var(--entry-tint));
+    border:1px solid rgba(255,255,255,.68);
     border-radius:var(--radius-feature);
-    background:linear-gradient(135deg,color-mix(in srgb,var(--entry-tint) 45%,var(--card)),color-mix(in srgb,var(--entry-tint) 70%,var(--card)));
-    box-shadow:inset 0 1px 0 var(--card),var(--shadow);
-    color:var(--text);
+    background:linear-gradient(145deg,var(--entry-tint) 0%,var(--entry-mid) 52%,var(--entry-end) 100%);
+    box-shadow:
+      inset 0 1.5px 0 rgba(255,255,255,.88),
+      inset 0 -3.5px 0 rgba(0,0,0,.15),
+      0 8px 18px -5px var(--entry-glow),
+      0 2px 6px rgba(0,0,0,.08);
+    color:var(--entry-ink);
     font-family:var(--font-app);
-    transition:box-shadow var(--motion-press) var(--ease-standard),transform var(--motion-press) var(--ease-standard);
+    transition:transform var(--motion-press) var(--ease-standard),box-shadow var(--motion-press) var(--ease-standard),filter var(--motion-press) var(--ease-standard);
+  }
+  .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner)::before) {
+    content:'';
+    position:absolute;
+    inset:0 0 46% 0;
+    border-radius:calc(var(--radius-feature) - 1px) calc(var(--radius-feature) - 1px) 48% 48% / calc(var(--radius-feature) - 1px) calc(var(--radius-feature) - 1px) 18px 18px;
+    background:linear-gradient(180deg,rgba(255,255,255,.54) 0%,rgba(255,255,255,.06) 100%);
+    pointer-events:none;
+    z-index:0;
+  }
+  .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner)::after) {
+    content:'';
+    position:absolute;
+    right:-18px;
+    bottom:-24px;
+    width:96px;
+    height:96px;
+    border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.34) 0%,transparent 70%);
+    pointer-events:none;
+    z-index:0;
+  }
+  .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner) > *) { position:relative; z-index:1; }
+  :global([data-theme='dark']) .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner)) {
+    border-color:rgba(255,255,255,.14);
+    box-shadow:
+      inset 0 1.5px 0 rgba(255,255,255,.22),
+      inset 0 -3.5px 0 rgba(0,0,0,.44),
+      0 8px 18px -5px var(--entry-glow),
+      0 2px 6px rgba(0,0,0,.35);
+  }
+  :global([data-theme='dark']) .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner)::before) {
+    background:linear-gradient(180deg,rgba(255,255,255,.13) 0%,rgba(255,255,255,.02) 100%);
+  }
+  :global([data-theme='dark']) .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner)::after) {
+    background:radial-gradient(circle,rgba(255,255,255,.08) 0%,transparent 70%);
   }
   .tt-entry-cards :global(.dharma-giving-prompt.permanent) { display:flex; padding:0; }
   .tt-entry-cards :global(.dharma-giving-prompt.permanent .dharma-giving-main-action) {
@@ -603,46 +699,59 @@
     display:grid; place-items:center; box-sizing:border-box;
     width:calc(var(--space-page) * 2.6); height:calc(var(--space-page) * 2.6); flex:0 0 calc(var(--space-page) * 2.6);
     border-radius:var(--radius-card);
-    background:linear-gradient(135deg,color-mix(in srgb,var(--card) 85%,transparent),color-mix(in srgb,var(--card) 40%,transparent));
-    border:1px solid color-mix(in srgb,var(--card) 85%,var(--border2));
-    box-shadow:inset 0 1px 0 var(--card),var(--shadow);
-    color:var(--gold);
+    background:rgba(255,255,255,.64);
+    border:1px solid rgba(255,255,255,.82);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.88),0 3px 8px rgba(0,0,0,.1);
+    color:var(--entry-ink);
+  }
+  :global([data-theme='dark']) .tt-entry-cards :global(:is(.tt-beginner-icon-box,.dharma-giving-icon-box,.banner-icon-box)) {
+    background:rgba(255,255,255,.14);
+    border-color:rgba(255,255,255,.18);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 3px 8px rgba(0,0,0,.28);
   }
   .tt-entry-cards :global(.dharma-giving-icon),
   .tt-entry-cards :global(.banner-icon-box .icon) { display:flex; width:100%; height:100%; }
   .tt-entry-cards :global(:is(.tt-beginner-content strong,.dharma-giving-title,.banner-badge-text)) {
     margin:0; font-family:var(--font-app); font-size:var(--font-size-card-title); font-weight:700;
-    line-height:1.4; letter-spacing:normal; color:var(--text); text-wrap:balance; overflow-wrap:anywhere;
+    line-height:1.4; letter-spacing:normal; color:var(--entry-ink); text-shadow:0 1px 0 rgba(255,255,255,.45); text-wrap:balance; overflow-wrap:anywhere;
+  }
+  :global([data-theme='dark']) .tt-entry-cards :global(:is(.tt-beginner-content strong,.dharma-giving-title,.banner-badge-text)) {
+    text-shadow:0 1px 2px rgba(0,0,0,.35);
   }
   .tt-entry-cards :global(:is(.tt-banner-arrow,.dharma-giving-compact-arrow,.banner-chevron-btn)) {
     display:grid; place-items:center; box-sizing:border-box;
     flex:0 0 calc(var(--space-page) * 2.2); width:calc(var(--space-page) * 2.2); height:calc(var(--space-page) * 2.2);
-    border:1px solid color-mix(in srgb,var(--card) 85%,var(--border2)); border-radius:50%;
-    background:color-mix(in srgb,var(--card) 55%,transparent); color:var(--gold);
-    box-shadow:inset 0 1px 0 var(--card),var(--shadow); font-size:var(--font-size-body);
+    border:1px solid rgba(255,255,255,.82); border-radius:50%;
+    background:rgba(255,255,255,.64); color:var(--entry-ink);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.88),0 2px 6px rgba(0,0,0,.1); font-size:var(--font-size-body);
+  }
+  :global([data-theme='dark']) .tt-entry-cards :global(:is(.tt-banner-arrow,.dharma-giving-compact-arrow,.banner-chevron-btn)) {
+    background:rgba(255,255,255,.14);
+    border-color:rgba(255,255,255,.18);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 2px 6px rgba(0,0,0,.28);
   }
   .tt-entry-cards :global(.banner-actions) { flex-direction:row; align-self:center; }
   .tt-entry-cards :global(.dharma-giving-main-action:focus-visible) { outline:3px solid var(--gold); outline-offset:3px; }
   .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner):active) {
-    transform:translateY(1px); box-shadow:inset 0 1px 0 var(--card);
+    transform:translateY(2px) scale(.99);
+    box-shadow:inset 0 2px 4px rgba(0,0,0,.16),inset 0 -1px 0 rgba(0,0,0,.14),0 2px 6px -2px var(--entry-glow);
   }
   @media(hover:hover) {
-    .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner):hover) { box-shadow:inset 0 1px 0 var(--card),var(--shadow-lg); }
+    .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner):hover) {
+      transform:translateY(-2.5px);
+      filter:brightness(1.03);
+      box-shadow:inset 0 1.5px 0 rgba(255,255,255,.92),inset 0 -4px 0 rgba(0,0,0,.17),0 12px 24px -5px var(--entry-glow),0 4px 10px rgba(0,0,0,.12);
+    }
+    :global([data-theme='dark']) .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner):hover) {
+      box-shadow:inset 0 1.5px 0 rgba(255,255,255,.26),inset 0 -4px 0 rgba(0,0,0,.48),0 12px 24px -5px var(--entry-glow),0 4px 10px rgba(0,0,0,.4);
+    }
   }
   @media(prefers-reduced-motion:reduce) {
     .tt-entry-cards :global(:is(.tt-beginner-guide,.dharma-giving-prompt,.thap-trai-banner)) { transition:none; transform:none; }
   }
   .tt-beginner-guide-wrap{width:calc(100% - 32px);max-width:968px;margin:0 auto 12px}
-  .tt-beginner-guide{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--gold-light);color:var(--text);text-decoration:none;line-height:1.5;box-shadow:0 2px 8px rgba(60,40,10,.03);transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
-  :global([data-theme="dark"]) .tt-beginner-guide{background:var(--bg2);border-color:var(--border2);color:var(--text)}
-  .tt-beginner-icon-box{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;border-radius:14px;background:color-mix(in srgb,var(--gold) 14%,transparent);border:1px solid color-mix(in srgb,var(--gold) 28%,transparent);color:var(--gold)}
-  :global([data-theme="dark"]) .tt-beginner-icon-box{background:rgba(200,150,62,.15);border-color:rgba(200,150,62,.3);color:var(--gold2)}
+  .tt-beginner-guide{display:flex;align-items:center;gap:14px;text-decoration:none;line-height:1.5}
   .tt-beginner-content{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-  .tt-beginner-guide strong{display:block;font-size:var(--font-size-card-title);font-weight:700;margin:2px 0 1px;color:var(--text);line-height:1.35}
-  .tt-banner-arrow{display:grid;place-items:center;width:32px;height:32px;flex-shrink:0;border-radius:50%;background:color-mix(in srgb,var(--gold) 15%,transparent);color:var(--gold);font-weight:700;font-size:15px;transition:all .15s ease}
-  :global([data-theme="dark"]) .tt-banner-arrow{background:rgba(200,150,62,.15);color:var(--gold2)}
-  .tt-beginner-guide:hover{border-color:var(--gold);background:var(--hover);transform:translateY(-2px);box-shadow:var(--shadow)}
-  .tt-beginner-guide:hover .tt-banner-arrow{transform:translateX(3px);background:var(--gold);color:#fff}
   .tt-beginner-guide:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
   :global(body){font-family:var(--font-app)!important}
   .tt-catalog{width:100%;margin:0 auto;padding:0}
@@ -682,7 +791,7 @@
   .tt-filter-container{display:flex;flex-direction:column;gap:12px;width:calc(100% - 32px);max-width:968px;margin:0 auto 20px}
 
 
-  :global(.tt-mode-card){position:relative;display:flex;align-items:center;gap:14px;padding:18px 18px;border:none;border-radius:18px;color:#fff;cursor:pointer;font:inherit;text-align:left;box-shadow:0 6px 18px rgba(0,0,0,.1);transition:transform .18s ease,box-shadow .18s ease}
+  :global(.tt-mode-card){position:relative;display:flex;align-items:center;gap:14px;padding:18px 18px;border:none;border-radius:18px;color:#fff;cursor:pointer;font:inherit;text-align:left;text-decoration:none;box-shadow:0 6px 18px rgba(0,0,0,.1);transition:transform .18s ease,box-shadow .18s ease}
   :global(.tt-mode-card--vegan){text-decoration:none}
   :global(.tt-mode-card:hover){transform:translateY(-3px);box-shadow:0 10px 24px rgba(0,0,0,.18)}
   :global(.tt-mode-card:active){transform:translateY(-1px)}

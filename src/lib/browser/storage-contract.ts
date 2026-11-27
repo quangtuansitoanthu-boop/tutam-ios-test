@@ -1,4 +1,7 @@
 export const DELETED_PRACTICE_LOGS_KEY = 'tt_deleted_practice_logs_v1';
+export const DIVINATION_HISTORY_KEY = 'tt_divination_history_v1';
+export const BIORHYTHM_PROFILE_KEY = 'tt_biorhythm_profile_v1';
+export const DREAM_JOURNAL_KEY = 'tt_dream_journal_v1';
 
 export const LEGACY_LOCAL_STORAGE_KEYS = Object.freeze({
   articleCache: 'tutam_articles_v4',

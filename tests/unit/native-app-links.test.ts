@@ -492,6 +492,43 @@ describe('native launch fallback consumption across document remounts', () => {
     next();
   });
 
+  it('remembers the Android launch URL when its warm event arrives before the getter', async () => {
+    const state = sessionWindow();
+    const url = 'vn.quangtu.tutam:///kinh-sach';
+    let finish!: (value: { url: string }) => void;
+    mocks.launch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const first = startNativeAppLinks(state.navigate);
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    const onUrl = mocks.appListener.mock.calls.at(-1)![1] as (value: { url: string }) => void;
+    onUrl({ url });
+    finish({ url });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(state.navigate).toHaveBeenCalledExactlyOnceWith('/kinh-sach');
+    onUrl({ url: 'vn.quangtu.tutam:///ca-nhan' });
+    expect(state.navigate).toHaveBeenLastCalledWith('/ca-nhan');
+    first();
+
+    mocks.launch.mockResolvedValue({ url });
+    state.navigate.mockClear();
+    const next = startNativeAppLinks(state.navigate);
+    try {
+      await vi.waitFor(() => expect(mocks.launch).toHaveBeenCalledTimes(2));
+      expect(state.navigate).not.toHaveBeenCalled();
+    } finally { next(); }
+  });
+
+  it('honors a raw launch URL stored by an earlier app version', async () => {
+    const state = sessionWindow();
+    const url = 'vn.quangtu.tutam:///kinh-sach';
+    state.sessionStorage.setItem('tutam_native_launch_consumed_url_v2', url);
+    mocks.launch.mockResolvedValue({ url });
+    const stop = startNativeAppLinks(state.navigate);
+    try {
+      await vi.waitFor(() => expect(mocks.launch).toHaveBeenCalledOnce());
+      expect(state.navigate).not.toHaveBeenCalled();
+    } finally { stop(); }
+  });
+
   it('accepts the same cold URL in a new WebView browsing session', async () => {
     const state = sessionWindow();
     mocks.launch.mockResolvedValue({ url: 'vn.quangtu.tutam:///ca-nhan?tab=account' });

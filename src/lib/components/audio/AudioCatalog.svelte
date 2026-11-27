@@ -17,7 +17,7 @@
     estimateOfflineQuota,
     readAlbumDownloadSize,
   } from '$lib/browser/audio-downloads';
-  import { deleteOfflineAlbum, readOfflineLibrarySnapshot } from '$lib/browser/offline-audio-database';
+  import { deleteOfflineAlbum, offlineCatalogProgress, readOfflineLibrarySnapshot, type OfflineLibrarySnapshot } from '$lib/browser/offline-audio-database';
   import { readStoredAlbumPosition } from '$lib/browser/audio-sync';
   import { getBrowserSession, hasUsableBrowserCsrf, requireBrowserCsrf } from '$lib/browser/session-csrf';
   import { resolvePublicUrl } from '$lib/browser/native-api';
@@ -103,7 +103,7 @@
     onCollectionToggle = () => {},
   }: Props = $props();
 
-  let selected = $state<TalkAlbum | null>(null);
+  let selected = $state.raw<TalkAlbum | null>(null);
   let offlineNoticeVisible = $state(false);
   const hasStoryNotice = $derived(!!selected && hasContentExperienceNotice(selected.id));
 
@@ -122,9 +122,9 @@
     ? selected.tracks[$audioPlayer.trackIndex] : null);
   const videoIsFull = $derived(Boolean(selectedVideoTrack && videoExpanded));
   let downloadStatus = $state<Record<string, string>>({});
-  let albumStatuses = $state<Record<string, 'none' | 'partial' | 'downloaded'>>({});
+  let offlineSnapshot = $state.raw<OfflineLibrarySnapshot | null>(null);
   let offlineStateReady = $state(false);
-  let offlineTrackCounts = $state<Record<string, number>>({});
+  const albumProgress = $derived(new Map(albums.map(album => [album.id, offlineCatalogProgress(offlineSnapshot, album)])));
   let busyModes = $state<Record<string, 'offline' | 'zip' | null>>({});
   let transferProgress = $state<Record<string, AlbumTransferProgress | null>>({});
   let storageStatus = $state('');
@@ -287,9 +287,10 @@
   }
 
   $effect(() => {
-    if (selectedAlbumId && selectedAlbumId !== selected?.id) {
+    if (selectedAlbumId) {
       const match = albums.find((a) => a.id === selectedAlbumId);
-      if (match) void openAlbum(match, null);
+      if (match && selectedAlbumId !== selected?.id) void openAlbum(match, null);
+      else if (match && selected !== match) selected = match;
     } else if (!selectedAlbumId && selected) {
       closeAlbum();
     }
@@ -376,8 +377,15 @@
     }
   }
 
+  function revealCurrentPlayer(album: TalkAlbum): void {
+    if ($audioPlayer.album?.id === album.id) {
+      window.dispatchEvent(new Event('quangtu:show-audio-player'));
+    }
+  }
+
   async function play(album: TalkAlbum, trackIndex = 0, resumeSeconds = 0, dismissPrompt = true): Promise<void> {
     if (dismissPrompt) clearResumePrompt();
+    revealCurrentPlayer(album);
     if (album.tracks[trackIndex]?.media_type === 'video') videoExpanded = album.tracks[trackIndex]?.aspect_ratio !== '16:9';
     const player = await getAudioPlayer();
     await player.playTrack(mapped(album), trackIndex, resumeSeconds);
@@ -385,6 +393,7 @@
 
   async function playAll(album: TalkAlbum): Promise<void> {
     clearResumePrompt();
+    revealCurrentPlayer(album);
     await (await getAudioPlayer()).playAll(mapped(album));
   }
 
@@ -443,34 +452,23 @@
     // Root đăng ký session sau lượt mount con; chờ để đọc đúng principal ngay lần đầu.
     await tick();
     if (disposed) return;
-    const generation = offlineStateGeneration;
+    const generation = ++offlineStateGeneration;
     const session = getBrowserSessionSnapshot();
     const principalId = session.authenticated ? session.user?.id ?? null : null;
-    const snapshot = await readOfflineLibrarySnapshot().catch(() => ({
-      albums: [],
-      bytes: 0,
-      trackCounts: {} as Record<string, number>,
-    }));
+    const snapshot = await readOfflineLibrarySnapshot().catch(() => null);
     const current = getBrowserSessionSnapshot();
     if (disposed || generation !== offlineStateGeneration) return;
     if (principalId !== (current.authenticated ? current.user?.id ?? null : null) || session.user?.role !== current.user?.role) {
       void syncOfflineState();
       return;
     }
-    const downloadedIds = new Set(snapshot.albums.map((album) => album.id));
-    const nextStatuses: Record<string, 'none' | 'partial' | 'downloaded'> = {};
-    const knownIds = new Set([...albums.map(album => album.id), ...downloadedIds, ...Object.keys(snapshot.trackCounts)]);
-    for (const albumId of knownIds) {
-      const count = snapshot.trackCounts[albumId] ?? 0;
-      if (downloadedIds.has(albumId)) nextStatuses[albumId] = 'downloaded';
-      else if (count > 0) nextStatuses[albumId] = 'partial';
-      else nextStatuses[albumId] = 'none';
-    }
-    albumStatuses = nextStatuses;
+    offlineSnapshot = snapshot;
     offlineStateReady = true;
-    offlineTrackCounts = snapshot.trackCounts;
-    storageStatus = snapshot.bytes > 0 ? `Đang lưu offline ${formatBytes(snapshot.bytes)}.` : '';
-    window.dispatchEvent(new CustomEvent('quangtu:offline-updated', { detail: nextStatuses }));
+    storageStatus = snapshot && snapshot.bytes > 0 ? `Đang lưu offline ${formatBytes(snapshot.bytes)}.` : '';
+    const statuses = Object.fromEntries(Object.keys(snapshot?.trackCounts ?? {}).map(id => [id, 'partial']));
+    for (const saved of snapshot?.albums ?? []) statuses[saved.id] = 'downloaded';
+    for (const [id, progress] of albumProgress) statuses[id] = progress.status;
+    window.dispatchEvent(new CustomEvent('quangtu:offline-updated', { detail: statuses }));
     onOfflineChanged();
   }
 
@@ -522,7 +520,7 @@
 
   async function toggleOffline(album: TalkAlbum, returnFocusTo: HTMLElement): Promise<void> {
     if (disposed) return;
-    if (albumStatuses[album.id] === 'downloaded') {
+    if (offlineCatalogProgress(offlineSnapshot, album).status === 'downloaded') {
       await removeOffline(album);
       return;
     }
@@ -530,6 +528,8 @@
     if (offlineControllers.has(album.id) || zipControllers.has(album.id)) return;
     if (offlineConfirmation) return;
     rememberTransferSession();
+    // WebKit có thể không lấy focus khi chạm nút. Đặt focus để hộp thoại trả về đúng nút.
+    returnFocusTo.focus({ preventScroll: true });
     offlineConfirmation = { album, trigger: returnFocusTo };
     offlineSize = null;
     const controller = new AbortController();
@@ -582,7 +582,7 @@
     const controller = new AbortController();
     offlineControllers.set(album.id, controller);
     busyModes = { ...busyModes, [album.id]: 'offline' };
-    const initialCompleted = Math.min(offlineTrackCounts[album.id] ?? 0, album.tracks.length);
+    const initialCompleted = offlineCatalogProgress(offlineSnapshot, album).count;
     const initialPercent = Math.min(100, Math.round((initialCompleted / album.tracks.length) * 100));
 
     audioDownloadProgress = {
@@ -782,8 +782,15 @@
   onMount(() => {
     disposed = false;
     void syncOfflineState();
+    let offlinePrincipal = transferIdentity().key;
     const closeStaleTransfers = () => {
       const next = transferIdentity(), previous = transferSession;
+      if (offlinePrincipal !== next.key) {
+        offlinePrincipal = next.key;
+        offlineSnapshot = null;
+        offlineStateReady = false;
+        void syncOfflineState();
+      }
       if (!previous || previous.key === next.key) return;
       transferSession = next;
       cancelTrackDownload();
@@ -804,8 +811,8 @@
     };
 
     const handleDialogKeyboard = (event: KeyboardEvent) => {
-      if (offlineConfirmation) return;
-      if (loginModalOpen) return;
+      if (offlineConfirmation || loginModalOpen || event.defaultPrevented) return;
+      if (event.target instanceof Element && event.target.closest('dialog[open]')) return;
       if (event.key === 'Escape' && selected) {
         event.preventDefault();
         if (videoIsFull) videoExpanded = false;
@@ -903,7 +910,7 @@
           <div class="pt-card-meta-row">
             <span class="pt-card-meta-item pt-card-meta-plays">▶ {album.playCount == null ? (localeStore.current === 'en' ? '0 plays' : '0 lượt phát') : `${new Intl.NumberFormat(localeStore.current === 'en' ? 'en-US' : 'vi-VN').format(album.playCount)} ${t.talks.playCountUnit}`}</span>
             {#if recentLookup.has(album.id)}<span class="pt-card-meta-sep">·</span><span class="pt-card-meta-item pt-card-meta-recent">🕘 {t.talks.recentlyPlayed}</span>{/if}
-            {#if albumStatuses[album.id] === 'downloaded' || offlineLookup.has(album.id)}<span class="pt-card-meta-sep">·</span><span class="pt-card-meta-item pt-card-meta-offline">⬇ Offline</span>{/if}
+            {#if albumProgress.get(album.id)?.status === 'downloaded' || (!offlineStateReady && offlineLookup.has(album.id))}<span class="pt-card-meta-sep">·</span><span class="pt-card-meta-item pt-card-meta-offline">⬇ Offline</span>{/if}
           </div>
         </div>
       </div>
@@ -931,9 +938,10 @@
 
 {#if selected}
   {@const selectedTransfer = transferProgress[selected.id]}
+  {@const saved = offlineCatalogProgress(offlineSnapshot, selected)}
   {@const offlineControl = offlineDownloadControl(
-    albumStatuses[selected.id] ?? 'none',
-    offlineTrackCounts[selected.id] ?? 0,
+    saved.status,
+    saved.count,
     selectedTransfer,
   )}
   <div class="album-overlay" class:video-full={videoIsFull} class:compact-video-active={selectedLandscapeVideo && Boolean(selectedVideoTrack)} role="presentation" inert={loginModalOpen} aria-hidden={loginModalOpen ? 'true' : undefined}>
@@ -1005,7 +1013,7 @@
       </header>
 
       <div class="album-body" class:album-body-scroll={hasStoryNotice && !videoIsFull}>
-      {#if offlineNoticeVisible && offlineStateReady && !isSelectedOnlineOnly && albumStatuses[selected.id] !== 'downloaded' && !offlineLookup.has(selected.id) && !busyModes[selected.id]}
+      {#if offlineNoticeVisible && offlineStateReady && !isSelectedOnlineOnly && saved.status !== 'downloaded' && !busyModes[selected.id]}
         <aside class="album-offline-notice" aria-label={t.talks.offlineRecommendationTitle}>
           <span class="album-offline-hand" aria-hidden="true">👆</span>
           <p>{t.talks.offlineRecommendation}</p>
@@ -1140,15 +1148,15 @@
 {/if}
 
 {#if audioDownloadModalOpen && audioDownloadProgress}
-  <div class="audio-offline-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="audio-dl-progress-title" tabindex="-1">
+  <dialog class="audio-offline-modal-backdrop" use:modalDialog aria-labelledby="audio-dl-progress-title" oncancel={(event) => { event.preventDefault(); cancelAudioOfflineDownload(); }}>
     <div class="audio-offline-modal-card" data-dialog-glass>
       <div class="audio-offline-modal-icon pulse">⏳</div>
-      <h3 id="audio-dl-progress-title">Đang tải album Pháp thoại...</h3>
+      <h3 id="audio-dl-progress-title">{localizeUi('Đang tải album Pháp thoại...')}</h3>
       <p class="audio-offline-modal-sub">{audioDownloadProgress.albumTitle}</p>
 
       {#if audioDownloadProgress.currentTitle}
         <div class="audio-dl-track-tag">
-          Bài {audioDownloadProgress.completed + 1}/{audioDownloadProgress.total}: <strong>{audioDownloadProgress.currentTitle}</strong>
+          {localizeUi('Bài')} {audioDownloadProgress.completed + 1}/{audioDownloadProgress.total}: <strong>{audioDownloadProgress.currentTitle}</strong>
         </div>
       {/if}
 
@@ -1160,10 +1168,10 @@
           class="audio-dl-progress-bar"
           value={audioDownloadProgress.completed}
           max={audioDownloadProgress.total}
-          aria-label="Tiến độ tải album"
+          aria-label={localizeUi('Tiến độ tải album')}
         ></progress>
         <div class="audio-dl-bytes-info">
-          <span>Đã tải {audioDownloadProgress.completed}/{audioDownloadProgress.total} bài</span>
+          <span>{localizeUi('Đã tải {0}/{1} bài', audioDownloadProgress.completed, audioDownloadProgress.total)}</span>
           {#if audioDownloadProgress.bytesDownloaded > 0}
             <span>({formatBytes(audioDownloadProgress.bytesDownloaded)})</span>
           {/if}
@@ -1175,19 +1183,36 @@
       {/if}
 
       <div class="audio-offline-modal-actions">
-        <button type="button" class="btn-cancel" onclick={cancelAudioOfflineDownload}>
-          Hủy tải
+        <button type="button" class="btn-cancel" data-modal-focus onclick={cancelAudioOfflineDownload}>
+          {localizeUi('Hủy tải')}
         </button>
       </div>
     </div>
-  </div>
+  </dialog>
 {/if}
 
 <style>
   .album-offline-notice{position:relative;margin:calc(var(--space-page) / 2) var(--space-page);padding:calc(var(--space-page) / 2);background:var(--gold-light);border:1px solid var(--border);border-radius:var(--radius-control);box-shadow:var(--shadow);color:var(--text2);flex-shrink:0}
   .album-offline-notice p{margin:0;font-size:small;line-height:1.5;text-align:center}
   .album-offline-hand{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);font-size:large;pointer-events:none}
-  .audio-offline-confirm{margin:auto;width:min(100% - var(--space-page) * 2, var(--practice-dialog-width));max-height:calc(100dvh - var(--space-page) * 2 - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:auto;padding:var(--space-page);border:1px solid var(--dialog-surface-border,var(--border));border-radius:var(--radius-card);background:var(--dialog-surface-background,var(--card));color:var(--text);box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));font:inherit}
+  .audio-offline-confirm{
+    position:fixed;
+    inset:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);
+    box-sizing:border-box;
+    margin:auto;
+    width:min(calc(100% - var(--space-page) * 2 - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)), var(--practice-dialog-width));
+    max-height:calc(100vh - var(--space-page) * 2 - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));
+    max-height:calc(100dvh - var(--space-page) * 2 - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));
+    overflow:auto;
+    overscroll-behavior:contain;
+    padding:var(--space-page);
+    border:1px solid var(--dialog-surface-border,var(--border));
+    border-radius:var(--radius-card);
+    background:var(--dialog-surface-background,var(--card));
+    color:var(--text);
+    box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));
+    font:inherit;
+  }
   .pt-as-header-row2 .pt-as-action-btn{min-height:44px}
   .audio-offline-confirm::backdrop{background:var(--practice-dialog-backdrop)}
   .audio-offline-confirm h3{margin:0;font-size:inherit}
@@ -1216,8 +1241,9 @@
   .pt-card-thumb-icon.with-art{opacity:.1}
   .pt-card:hover .pt-card-thumb-icon{transform:scale(1.08)}
   .pt-card-thumb-play{position:absolute;z-index:3;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(200,150,62,.22);opacity:0;transition:opacity .2s}
-  .pt-card:hover .pt-card-thumb-play{opacity:1}
-  .pt-card-thumb-play svg{width:28px;height:28px;padding:6px;border-radius:10px;background:var(--gold);color:#fff;box-shadow:0 2px 10px rgba(200,150,62,.5)}
+  @media (hover:hover){.pt-card:hover .pt-card-thumb-play{opacity:1}}
+  @media (hover:none){.pt-card-thumb-play{opacity:1;background:transparent}}
+  .pt-card-thumb-play svg{width:28px;height:28px;padding:6px;border-radius:10px;background:var(--gold);color:var(--on-gold);box-shadow:0 2px 10px rgba(200,150,62,.5)}
   .pt-card-body{position:relative;display:flex;min-width:0;flex:1;flex-direction:column;justify-content:center;gap:3px;padding:14px 16px}
   .pt-card-body-open{position:absolute;inset:0;padding:0;border:0;background:transparent;cursor:pointer}
   .pt-card-body-open:focus-visible{outline:3px solid var(--gold);outline-offset:-3px;border-radius:10px}
@@ -1418,7 +1444,7 @@
   @keyframes audio-card-reveal{from{opacity:.15}to{opacity:1}}
   .pt-card-thumb-playing{position:absolute;z-index:3;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(200,150,62,.48);color:#fff;border-radius:inherit}
   .pt-card-thumb-playing .pt-as-playing-bars i{background:#fff}
-  .pt-share-toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);z-index:1500;display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:24px;background:var(--brown-dark);color:#fff;box-shadow:var(--shadow-xl);font-size:var(--font-size-meta);font-weight:600;pointer-events:none;animation:pt-toast-in .22s cubic-bezier(.16,1,.3,1)}
+  .pt-share-toast{position:fixed;bottom:calc(max(var(--bottom-nav-clearance,0px),var(--audio-player-top,0px)) + var(--radius-control));left:50%;transform:translateX(-50%);z-index:1500;display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:24px;background:var(--text);color:var(--bg);box-shadow:var(--shadow-xl);font-size:var(--font-size-meta);font-weight:600;pointer-events:none;animation:pt-toast-in .22s cubic-bezier(.16,1,.3,1)}
   .pt-share-toast svg{color:#22c55e}
   @keyframes pt-toast-in{from{opacity:0;transform:translate(-50%,12px)}to{opacity:1;transform:translate(-50%,0)}}
   @media(max-width:600px){
@@ -1448,11 +1474,8 @@
   }
   @media(max-width:768px){
     .album-overlay{
-      bottom:calc(56px + max(env(safe-area-inset-bottom, 0px), 6px));
+      bottom:max(var(--audio-player-top, 0px), calc(56px + max(env(safe-area-inset-bottom, 0px), 6px)));
       overflow:hidden;
-    }
-    :global(.qts-shell--audio-active) .album-overlay{
-      bottom:calc(114px + max(env(safe-area-inset-bottom, 0px), 6px));
     }
     .album-dialog{
       height:100%;
@@ -1462,12 +1485,9 @@
       padding-bottom:24px;
     }
   }
-  :global([data-native-app='true']) .album-overlay{
-    bottom:calc(56px + max(env(safe-area-inset-bottom, 0px), 6px));
+  :global(:is([data-native-app='true'], [data-narrow-screen='true'])) .album-overlay{
+    bottom:max(var(--audio-player-top, 0px), calc(56px + max(env(safe-area-inset-bottom, 0px), 6px)));
     overflow:hidden;
-  }
-  :global([data-native-app='true'] .qts-shell--audio-active) .album-overlay{
-    bottom:calc(114px + max(env(safe-area-inset-bottom, 0px), 6px));
   }
   :global([data-native-app='true']) .album-dialog{
     height:100%;
@@ -1476,13 +1496,6 @@
   :global([data-native-app='true']) .pt-as-track-list-wrap,
   :global([data-narrow-screen='true']) .pt-as-track-list-wrap{
     padding-bottom:var(--space-page);
-  }
-  :global([data-narrow-screen='true']) .album-overlay{
-    bottom:calc(56px + max(env(safe-area-inset-bottom, 0px), 6px));
-    overflow:hidden;
-  }
-  :global([data-narrow-screen='true'] .qts-shell--audio-active) .album-overlay{
-    bottom:calc(114px + max(env(safe-area-inset-bottom, 0px), 6px));
   }
   :global([data-narrow-screen='true']) .album-dialog{
     height:100%;
@@ -1499,8 +1512,24 @@
   @media(prefers-reduced-motion:reduce){.album-dialog,.pt-card{animation:none}.pt-as-playing-bars i{animation:none;height:10px}}
 
   /* Audio offline modal */
-  .audio-offline-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:grid;place-items:center;z-index:9999;padding:16px}
-  .audio-offline-modal-card{position:relative;width:min(380px,100%);background:var(--dialog-surface-background,var(--card));color:var(--text,#1c1a15);border:1.5px solid var(--dialog-surface-border,var(--border));border-radius:20px;padding:24px 20px 20px;box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));display:flex;flex-direction:column;align-items:center;text-align:center;box-sizing:border-box;animation:audioModalUp .24s cubic-bezier(.34,1.3,.64,1)}
+  .audio-offline-modal-backdrop{
+    position:fixed;
+    inset:0;
+    box-sizing:border-box;
+    width:auto;
+    height:auto;
+    max-width:none;
+    max-height:none;
+    margin:0;
+    border:0;
+    background:transparent;
+    overflow:hidden;
+    overscroll-behavior:contain;
+    padding:max(var(--space-page),env(safe-area-inset-top,0px)) max(var(--space-page),env(safe-area-inset-right,0px)) max(var(--space-page),env(safe-area-inset-bottom,0px)) max(var(--space-page),env(safe-area-inset-left,0px));
+  }
+  .audio-offline-modal-backdrop[open]{display:grid;grid-template:minmax(0,1fr) / minmax(0,1fr);place-items:center}
+  .audio-offline-modal-backdrop::backdrop{background:var(--practice-dialog-backdrop);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+  .audio-offline-modal-card{position:relative;width:min(380px,100%);max-height:100%;overflow:auto;overscroll-behavior:contain;background:var(--dialog-surface-background,var(--card));color:var(--text,#1c1a15);border:1.5px solid var(--dialog-surface-border,var(--border));border-radius:20px;padding:24px 20px 20px;box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));display:flex;flex-direction:column;align-items:center;text-align:center;box-sizing:border-box}
   .audio-offline-modal-icon{font-size:38px;line-height:1;margin-bottom:12px}
   .audio-offline-modal-icon.pulse{animation:audioPulse 1.4s ease-in-out infinite}
   .audio-offline-modal-card h3{margin:0 0 8px;font-size:var(--font-size-card-title);font-weight:700;color:var(--text)}
@@ -1512,11 +1541,11 @@
   .audio-dl-bytes-info{display:flex;gap:6px;font-size:var(--font-size-meta);color:var(--muted);font-weight:600}
   .audio-dl-error-msg{margin:0 0 14px;color:#d93829;font-size:var(--font-size-body)}
   .audio-offline-modal-actions{display:flex;gap:10px;width:100%;justify-content:center}
-  .audio-offline-modal-actions button{flex:1;min-height:42px;border-radius:12px;font:700 var(--font-size-label) var(--font-app);cursor:pointer;transition:all .15s ease}
+  .audio-offline-modal-actions button{flex:1;min-height:var(--touch-target-size);border-radius:12px;font:700 var(--font-size-label) var(--font-app);cursor:pointer;transition:all .15s ease}
   .audio-offline-modal-actions .btn-cancel{border:1px solid var(--border);background:var(--bg2,#f5f5f5);color:var(--text2,#444)}
   .audio-offline-modal-actions .btn-cancel:hover{background:var(--bg3,#e5e5e5)}
-  @keyframes audioModalUp{from{opacity:0;transform:scale(.92) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}
   @keyframes audioPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+  @media(prefers-reduced-motion:reduce){.audio-offline-modal-icon.pulse{animation:none}}
   @media(max-width:600px){
     .pt-card{min-height:calc(var(--space-page) * 6);border-radius:var(--radius-card);box-shadow:var(--shadow)}
     .pt-card-title{font-size:var(--font-size-card-title);line-height:1.4}

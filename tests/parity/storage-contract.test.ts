@@ -37,6 +37,68 @@ class MemoryStorage implements StorageLike {
 }
 
 describe('legacy storage sync contract', () => {
+  it('preserves offline deletions across failed push, reload and pull before retry', async () => {
+    const storage = new MemoryStorage();
+    const scoped = createPrincipalStorage(storage, 'a');
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks, '[{"id":"deleted"},{"id":"kept"}]');
+    const remote = readAggregateSyncSnapshot(scoped);
+    const push = vi.fn(async () => {});
+    const client = { pull: async () => remote, push };
+    const coordinator = createCloudSyncCoordinator(storage, client);
+    await coordinator.pull('a');
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks, '[{"id":"kept"}]');
+    push.mockRejectedValueOnce(new Error('offline'));
+    await expect(coordinator.push('a')).rejects.toThrow('offline');
+    const reloaded = createCloudSyncCoordinator(storage, client);
+    await reloaded.pull('a');
+    expect(JSON.parse(scoped.getItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks)!)).toEqual([{ id: 'kept' }]);
+    expect(push).toHaveBeenLastCalledWith('a', expect.objectContaining({ syncTombstones:
+      expect.objectContaining({ bookmarks: [expect.objectContaining({ key: 'id:deleted' })] }) }));
+  });
+
+  it('serializes pulls behind an active push and preserves deletion made during push transport', async () => {
+    const storage = new MemoryStorage();
+    const scoped = createPrincipalStorage(storage, 'a');
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks, '[{"id":"deleted"}]');
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const remote = readAggregateSyncSnapshot(scoped);
+    const pull = vi.fn(async () => remote);
+    const push = vi.fn(async () => { await gate; });
+    const coordinator = createCloudSyncCoordinator(storage, { pull, push });
+    const pushing = coordinator.push('a');
+    const pulling = coordinator.pull('a');
+    await Promise.resolve();
+    expect(pull).not.toHaveBeenCalled();
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks, '[]');
+    release();
+    await pushing;
+    await pulling;
+    expect(JSON.parse(scoped.getItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks)!)).toEqual([]);
+  });
+
+  it('filters deletion made during pull and keeps a later explicit local restoration', async () => {
+    const storage = new MemoryStorage();
+    const scoped = createPrincipalStorage(storage, 'a');
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks, '[{"id":"deleted"}]');
+    const remote = readAggregateSyncSnapshot(scoped);
+    let release!: (snapshot: typeof remote) => void;
+    const pull = vi.fn().mockResolvedValueOnce(remote)
+      .mockImplementationOnce(() => new Promise<typeof remote>(resolve => { release = resolve; }))
+      .mockResolvedValue(remote);
+    const push = vi.fn(async (_userId: string, _snapshot: typeof remote) => {});
+    const coordinator = createCloudSyncCoordinator(storage, { pull, push });
+    await coordinator.pull('a');
+    const pulling = coordinator.pull('a');
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks, '[]');
+    release(remote);
+    await pulling;
+    expect(JSON.parse(scoped.getItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks)!)).toEqual([]);
+    scoped.setItem(LEGACY_LOCAL_STORAGE_KEYS.bookmarks, '[{"id":"deleted"}]');
+    await coordinator.push('a');
+    expect(push).toHaveBeenLastCalledWith('a', expect.objectContaining({ bookmarks: [{ id: 'deleted' }] }));
+    expect(push.mock.calls.at(-1)?.[1].syncTombstones).toBeUndefined();
+  });
   it('invalidates late pull work before fallback, local apply, or a follow-up push', async () => {
     const storage = new MemoryStorage();
     const scoped = createPrincipalStorage(storage, 'user-a');
@@ -63,7 +125,7 @@ describe('legacy storage sync contract', () => {
     const delayed = new Promise<void>((resolve) => { release = resolve; });
     const coordinator = createCloudSyncCoordinator(storage, {
       pull: async () => readAggregateSyncSnapshot(scoped),
-      push: async () => delayed,
+      push: vi.fn().mockReturnValueOnce(delayed).mockResolvedValue(undefined),
     });
     const pending = coordinator.push('user-a');
     const rejected = expect(pending).rejects.toThrow('sync_principal_changed');

@@ -100,13 +100,16 @@
 
   function inputLine(value: string, index: number, compositionCommitted = false) {
     const previouslyComplete = matchesNameCopyingPhrase(draft.lines[draft.selected][index], target);
-    const nextValue = composing ? value : reconcileNameCopyingInput(target, value, false);
+    const input = inputs[index];
+    const atEnd = input?.selectionStart === value.length && input.selectionEnd === value.length;
+    // Sửa giữa dòng giữ nguyên DOM/range của bàn phím; chỉ tự khớp khi đang viết tiếp cuối dòng.
+    const nextValue = composing || !atEnd ? value : reconcileNameCopyingInput(target, value, false);
     draft.lines[draft.selected][index] = nextValue;
     roundNotice = '';
     if (lineMismatchNotice) lineMismatchNotice = '';
     save();
     // Không ngắt bộ gõ Telex/IME khi người dùng còn đang hoàn thiện dấu.
-    if (!composing && matchesNameCopyingPhrase(nextValue, target) && (compositionCommitted || !previouslyComplete)) {
+    if (!composing && atEnd && matchesNameCopyingPhrase(nextValue, target) && (compositionCommitted || !previouslyComplete)) {
       void advanceFromCompletedLine(index);
     }
   }

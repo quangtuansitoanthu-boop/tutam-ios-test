@@ -16,6 +16,8 @@ public class ReaderSpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesize
     private var active: AVSpeechUtterance?
     private var activeID = ""
     private var observers: [NSObjectProtocol] = []
+    private var pendingAudioRelease: DispatchWorkItem?
+    private var audioReleaseGeneration = 0
 
     public override func load() {
         DispatchQueue.main.async { [weak self] in
@@ -28,7 +30,7 @@ public class ReaderSpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesize
             })
             self.observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
                 if let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                   type == AVAudioSession.InterruptionType.began.rawValue { self?.cancelCurrent() }
+                   type == AVAudioSession.InterruptionType.began.rawValue { self?.cancelCurrent(deactivateAudioSession: false) }
             })
         }
     }
@@ -52,9 +54,9 @@ public class ReaderSpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesize
             guard let voice = AVSpeechSynthesisVoice(language: language) else {
                 call.reject("Voice is not installed for this language", "MISSING_VOICE"); return
             }
-            self.cancelCurrent()
+            self.cancelCurrent(deactivateAudioSession: false)
             do { try NativeAudioSession.activate(self) }
-            catch { call.reject("Cannot activate speech audio", "AUDIO_SESSION", error); return }
+            catch { NativeAudioSession.deactivate(self); call.reject("Cannot activate speech audio", "AUDIO_SESSION", error); return }
             let utterance = AVSpeechUtterance(string: text)
             utterance.voice = voice
             let rate = call.getDouble("rate") ?? 1
@@ -67,12 +69,34 @@ public class ReaderSpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesize
         }
     }
 
-    private func cancelCurrent() {
+    private func cancelAudioRelease() {
+        audioReleaseGeneration += 1
+        pendingAudioRelease?.cancel()
+        pendingAudioRelease = nil
+    }
+
+    private func scheduleAudioRelease() {
+        cancelAudioRelease()
+        let generation = audioReleaseGeneration
+        // Giữ owner đến lúc nhả session, kể cả khi bridge đóng trong khoảng chờ ngắn này.
+        let release = DispatchWorkItem { [self] in
+            guard self.audioReleaseGeneration == generation, self.active == nil else { return }
+            self.pendingAudioRelease = nil
+            self.activeID = ""
+            NativeAudioSession.deactivate(self)
+        }
+        pendingAudioRelease = release
+        // JS nhận completion rồi mới gửi chunk kế; tránh nhả/chiếm session giữa hai lượt bridge.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: release)
+    }
+
+    private func cancelCurrent(deactivateAudioSession: Bool = true) {
+        cancelAudioRelease()
         let call = pending
         pending = nil; active = nil; activeID = ""
         synthesizer.stopSpeaking(at: .immediate)
         call?.resolve(["canceled": true])
-        NativeAudioSession.deactivate(self)
+        if deactivateAudioSession { NativeAudioSession.deactivate(self) }
     }
 
     @objc public func stop(_ call: CAPPluginCall) {
@@ -88,17 +112,28 @@ public class ReaderSpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesize
     }
 
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
-        if utterance === active { notifyListeners("speechStart", data: ["id": activeID]) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, utterance === self.active else { return }
+            self.notifyListeners("speechStart", data: ["id": self.activeID])
+        }
     }
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        guard utterance === active else { return }
-        let call = pending
-        pending = nil; active = nil; activeID = ""
-        call?.resolve()
-        NativeAudioSession.deactivate(self)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, utterance === self.active else { return }
+            let call = self.pending
+            self.pending = nil; self.active = nil
+            self.scheduleAudioRelease()
+            call?.resolve()
+        }
     }
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        if utterance === active { cancelCurrent() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, utterance === self.active else { return }
+            self.cancelCurrent()
+        }
     }
-    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+    deinit {
+        pendingAudioRelease?.cancel()
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
 }

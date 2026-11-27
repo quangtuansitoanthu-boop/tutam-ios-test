@@ -70,7 +70,7 @@ export async function savedContentItems(strict = false): Promise<SavedItem[]> {
     try { const legacy = cache ? await readCacheIndex(cache) : null; return legacy && !legacy.marker ? legacy.items : []; }
     catch { return []; }
   }
-  if (!cache) { if (strict) throw new Error('offline_content_storage_unavailable'); return savedItems(snapshot); }
+  if (!cache) return savedItems(snapshot);
   let legacy: Awaited<ReturnType<typeof readCacheIndex>>;
   try { legacy = await readCacheIndex(cache); }
   catch (cause) { if (strict) throw cause; return savedItems(snapshot); }
@@ -104,7 +104,6 @@ export async function saveContentPackage(item: ContentUpdateItem, article: Conte
     throw new Error('offline_content_not_public');
   }
   const cache = await open();
-  if (!cache) throw new Error('offline_content_storage_unavailable');
   const packageKey = `${ORIGIN}${item.kind}/${encodeURIComponent(item.row.id)}/${item.version}`;
   await savedContentItems(true);
   const snapshot = await readContentIndex();
@@ -112,12 +111,14 @@ export async function saveContentPackage(item: ContentUpdateItem, article: Conte
   const next = savedItems(snapshot).filter(saved => updateItemKey(saved) !== updateItemKey(item));
   const saved = { ...item, row: article, packageKey };
   next.push(saved);
-  await cache.put(packageKey, json({ article, chapters }));
-  // Giữ contract quota cũ: projection phải ghi được trước khi commit authority mới.
-  await cache.put(`${ORIGIN}index`, json(next, { [PROJECTION_HEADER]: 'pending' }));
+  if (cache) {
+    await cache.put(packageKey, json({ article, chapters }));
+    // Giữ contract quota cũ khi CacheStorage khả dụng; IDB là authority khi WebView thiếu API này.
+    await cache.put(`${ORIGIN}index`, json(next, { [PROJECTION_HEADER]: 'pending' }));
+  }
   await commitContentItem(indexedItem(saved, chapters), current?.revision ?? 0);
   // Commit đã bền vững: lỗi projection không được báo nhầm là mất lần lưu này.
-  await repairCommittedProjection(cache).catch(() => undefined);
+  if (cache) await repairCommittedProjection(cache).catch(() => undefined);
   // Không xóa blob cũ: reader/old writer đang dùng cache legacy vẫn cần bản đó.
 
 }

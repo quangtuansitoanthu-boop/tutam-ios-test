@@ -26,6 +26,7 @@ import {
   readPlayerSyncPayload,
   readStoredRecentAlbums,
   selectAudioSyncPrincipal,
+  type PlayerSyncPayload,
   type StoredPlayerState,
   writeStoredAlbumPosition,
   writeStoredPlayerState,
@@ -120,6 +121,19 @@ function readAvailableRecentAlbums(): string[] {
   catch { return []; }
 }
 
+function playerSyncFingerprint(payload: PlayerSyncPayload): string {
+  const position = (state: StoredPlayerState | null) => state ? [state.albumId, state.trackIndex, state.pos,
+    state.albumTitle ?? '', state.trackTitle ?? '', state.trackUrl ?? '', state.artwork ?? '', state.description ?? ''] : null;
+  return JSON.stringify([position(payload.pt_player_state), Object.entries(payload.pt_album_positions)
+    .sort(([left], [right]) => left.localeCompare(right)).map(([id, state]) => [id, position(state)]),
+  payload.pt_recent_albums, payload.pt_favorite_albums, payload.pt_listen_later_albums, payload.sync_tombstones]);
+}
+
+function readPlayerSyncFingerprint(): string {
+  try { return playerSyncFingerprint(readPlayerSyncPayload()); }
+  catch { return ''; }
+}
+
 export class AudioPlayerController {
   private practicePlayback?: { token: symbol; armed: boolean; onState: (state: NativeAudioState) => void; onInterrupted: () => void; removeAbort: () => void };
   private isPracticeAudio(): boolean {
@@ -163,6 +177,7 @@ export class AudioPlayerController {
   private seekRequest?: AbortController;
   private seekMetadataReady?: () => void;
   private loadGeneration = 0;
+  private recoveringCatalog?: { album: AudioAlbum; result: Promise<AudioAlbum | undefined> };
   private playbackIntentGeneration = 0;
   private objectUrl?: string;
   private lastSavedAt = 0;
@@ -171,6 +186,8 @@ export class AudioPlayerController {
   private sleepTimerLastTick = 0;
   private syncTimer?: ReturnType<typeof setTimeout>;
   private lastRemoteSyncAt = 0;
+  private remoteSyncBaseline = '';
+  private remotePushGeneration?: number;
   private session: AudioPlayerSession;
   private principalId: string | null;
   private principalGeneration = 0;
@@ -239,6 +256,7 @@ export class AudioPlayerController {
     this.principalId = sessionPrincipal(this.session);
     this.nowMs = dependencies.nowMs ?? (() => Date.now());
     selectAudioSyncPrincipal(this.principalId);
+    this.remoteSyncBaseline = readPlayerSyncFingerprint();
     this.snapshot = { ...this.snapshot, recentAlbumIds: readAvailableRecentAlbums() };
     try {
       if (typeof localStorage !== 'undefined') {
@@ -297,6 +315,12 @@ export class AudioPlayerController {
         });
         recoveredAlbum = { ...state.album, visibility: 'public', tracks };
       }
+      // Keep the native transport live while matching the queue against the local catalog.
+      const session = this.session;
+      const catalog = import('./content-catalogs')
+        .then(({ restoreLocalTalkAlbum }) => restoreLocalTalkAlbum(recoveredAlbum, session))
+        .catch(() => undefined);
+      this.recoveringCatalog = { album: recoveredAlbum, result: catalog };
       this.wantsPlayback = nativePlaybackRequested(state);
       this.snapshot = { ...this.snapshot, album: recoveredAlbum, trackIndex: state.trackIndex,
         currentTime: state.position, duration: state.duration, playing: this.wantsPlayback,
@@ -305,7 +329,14 @@ export class AudioPlayerController {
       audio.adopt(state);
       this.reportAlbumPlay.select(state.album.id, this.snapshot.album?.tracks[state.trackIndex]?.url ?? '');
       this.emit();
+      const catalogAlbum = await catalog;
+      if (!catalogAlbum || generation !== this.loadGeneration || this.snapshot.album !== recoveredAlbum) return;
+      const index = this.snapshot.trackIndex;
+      if (this.fallbackTrack === recoveredAlbum.tracks[index]) this.fallbackTrack = catalogAlbum.tracks[index];
+      this.reportAlbumPlay.select(catalogAlbum.id, catalogAlbum.tracks[index]?.url ?? '');
+      this.patch({ album: catalogAlbum });
     } catch { /* No active native session to restore. */ }
+    finally { this.recoveringCatalog = undefined; }
   }
 
   subscribe(listener: (snapshot: AudioPlayerSnapshot) => void): () => void {
@@ -343,6 +374,8 @@ export class AudioPlayerController {
     }
 
     selectAudioSyncPrincipal(nextPrincipalId);
+    this.remoteSyncBaseline = readPlayerSyncFingerprint();
+    this.remotePushGeneration = undefined;
     this.lastRemoteSyncAt = 0;
     this.lastSavedAt = 0;
     this.snapshot = {
@@ -375,12 +408,16 @@ export class AudioPlayerController {
   async load(album: AudioAlbum, trackIndex = 0, resumeSeconds = 0): Promise<boolean> {
     if (!isContentAvailable(album)) return false;
     if (album.visibility === 'private' && (!this.session.authenticated || this.session.user?.role !== 'admin')) return false;
-    const track = album.tracks[trackIndex];
-    if (!track) {
+    if (!album.tracks[trackIndex]) {
       this.patch({ error: 'Bài pháp thoại không tồn tại.' });
       return false;
     }
     const generation = ++this.loadGeneration;
+    if (this.recoveringCatalog?.album === album) {
+      album = await this.recoveringCatalog.result ?? album;
+      if (generation !== this.loadGeneration) return false;
+    }
+    const track = album.tracks[trackIndex];
     const access: OfflineAudioAccess = { session: this.session, album, isCurrent: () => generation === this.loadGeneration };
     if (this.audio instanceof NativeTalkAudio && !await canAccessAudioAlbum(album, access).catch(() => false)) return false;
     if (generation !== this.loadGeneration) return false;
@@ -595,6 +632,7 @@ export class AudioPlayerController {
 
   seek(seconds: number): void {
     if (!Number.isFinite(seconds)) return;
+    this.clearPendingResume();
     if (this.dharmaTalkEvidence) this.dharmaTalkEvidence.seekCount += 1;
     const currentTime = Math.max(0, Math.min(seconds, this.audio.duration || seconds));
     this.pendingSeekTarget = currentTime;
@@ -800,7 +838,7 @@ export class AudioPlayerController {
   async beginPracticePlayback(
     album: AudioAlbum, remainingMs: number,
     onState: (state: NativeAudioState) => void, onInterrupted: () => void, signal?: AbortSignal,
-    options: { finite?: boolean; volume?: number; onStartupStep?: (step: string) => void } = {},
+    options: { finite?: boolean; volume?: number; autoplay?: boolean; onStartupStep?: (step: string) => void } = {},
   ): Promise<PracticeAudioLease | null> {
     options.onStartupStep?.('player-ready');
     const audio = this.audio;
@@ -826,8 +864,10 @@ export class AudioPlayerController {
       audio.muted = hasExplicitVolume ? false : this.snapshot.muted;
       audio.volume = hasExplicitVolume ? Math.max(0, Math.min(1, options.volume!)) : this.snapshot.volume;
       audio.setSleep(options.finite ? 0 : remainingMs, false);
-      options.onStartupStep?.('play');
-      await audio.play();
+      if (options.autoplay !== false) {
+        options.onStartupStep?.('play');
+        await audio.play();
+      }
       if (!owns()) return null;
       slot.armed = true;
       options.onStartupStep?.('read-player-state');
@@ -906,6 +946,10 @@ export class AudioPlayerController {
 
   private bindAudioEvents(): void {
     if (this.audio instanceof NativeTalkAudio) {
+      this.audio.addEventListener('nativerepeat', event => {
+        const repeat = (event as CustomEvent<0 | 1 | 2>).detail;
+        if (!this.isPracticeAudio() && this.snapshot.repeat !== repeat) this.patch({ repeat });
+      });
       this.audio.addEventListener('trackchange', event => {
         if (this.isPracticeAudio()) return;
         const index = (event as CustomEvent<number>).detail;
@@ -1455,6 +1499,7 @@ export class AudioPlayerController {
   private async hydrateRemoteSync(generation: number): Promise<void> {
     const session = this.session;
     if (!session.authenticated || generation !== this.principalGeneration) return;
+    const beforeHydrate = readPlayerSyncFingerprint();
     const controller = new AbortController();
     this.remoteRequests.add(controller);
 
@@ -1467,11 +1512,13 @@ export class AudioPlayerController {
       if (!response.ok || generation !== this.principalGeneration) return;
       const remote = await response.json();
       if (generation !== this.principalGeneration) return;
+      const unchanged = beforeHydrate === readPlayerSyncFingerprint();
       const payload = applyRemotePlayerSync(remote);
       if (payload) {
         this.patch({ recentAlbumIds: payload.pt_recent_albums });
         dispatchAudioStorageEvent('quangtu:player-sync-updated', payload);
       }
+      if (unchanged) this.remoteSyncBaseline = readPlayerSyncFingerprint();
     } catch {
       // Local playback remains available when sync is unreachable.
     } finally {
@@ -1480,6 +1527,12 @@ export class AudioPlayerController {
   }
 
   private async pushRemoteSync(force = false): Promise<void> {
+    if (!this.session.authenticated || !this.session.csrfToken || this.remotePushGeneration === this.principalGeneration) return;
+    let payload: PlayerSyncPayload;
+    try { payload = readPlayerSyncPayload(); }
+    catch { return; }
+    const fingerprint = playerSyncFingerprint(payload);
+    if (fingerprint === this.remoteSyncBaseline) return;
     if (!force && Date.now() - this.lastRemoteSyncAt < 30_000) return;
     if (!force && this.syncTimer) return;
     if (!force) {
@@ -1497,6 +1550,7 @@ export class AudioPlayerController {
     if (!session.authenticated || !session.csrfToken) return;
     const controller = new AbortController();
     this.remoteRequests.add(controller);
+    this.remotePushGeneration = generation;
 
     try {
       const response = await fetchWithSessionRefresh('/api/player-sync', {
@@ -1505,15 +1559,19 @@ export class AudioPlayerController {
           'content-type': 'application/json',
           'x-csrf-token': session.csrfToken
         },
-        body: JSON.stringify(readPlayerSyncPayload()),
+        body: JSON.stringify(payload),
         keepalive: true,
         signal: controller.signal,
       });
-      if (response.ok && generation === this.principalGeneration) this.lastRemoteSyncAt = Date.now();
+      if (response.ok && generation === this.principalGeneration) {
+        this.lastRemoteSyncAt = Date.now();
+        this.remoteSyncBaseline = fingerprint;
+      }
     } catch {
       // Sync retries on the next save/visibility lifecycle.
     } finally {
       this.remoteRequests.delete(controller);
+      if (this.remotePushGeneration === generation) this.remotePushGeneration = undefined;
     }
   }
 }

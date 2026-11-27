@@ -11,10 +11,12 @@
 
   let {
     home,
+    startupReady = true,
     blocked = false,
     onPermissionBlockChange,
   }: {
     home: boolean;
+    startupReady?: boolean;
     blocked?: boolean;
     onPermissionBlockChange?: (blocked: boolean) => void;
   } = $props();
@@ -31,7 +33,7 @@
       hasRelease: Boolean(release),
       appDialogOpen: Boolean($appDialogState),
       dismissedInOpening,
-      blocked,
+      blocked: blocked || !startupReady,
     }),
   );
 
@@ -53,7 +55,10 @@
   }
 
   onMount(() => {
-    const stop = watchNativeAppUpdates(setRelease, value => { checking = value; });
+    const stop = watchNativeAppUpdates(setRelease, value => {
+      checking = value;
+      if (value && home) onPermissionBlockChange?.(true);
+    });
     return () => {
       stop();
       onPermissionBlockChange?.(false);

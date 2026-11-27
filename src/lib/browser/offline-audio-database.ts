@@ -109,7 +109,7 @@ async function readableTrack(record: OfflineTrack, context: AccessContext, album
   const local = (await context.ownedAlbums).find(album => owned(album, context) && album.trackUrls?.includes(record.url)
     && (album.visibility === 'public' ? !albumId || album.id === albumId : album.id === (albumId ?? record.albumId)));
   context.assertCurrent();
-  if (local) return { ...record, albumId: local.id, title: local.title, visibility: local.visibility,
+  if (local) return { ...record, albumId: local.id, visibility: local.visibility,
     ownerId: local.visibility === 'private' ? context.principalId! : undefined };
   const proof = (await catalogProof(context)).find(item => item.tracks.some(track => track.url === record.url)
     && (item.visibility === 'public' ? !albumId || item.id === albumId : item.id === (albumId ?? record.albumId)));
@@ -148,9 +148,21 @@ export interface OfflineLibrarySnapshot {
   albums: OfflineAlbum[];
   bytes: number;
   trackCounts: Record<string, number>;
+  trackUrlsByAlbum: Map<string, Set<string>>;
 }
 
 export type OfflineAlbumStatus = 'none' | 'partial' | 'downloaded';
+
+export function offlineCatalogProgress(snapshot: OfflineLibrarySnapshot | null, album: { id: string; tracks: readonly { url: string }[] }): {
+  count: number; status: OfflineAlbumStatus;
+} {
+  const urls = snapshot?.trackUrlsByAlbum.get(album.id);
+  if (!snapshot || !urls) return { count: 0, status: 'none' };
+  let count = 0;
+  for (const track of album.tracks) if (urls.has(track.url)) count++;
+  const complete = count > 0 && count === album.tracks.length && snapshot.albums.some(saved => saved.id === album.id);
+  return { count, status: complete ? 'downloaded' : count ? 'partial' : 'none' };
+}
 
 let databasePromise: Promise<IDBDatabase> | undefined;
 
@@ -173,7 +185,7 @@ export function openOfflineAudioDatabase(): Promise<IDBDatabase> {
   if (typeof indexedDB === 'undefined') return Promise.reject(new Error('IndexedDB is unavailable'));
   if (databasePromise) return databasePromise;
 
-  databasePromise = new Promise((resolve, reject) => {
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(OFFLINE_AUDIO_DATABASE, OFFLINE_AUDIO_VERSION);
     request.onupgradeneeded = () => {
       const database = request.result;
@@ -186,23 +198,25 @@ export function openOfflineAudioDatabase(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => {
       const database = request.result;
+      database.onclose = () => { if (databasePromise === opening) databasePromise = undefined; };
       database.onversionchange = () => {
         database.close();
-        databasePromise = undefined;
+        if (databasePromise === opening) databasePromise = undefined;
       };
       resolve(database);
     };
     request.onerror = () => {
-      databasePromise = undefined;
+      if (databasePromise === opening) databasePromise = undefined;
       reject(request.error ?? new Error('Cannot open offline audio database'));
     };
     request.onblocked = () => {
-      databasePromise = undefined;
+      if (databasePromise === opening) databasePromise = undefined;
       reject(new Error('Offline audio database upgrade is blocked'));
     };
   });
 
-  return databasePromise;
+  databasePromise = opening;
+  return opening;
 }
 
 export async function putOfflineTrack(track: OfflineTrack, access?: OfflineAudioAccess): Promise<void> {
@@ -285,6 +299,7 @@ export async function deleteOfflineAlbum(albumId: string): Promise<void> {
   const database = await openOfflineAudioDatabase();
   context.assertCurrent();
   const transaction = database.transaction(['tracks', 'albums'], 'readwrite');
+  const evictedUrls: string[] = [];
   let principalError: unknown;
   const albums = transaction.objectStore('albums');
   const albumRequest = albums.getAll();
@@ -308,11 +323,20 @@ export async function deleteOfflineAlbum(albumId: string): Promise<void> {
       if (!cursor) return;
       const track = cursor.value as OfflineTrack;
       if ((String(track.albumId) === id || targetUrls.has(track.url))
-        && !unresolvedLegacy && !retainedUrls.has(track.url) && !legacyAlbumIds.has(String(track.albumId))) cursor.delete();
+        && !unresolvedLegacy && !retainedUrls.has(track.url) && !legacyAlbumIds.has(String(track.albumId))) {
+        cursor.delete();
+        evictedUrls.push(track.url);
+      }
       cursor.continue();
     };
   };
   await transactionDone(transaction).catch(error => { throw principalError ?? error; });
+  context.assertCurrent();
+  if (evictedUrls.length) {
+    const { evictNativeTalkCache } = await import('./native-talk-audio');
+    context.assertCurrent();
+    await evictNativeTalkCache(evictedUrls, () => { context.assertCurrent(); return true; });
+  }
 }
 
 export async function offlineAlbumStatus(
@@ -351,16 +375,21 @@ export async function readOfflineLibrarySnapshot(access?: OfflineAudioAccess): P
   const allowed = await Promise.all(raw.albums.map(album => readableAlbum(album, raw.tracks, context)));
   const albums = allowed.filter((album): album is OfflineAlbum => Boolean(album));
 
-  const trackCounts: Record<string, number> = {};
+  const trackUrlsByAlbum = new Map<string, Set<string>>();
   for (const album of albums) {
-    trackCounts[album.id] = (await albumTracks(album.id, album, raw.tracks, context)).length;
+    const tracks = await albumTracks(album.id, album, raw.tracks, context);
+    trackUrlsByAlbum.set(album.id, new Set(tracks.map(track => track.url)));
   }
-  const completeIds = new Set(Object.keys(trackCounts));
+  const completeIds = new Set(trackUrlsByAlbum.keys());
   for (const track of raw.tracks) {
     const readable = await readableTrack(track, context);
-    if (readable && !completeIds.has(readable.albumId)) trackCounts[readable.albumId] = (trackCounts[readable.albumId] ?? 0) + 1;
+    if (!readable || completeIds.has(readable.albumId)) continue;
+    const urls = trackUrlsByAlbum.get(readable.albumId) ?? new Set<string>();
+    urls.add(readable.url);
+    trackUrlsByAlbum.set(readable.albumId, urls);
   }
+  const trackCounts = Object.fromEntries([...trackUrlsByAlbum].map(([id, urls]) => [id, urls.size]));
   // Quota là bytes vật lý, kể cả bản cũ đang chờ bằng chứng quyền; không xóa media.
   const bytes = raw.tracks.reduce((total, track) => total + (track.blob?.size ?? 0), 0);
-  return { albums, bytes, trackCounts };
+  return { albums, bytes, trackCounts, trackUrlsByAlbum };
 }

@@ -16,16 +16,15 @@
         window.addEventListener('popstate', normalizeFragment);
       })();
     </script>
-    <link rel="icon" href="/assets/branding/tu-tap-logo.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" media="print" onload="this.media='all'" />
-    <noscript>
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" />
-    </noscript>
-    <script>
+    <link rel="icon" sizes="48x48" href="/assets/branding/temple-favicon.png" />
+    <script data-app-bootstrap>
       (function() {
-        if ((window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
+        var isNativePlatform = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+        if (isNativePlatform) {
+          var viewport = document.querySelector('meta[name="viewport"]');
+          viewport.setAttribute('content', viewport.getAttribute('content') + ', minimum-scale=1, maximum-scale=1, user-scalable=no');
+        }
+        if (isNativePlatform ||
             (location.protocol === 'https:' && location.hostname === 'localhost')) {
           document.documentElement.setAttribute('data-native-app', 'true');
           if (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'android' &&
@@ -36,14 +35,6 @@
               window.Capacitor.isPluginAvailable && window.Capacitor.isPluginAvailable('StartupScreen')) {
             document.documentElement.setAttribute('data-native-startup', 'true');
           }
-          var backgrounds = ['lotus-dawn', 'temple-mist', 'bamboo-path', 'bodhi-leaves', 'stupa-moon', 'incense-lotus', 'rosary-stillness', 'lotus-lanterns', 'zen-garden', 'pagoda-hills'];
-          var backgroundIndex = 0;
-          try {
-            var previous = Number(localStorage.getItem('tutam_startup_background_index') ?? '-1');
-            backgroundIndex = (Number.isInteger(previous) && previous >= 0 && previous < backgrounds.length ? previous + 1 : 0) % backgrounds.length;
-            localStorage.setItem('tutam_startup_background_index', String(backgroundIndex));
-          } catch (e) {}
-          document.documentElement.style.setProperty('--startup-artwork', 'url("/images/calendar/' + backgrounds[backgroundIndex] + '.webp")');
         }
         try {
           var savedUiFontScale = localStorage.getItem('tutam_ui_font_scale');
@@ -71,6 +62,29 @@
         } catch (e) {}
       })();
     </script>
+    <script data-web-reading-fonts>
+      (function() {
+        // Capacitor injects at document start; the bootstrap above also marks its local origin.
+        if (document.documentElement.getAttribute('data-native-app') === 'true' ||
+            (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
+            (location.protocol === 'capacitor:' && location.hostname === 'localhost')) return;
+        var api = document.createElement('link');
+        api.rel = 'preconnect';
+        api.href = 'https://fonts.googleapis.com';
+        document.head.appendChild(api);
+        var files = document.createElement('link');
+        files.rel = 'preconnect';
+        files.href = 'https://fonts.gstatic.com';
+        files.crossOrigin = 'anonymous';
+        document.head.appendChild(files);
+        var sheet = document.createElement('link');
+        sheet.rel = 'stylesheet';
+        sheet.href = 'https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap';
+        sheet.media = 'print';
+        sheet.onload = function() { sheet.media = 'all'; };
+        document.head.appendChild(sheet);
+      })();
+    </script>
     <style>
       :root[data-theme='dark'], html[data-theme='dark'], html[data-theme='dark'] body {
         background-color: #15120d !important;
@@ -86,24 +100,46 @@
     <style>
       #app-startup { display: none; }
       html[data-native-app='true'] #app-startup {
-        position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center;
-        background: #fffaf2 var(--startup-artwork, none) center / cover no-repeat;
-        color: #28594f; opacity: 1; transition: opacity 220ms ease-out;
+        position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+        overflow: hidden; background: #f6efe0; opacity: 1; transition: opacity 220ms ease-out;
         font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
       }
-      #app-startup .startup-brand { box-sizing: border-box; width: min(340px, calc(100vw - 40px)); text-align: center; margin-top: -6vh; padding: 28px 24px; border: 1px solid #ffffffb3; border-radius: 28px; background: rgba(255, 250, 242, .88); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 16px 48px #39281924; animation: startup-arrive 500ms ease-out both; }
-      #app-startup img { display: block; width: clamp(104px, 28vw, 136px); height: auto; margin: 0 auto 22px; }
-      #app-startup strong { display: block; font-size: clamp(30px, 8vw, 38px); font-weight: 750; letter-spacing: -.5px; line-height: 1.25; }
-      #app-startup p { margin: 12px 0 0; color: #63715e; font-size: 14px; line-height: 1.6; }
-      html[data-native-app='true'] #app-startup.startup-ready { opacity: 0; pointer-events: none; }
-      @keyframes startup-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-      @media (orientation: landscape) and (max-height: 540px) {
-        #app-startup .startup-brand { margin-top: 0; }
-        #app-startup img { width: 84px; margin-bottom: 12px; }
-        #app-startup strong { font-size: 28px; }
-        #app-startup p { margin-top: 6px; font-size: 12px; }
+      #app-startup .startup-blur {
+        display: none; position: absolute; inset: -24px; width: calc(100% + 48px); height: calc(100% + 48px);
+        object-fit: cover; filter: blur(26px) saturate(1.06); opacity: 0.92; pointer-events: none;
       }
-      @media (prefers-reduced-motion: reduce) { #app-startup .startup-brand { animation: none; } html[data-native-app='true'] #app-startup { transition: none; } }
+      #app-startup .startup-bg, #app-startup .startup-title {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: cover; object-position: center center; pointer-events: none;
+      }
+      #app-startup .startup-scrim {
+        position: absolute; left: 0; right: 0; bottom: 0;
+        height: calc(96px + env(safe-area-inset-bottom, 0px));
+        background: linear-gradient(180deg, rgba(24, 17, 10, 0) 0%, rgba(24, 17, 10, 0.28) 45%, rgba(24, 17, 10, 0.58) 100%);
+        pointer-events: none;
+      }
+      #app-startup .startup-loading {
+        position: relative; display: inline-flex; align-items: center; gap: 8px;
+        margin: 0 18px calc(22px + env(safe-area-inset-bottom, 0px));
+        font-size: 12.5px; font-weight: 600; color: #fff8ea; letter-spacing: 0.02em;
+        text-shadow: 0 1px 6px rgba(18, 11, 4, 0.65); pointer-events: none;
+      }
+      #app-startup .startup-spinner {
+        width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box;
+        border: 2px solid rgba(255, 245, 222, 0.30); border-top-color: #f5ce7a; border-right-color: #e3b14e;
+        box-shadow: 0 1px 4px rgba(18, 11, 4, 0.35);
+        animation: startup-spin 0.9s linear infinite;
+      }
+      html[data-native-app='true'] #app-startup.startup-ready { opacity: 0; pointer-events: none; }
+      @keyframes startup-spin { to { transform: rotate(360deg); } }
+      @media (min-aspect-ratio: 3/5), (max-aspect-ratio: 9/20) {
+        #app-startup .startup-blur { display: block; }
+        #app-startup .startup-bg, #app-startup .startup-title { object-fit: contain; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #app-startup .startup-spinner { animation: none; }
+        html[data-native-app='true'] #app-startup { transition: none; }
+      }
     </style>
     <style>
       html[data-native-startup='true'] #app-startup { display: none; }
@@ -119,22 +155,62 @@
     </script>
   </head>
   <body data-sveltekit-preload-data="hover">
-    <div id="app-startup" role="status" aria-label="Tu tập Phật pháp">
-      <div class="startup-brand">
-        <img data-startup-logo alt="" width="160" height="160" />
-        <strong>Tu tập Phật pháp</strong>
-        <p data-startup-tagline>Học lời Phật dạy · Thực hành mỗi ngày</p>
+    <div id="app-startup" role="status">
+      <img class="startup-blur" data-startup-blur alt="" aria-hidden="true" />
+      <img class="startup-bg" data-startup-bg alt="" />
+      <img class="startup-title" data-startup-title alt="" />
+      <div class="startup-scrim" aria-hidden="true"></div>
+      <div class="startup-loading">
+        <span class="startup-spinner" aria-hidden="true"></span>
+        <span data-startup-loading></span>
       </div>
     </div>
-    <script>
+    <script data-startup-artwork>
       if (document.documentElement.dataset.nativeStartup === 'true') {
         document.getElementById('app-startup').remove();
       } else if (document.documentElement.dataset.nativeApp === 'true') {
-        document.querySelector('[data-startup-logo]').src = '/assets/branding/lotus-mark.png';
-        try { if (localStorage.getItem('tutam_locale') === 'en') document.querySelector('[data-startup-tagline]').textContent = 'Learn the Buddha’s teachings · Practice every day'; } catch (e) {}
+        var indexKey = 'tutam_startup_background_index';
+        var launchIndex;
+        try { launchIndex = sessionStorage.getItem(indexKey); } catch (e) {}
+        var backgroundIndex = 0;
+        if (/^[0-9]$/.test(launchIndex)) {
+          backgroundIndex = Number(launchIndex);
+        } else {
+          try {
+            var previous = localStorage.getItem(indexKey);
+            if (/^[0-9]$/.test(previous)) backgroundIndex = (Number(previous) + 1) % 10;
+            localStorage.setItem(indexKey, String(backgroundIndex));
+          } catch (e) {}
+          try { sessionStorage.setItem(indexKey, String(backgroundIndex)); } catch (e) {}
+        }
+        var startupSrc = '/images/calendar/cu-si/' + String(backgroundIndex + 1).padStart(2, '0') + '.webp';
+        document.querySelector('[data-startup-blur]').src = startupSrc;
+        var painting = document.querySelector('[data-startup-bg]');
+        var title = document.querySelector('[data-startup-title]');
+        painting.src = startupSrc;
+        var startupLocale = 'vi';
+        try { if (localStorage.getItem('tutam_locale') === 'en') startupLocale = 'en'; } catch (e) {}
+        var englishStartup = startupLocale === 'en';
+        title.src = englishStartup ? '/images/calendar/cu-si-title-en.webp' : '/images/calendar/cu-si-title.webp';
+        document.querySelector('[data-startup-loading]').textContent = englishStartup ? 'Loading app...' : 'Đang tải ứng dụng...';
+        var cover = document.getElementById('app-startup');
+        cover.lang = startupLocale;
+        cover.setAttribute('aria-label', englishStartup ? 'Buddhist Practice App. For lay practitioners.' : 'Ứng dụng Tu tập Phật pháp. Dành cho cư sĩ tại gia.');
+        cover.artworkPainted = Promise.all([painting, title].map(function (image) {
+          if (image.decode) return image.decode().catch(function () {});
+          if (!image.complete) return new Promise(function (resolve) { image.onload = image.onerror = resolve; });
+        })).then(function () {
+          return new Promise(function (resolve) {
+            requestAnimationFrame(function () {
+              var shownAt = performance.now();
+              cover.dataset.shownAt = String(shownAt);
+              resolve(shownAt);
+            });
+          });
+        });
       }
       // A recoverable startup error must never leave a permanent cover over the app.
-      window.setTimeout(function() { var screen = document.getElementById('app-startup'); if (screen) screen.remove(); }, 15000);
+      window.setTimeout(function() { var screen = document.getElementById('app-startup'); if (screen) screen.remove(); }, 30000);
     </script>
     <div style="display: contents">%sveltekit.body%</div>
   </body>

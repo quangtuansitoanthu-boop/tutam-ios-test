@@ -68,6 +68,13 @@
   --brown: #6b4c2a;
   --brown2: #8b6340;
   --brown-dark: #3e2c1a;
+  /* Màu kim loại giữ cố định theo mẫu xu đã duyệt ở cả hai theme. */
+  --practice-coin-glint: #fbf4e6;
+  --practice-coin-gold: #e0ad5a;
+  --practice-coin-amber: #c8963e;
+  --practice-coin-copper: #8b6340;
+  --practice-coin-brown: #6b4c2a;
+  --practice-coin-rim: #3e2c1a;
   --bg: #fafaf8;
   --bg2: #f4f3ee;
   --bg3: #eeede6;
@@ -88,6 +95,7 @@
   --library-popular-ink: #f97316;
   --library-popular-tint: rgba(249,115,22,.08);
   --nav-base-h: 62px;
+  --bottom-nav-clearance: 0px;
   --touch-target-size: 44px;
   --meditation-surface: #171320;
   --nav-h: var(--nav-base-h);
@@ -97,6 +105,24 @@
   --radius-card: 18px;
   --radius-feature: 24px;
   --radius-control: 14px;
+  --radius-pill: 999px;
+  /* Hai công cụ Cảm ứng tâm linh theo bản xem trước được duyệt ngày 27/11. */
+  --bio-tint: #c9f3f8;
+  --bio-mid: #94e2ee;
+  --bio-end: #5cc9dc;
+  --bio-ink: #06333e;
+  --bio-glow: rgba(34, 158, 184, .34);
+  --dream-tint: #e2d6ff;
+  --dream-mid: #c5b0fb;
+  --dream-end: #a488f5;
+  --dream-ink: #230d4f;
+  --dream-glow: rgba(126, 86, 219, .34);
+  --wave-physical: #cf5242;
+  --wave-emotional: #148b7e;
+  --wave-intellectual: #435bd0;
+  --wave-intuitive: #b57718;
+  --wave-aesthetic: #a64d94;
+  --wave-spiritual: #2f7d4f;
   --practice-dialog-width: 680px;
   --practice-dialog-height: min(760px, calc(100dvh - max(16px, var(--app-safe-top, 0px)) - max(16px, env(safe-area-inset-bottom, 0px))));
   --practice-dialog-backdrop: #0007;
@@ -153,7 +179,12 @@
   color-scheme: light;
 }
 
+@media (max-width: 768px) {
+  :root { --bottom-nav-clearance: calc(var(--nav-base-h) + env(safe-area-inset-bottom, 0px)); }
+}
+
 :root[data-native-app='true'] {
+  --bottom-nav-clearance: calc(var(--nav-base-h) + env(safe-area-inset-bottom, 0px));
   --app-safe-top: max(env(safe-area-inset-top, 0px), 32px);
 }
 
@@ -163,6 +194,22 @@
 }
 
 :root[data-theme='dark'] {
+  --bio-tint: #144e5e;
+  --bio-mid: #0d3b47;
+  --bio-end: #072830;
+  --bio-ink: #d8f8fc;
+  --bio-glow: rgba(0, 0, 0, .55);
+  --dream-tint: #3b2868;
+  --dream-mid: #2a1c4d;
+  --dream-end: #1b1133;
+  --dream-ink: #ece4ff;
+  --dream-glow: rgba(0, 0, 0, .55);
+  --wave-physical: #f27c6c;
+  --wave-emotional: #4cd4c5;
+  --wave-intellectual: #8aa0ff;
+  --wave-intuitive: #eab354;
+  --wave-aesthetic: #e18ad1;
+  --wave-spiritual: #6cd095;
   --notice-glass: #203d31dc;
   --notice-edge: #8bc0a45c;
   --notice-ink: #edf9ef;

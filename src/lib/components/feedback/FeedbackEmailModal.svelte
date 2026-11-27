@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { modalDialog } from '$lib/browser/modal-dialog';
-  import { isNativeApp, nativePlatform } from '$lib/browser/native-platform';
+  import { nativePlatform } from '$lib/browser/native-platform';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
   import { triggerHaptic } from '$lib/utils/haptics';
 
@@ -87,15 +87,6 @@
     const body = encodeURIComponent(getFullBody());
     const mailtoUrl = `mailto:${officialEmail}?subject=${subject}&body=${body}`;
 
-    const isAndroid = isNativeApp()
-      ? nativePlatform() === 'android'
-      : (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent));
-    if (isAndroid) {
-      const intentUrl = `intent://co?to=${officialEmail}&subject=${subject}&body=${body}#Intent;scheme=googlegmail;package=com.google.android.gm;S.browser_fallback_url=${encodeURIComponent(mailtoUrl)};end`;
-      window.location.href = intentUrl;
-      onClose();
-      return;
-    }
     window.location.href = mailtoUrl;
     onClose();
   }

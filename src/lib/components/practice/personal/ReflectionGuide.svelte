@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
   import { REFLECTION_GUIDE_SECTIONS } from '$lib/i18n/reflection-guide';
   import { personalPracticeCopy } from '$lib/i18n/personal-practice-copy';
   import { countReflectionWords } from '$lib/domain/practice/personal-practice';
+
+  const GUIDE_FONT_SCALE_KEY = 'tutam_guide_font_scale_v1';
 
   interface Props {
     onDismiss?: () => void;
@@ -14,13 +17,35 @@
   const isEn = $derived(locale.current === 'en');
   const sections = $derived(REFLECTION_GUIDE_SECTIONS[isEn ? 'en' : 'vi']);
   const copy = $derived(personalPracticeCopy[isEn ? 'en' : 'vi']);
+  let guideFontScale = $state(1);
+
+  onMount(() => {
+    try {
+      const saved = Number(localStorage.getItem(GUIDE_FONT_SCALE_KEY));
+      if (Number.isFinite(saved) && saved >= 0.85 && saved <= 1.35) guideFontScale = saved;
+    } catch { /* ignore storage errors */ }
+  });
+
+  function stepFontScale(delta: number): void {
+    const next = Math.max(0.85, Math.min(1.35, Number((guideFontScale + delta).toFixed(2))));
+    guideFontScale = next;
+    try { localStorage.setItem(GUIDE_FONT_SCALE_KEY, String(next)); } catch { /* ignore */ }
+  }
 
   function handleContinue() {
     onDismiss?.();
   }
 </script>
 
-<div class="reflection-guide" class:embedded data-testid="reflection-guide">
+<div class="reflection-guide" class:embedded data-testid="reflection-guide" style={`--ui-font-scale:${guideFontScale}`}>
+  <div class="guide-font-bar" role="group" aria-label={isEn ? 'Adjust text size' : 'Chỉnh cỡ chữ hướng dẫn'}>
+    <span class="guide-font-label">{isEn ? 'Text size' : 'Cỡ chữ'}</span>
+    <div class="guide-font-actions">
+      <button type="button" class="guide-font-btn" aria-label={isEn ? 'Decrease text size' : 'Giảm cỡ chữ'} disabled={guideFontScale <= 0.85} onclick={() => stepFontScale(-0.1)}>A−</button>
+      <span class="guide-font-value">{Math.round(guideFontScale * 100)}%</span>
+      <button type="button" class="guide-font-btn" aria-label={isEn ? 'Increase text size' : 'Tăng cỡ chữ'} disabled={guideFontScale >= 1.35} onclick={() => stepFontScale(0.1)}>A+</button>
+    </div>
+  </div>
   {#if !embedded}
     <header class="guide-header">
       <span class="eyebrow">{isEn ? 'STEP 1 · PREPARATION & MINDFULNESS' : 'BƯỚC 1 · THÂN TÂM TRANG NGHIÊM'}</span>
@@ -98,6 +123,52 @@
     max-width: 800px;
     margin-inline: auto;
   }
+  .guide-font-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: linear-gradient(155deg, var(--card), var(--bg2));
+    box-shadow: inset 0 1.5px 0 color-mix(in srgb, var(--card) 88%, transparent), var(--shadow-sm);
+  }
+  .guide-font-label {
+    font-size: var(--font-size-label);
+    font-weight: 700;
+    color: var(--text2);
+  }
+  .guide-font-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .guide-font-value {
+    min-width: 42px;
+    text-align: center;
+    font-size: var(--font-size-label);
+    font-weight: 700;
+    color: var(--brown-dark);
+    font-variant-numeric: tabular-nums;
+  }
+  .guide-font-btn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: linear-gradient(155deg, var(--card), var(--bg2));
+    color: var(--brown);
+    font: inherit;
+    font-size: var(--font-size-label);
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: inset 0 1.5px 0 color-mix(in srgb, var(--card) 88%, transparent), inset 0 -2px 0 rgba(60, 40, 10, 0.1), var(--shadow-sm);
+    transition: transform 0.12s ease;
+  }
+  .guide-font-btn:active:not(:disabled) { transform: translateY(1.5px) scale(0.96); }
+  .guide-font-btn:disabled { opacity: 0.45; cursor: default; }
   .guide-header {
     text-align: center;
     padding-block: calc(var(--space-page) * 0.5);

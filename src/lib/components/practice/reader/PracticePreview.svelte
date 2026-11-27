@@ -18,7 +18,8 @@
   import { getLocaleContext } from '$lib/stores/locale.svelte';
   import { getThemeContext } from '$lib/stores/theme.svelte';
   import { hasEnglishReadingContent, ENGLISH_TRANSLATION_NOTICE, prepareLocalizedReadingContent, localizeChapterTitle } from '$lib/domain/library/localized-article';
-  import { isHtmlResponse } from '$lib/browser/native-api';
+  import { resolvePublicUrl } from '$lib/browser/native-api';
+  import { loadEnglishSingleArticleContent } from '$lib/browser/english-pack';
 
   interface ReaderSession {
     authenticated: boolean;
@@ -122,15 +123,11 @@
     singleArticleEnContent = null;
     if (curLocale === 'en' && curArticle && !curArticle.hasTableOfContents) {
       notifyEnglishContent(curArticle.id, null);
-      void fetch('/offline-data/articles-en.json', { signal: controller.signal })
-        .then((r) => r.ok && !isHtmlResponse(r) ? r.json() : null)
-        .then((map) => {
-          if (!active || !map) return;
-          const item = map[curArticle.id] || map[curArticle.id.replace(/^book_/u, '')] || map[`book_${curArticle.id}`];
-          if (typeof item?.noi_dung === 'string' && item.noi_dung.trim()) {
-            singleArticleEnContent = item.noi_dung;
-            notifyEnglishContent(curArticle.id, item.noi_dung);
-          }
+      void loadEnglishSingleArticleContent(curArticle.id, controller.signal)
+        .then((content) => {
+          if (!active || !content) return;
+          singleArticleEnContent = content;
+          notifyEnglishContent(curArticle.id, content);
         })
         .catch(() => {});
     }
@@ -155,6 +152,10 @@
   );
 
   const isReadingChapter = $derived(currentChapterIndex !== null && chapters.length > 0);
+  const orderedChapters = $derived(orderPracticeChapters(chapters, article.category));
+  const chapterPosition = $derived(orderedChapters.findIndex((chapter) => chapter.index === currentChapterIndex));
+  const previousChapter = $derived(chapterPosition > 0 ? orderedChapters[chapterPosition - 1] : null);
+  const nextChapter = $derived(chapterPosition >= 0 && chapterPosition < orderedChapters.length - 1 ? orderedChapters[chapterPosition + 1] : null);
   const isSingleTextScripture = $derived(chapters.length === 0 && !article.hasTableOfContents);
   const rawChapterTitle = $derived(
     chapterContent?.title || (currentChapterIndex !== null ? chapters[currentChapterIndex]?.title : '') || article.title
@@ -323,14 +324,16 @@
       if (target && bookmark.scrollTop > 0) {
         restoreReaderScroll(target, bookmark.scrollTop, requestAnimationFrame, () => true);
       }
-      notify(`📖 Tiếp tục đọc: ${bookmark.chapTitle || `Phẩm ${bookmark.chapIdx + 1}`}`);
+      notify(isEn
+        ? `📖 Continue reading: ${getLocalizedChapterTitle(bookmark.chapTitle) || `Chapter ${bookmark.chapIdx + 1}`}`
+        : `📖 Tiếp tục đọc: ${bookmark.chapTitle || `Phẩm ${bookmark.chapIdx + 1}`}`);
       return;
     }
     const target = scrollArea;
     if (target && bookmark.scrollTop > 0) {
       restoreReaderScroll(target, bookmark.scrollTop, requestAnimationFrame, () => true);
     }
-    notify('📖 Đang ở vị trí đánh dấu');
+    notify(isEn ? '📖 At saved bookmark' : '📖 Đang ở vị trí đánh dấu');
   }
 
   function stopTts(): void {
@@ -348,20 +351,24 @@
     autoScrollActive = false;
   }
 
+  function handleReaderVisibilityChange(): void {
+    if (document.visibilityState === 'hidden') stopAutoScroll();
+  }
+
   function autoScrollFrame(time: number): void {
     if (!autoScrollActive) return stopAutoScroll();
     if (isSingleTextScripture) {
       if (typeof window === 'undefined') return stopAutoScroll();
       const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
       if (window.scrollY >= maxScroll - 1) return stopAutoScroll();
-      if (autoFrameTime) window.scrollBy(0, autoScrollSpeed * ((time - autoFrameTime) / 16.667));
+      if (autoFrameTime) window.scrollBy(0, autoScrollSpeed * (Math.min(100, Math.max(0, time - autoFrameTime)) / 16.667));
       autoFrameTime = time;
       autoFrame = requestAnimationFrame(autoScrollFrame);
       return;
     }
     if (!scrollArea) return stopAutoScroll();
     if (scrollArea.scrollTop + scrollArea.clientHeight >= scrollArea.scrollHeight - 1) return stopAutoScroll();
-    if (autoFrameTime) scrollArea.scrollTop += autoScrollSpeed * ((time - autoFrameTime) / 16.667);
+    if (autoFrameTime) scrollArea.scrollTop += autoScrollSpeed * (Math.min(100, Math.max(0, time - autoFrameTime)) / 16.667);
     autoFrameTime = time;
     autoFrame = requestAnimationFrame(autoScrollFrame);
   }
@@ -399,7 +406,7 @@
 
   async function share(): Promise<void> {
     if (typeof location === 'undefined') return;
-    const shareUrl = location.href;
+    const shareUrl = resolvePublicUrl(location.pathname + location.search);
     const title = currentChapterTitle ? `${currentChapterTitle} - ${article.title}` : article.title;
     const data = { title, text: title, url: shareUrl };
     if (navigator.share) {
@@ -465,8 +472,8 @@
   function updateRouteHeader(active: boolean): void {
     document.dispatchEvent(new CustomEvent('qts:practice-header', {
       detail: active
-        ? { active: true, backLabel: isEn ? 'Back' : 'Quay lại', onBack: handlePreviewBack, title: article.title }
-        : { active: false }
+        ? { active: true, owner: 'practice-preview', backLabel: isEn ? 'Back' : 'Quay lại', onBack: handlePreviewBack, title: article.title }
+        : { active: false, owner: 'practice-preview' }
     }));
   }
 
@@ -497,7 +504,9 @@
       autoScrollSpeed = Number(localStorage.getItem('tutam_auto_scroll_speed') || 0.5) || 0.5;
     }
     updateRouteHeader(true);
+    document.addEventListener('visibilitychange', handleReaderVisibilityChange);
     return () => {
+      document.removeEventListener('visibilitychange', handleReaderVisibilityChange);
       stopTts();
       stopAutoScroll();
       ttsController.destroy();
@@ -751,25 +760,29 @@
       {#if chapters.length > 1}
         <nav class="chapter-nav" aria-label={localeStore.current === 'en' ? 'Chapter navigation' : 'Điều hướng phẩm'}>
           <button
-            class:hidden={currentChapterIndex === null || currentChapterIndex <= 0}
+            class="chapter-nav-arrow"
+            class:hidden={!previousChapter}
             type="button"
             aria-label={localeStore.current === 'en' ? 'Previous chapter' : 'Bài trước'}
-            disabled={currentChapterIndex === null || currentChapterIndex <= 0}
-            onclick={() => currentChapterIndex !== null && onChapterOpen(currentChapterIndex - 1)}
+            title={localeStore.current === 'en' ? 'Previous chapter' : 'Bài trước'}
+            disabled={!previousChapter}
+            onclick={() => previousChapter && onChapterOpen(previousChapter.index)}
           >
-            ← {localeStore.current === 'en' ? 'Previous' : 'Bài trước'}
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
           </button>
           <span class="chapter-nav-title">
-            {currentChapterIndex !== null ? `${currentChapterIndex + 1}. ` : ''}{currentChapterTitle}
+            {chapterPosition >= 0 ? `${chapterPosition + 1}. ` : ''}{currentChapterTitle}
           </span>
           <button
-            class:hidden={currentChapterIndex === null || currentChapterIndex >= chapters.length - 1}
+            class="chapter-nav-arrow"
+            class:hidden={!nextChapter}
             type="button"
             aria-label={localeStore.current === 'en' ? 'Next chapter' : 'Bài tiếp'}
-            disabled={currentChapterIndex === null || currentChapterIndex >= chapters.length - 1}
-            onclick={() => currentChapterIndex !== null && onChapterOpen(currentChapterIndex + 1)}
+            title={localeStore.current === 'en' ? 'Next chapter' : 'Bài tiếp'}
+            disabled={!nextChapter}
+            onclick={() => nextChapter && onChapterOpen(nextChapter.index)}
           >
-            {localeStore.current === 'en' ? 'Next' : 'Bài tiếp'} →
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
           </button>
         </nav>
       {/if}
@@ -831,13 +844,13 @@
 </section>
 
 <style>
-  .tt-preview{min-height:100vh;padding-top:58px;background:var(--bg);color:var(--text);font-family:var(--font-app)}
+  .tt-preview{min-height:100vh;min-height:100dvh;padding-top:58px;background:var(--bg);color:var(--text);font-family:var(--font-app)}
   .tt-preview--reading{padding-top:58px}
   .tt-preview__wrap{max-width:720px;margin:0 auto;padding:28px 20px 120px}
-  .tt-preview__header{display:grid;justify-items:start;gap:12px;margin:0 0 16px;padding:0;background:transparent}
+  .tt-preview__header{display:grid;justify-items:center;gap:12px;margin:0 0 16px;padding:0;background:transparent;text-align:center}
   .tt-preview__category{display:inline-block;padding:3px 10px;border-radius:12px;background:var(--gold-light);color:var(--gold);font-size:11px;font-weight:700;letter-spacing:.5px;line-height:1.6}
-  .tt-preview__header h1{width:100%;margin:0;color:var(--text);font:700 clamp(20px,4vw,26px)/1.4 var(--font-app);text-align:center;text-transform:uppercase}
-  .tt-preview__meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin:0;padding:0;color:var(--muted);font-size:12px}
+  .tt-preview__header h1{width:100%;margin:0;color:var(--text);font:700 clamp(20px,4vw,26px)/1.4 var(--font-app);text-align:center;text-transform:uppercase;text-wrap:balance;overflow-wrap:anywhere}
+  .tt-preview__meta{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px 12px;margin:0;padding:0;color:var(--muted);font-size:12px}
   .tt-preview__start-card{margin:0 0 10px;padding:20px;border:1.5px solid var(--gold-muted);border-radius:18px;background:var(--gold-light);text-align:center}
   .tt-preview__start{display:inline-flex;align-items:center;gap:10px;padding:14px 28px;border:0;border-radius:36px;background:linear-gradient(135deg,var(--gold) 0%,var(--practice-start-end,#b8843a) 100%);box-shadow:0 4px 20px color-mix(in srgb,var(--gold) 40%,transparent);color:#fff;cursor:pointer;font:700 16px/1.6 var(--font-app);letter-spacing:.3px;transition:transform .18s,box-shadow .18s}
   .tt-preview__start span{font-size:22px}
@@ -989,7 +1002,7 @@
     .chapter-nav button{padding:5px 10px;font-size:12px}
   }
 
-  .tt-preview{padding-top:var(--practice-topbar-height,calc(64px + var(--app-safe-top,env(safe-area-inset-top,0px))))}
+  .tt-preview{padding-top:var(--practice-topbar-height,12px)}
   .tt-preview__header h1.tt-ritual-heading{font-size:clamp(16px,4.6vw,24px);line-height:1.5;text-align:center}
   .tt-ritual-heading span{display:block;white-space:nowrap}
   .tt-reader-top-bar{
@@ -1001,6 +1014,8 @@
   button{min-height:44px}
 
   /* Giữ tiêu đề ở cột co giãn, hai nút chuyển phẩm ở cùng một hàng. */
+  .chapter-nav button.chapter-nav-arrow{width:44px;height:44px;min-width:44px;min-height:44px;padding:0;justify-content:center;border-radius:50%;border:1px solid var(--border);background:linear-gradient(155deg,var(--card),var(--bg2));color:var(--text2);box-shadow:inset 0 1.5px 0 color-mix(in srgb,var(--card) 88%,transparent),inset 0 -2px 0 rgba(60,40,10,.1),var(--shadow-sm)}
+  .chapter-nav button.chapter-nav-arrow:hover:not(:disabled){border-color:var(--gold);background:var(--gold-light);color:var(--brown)}
   .chapter-nav{grid-template-columns:auto minmax(0,1fr) auto}
   .chapter-nav button:first-child{grid-column:1;grid-row:1;justify-self:start}
   .chapter-nav-title{grid-column:2;grid-row:1;min-width:0;max-width:100%}
@@ -1032,4 +1047,90 @@
     --practice-start-end:var(--gold);
   }
   .tt-preview[data-read-bg] .tt-preview__toc{background:var(--card)}
+
+  /* Phong cách 3D Pha lê đồng bộ cho Tu Tập (giữ nguyên cấu trúc và mặt giấy đọc) */
+  .tt-preview .tt-preview__category{
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,.78);
+    background:linear-gradient(180deg,rgba(255,255,255,.68) 0%,var(--gold-light) 100%);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.88),inset 0 -1.5px 0 rgba(60,40,10,.12),0 2px 6px rgba(60,40,10,.08);
+  }
+  .tt-preview[data-read-bg='dark'] .tt-preview__category{
+    border-color:rgba(255,255,255,.16);
+    background:linear-gradient(180deg,rgba(255,255,255,.1) 0%,var(--gold-light) 100%);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.16);
+  }
+  .tt-preview__start-card,
+  .tt-single-bottom-practice{
+    border-radius:var(--radius-card);
+    border:1px solid color-mix(in srgb,var(--gold) 32%,rgba(255,255,255,.82));
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.7) 0%,rgba(255,255,255,.04) 48%),
+      linear-gradient(150deg,var(--gold-light) 0%,color-mix(in srgb,var(--gold-muted) 42%,var(--card)) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.92),inset 0 -3.5px 0 rgba(140,96,24,.15),0 10px 22px -8px rgba(140,96,24,.22);
+  }
+  .tt-preview[data-read-bg='dark'] .tt-preview__start-card,
+  .tt-preview[data-read-bg='dark'] .tt-single-bottom-practice{
+    border-color:color-mix(in srgb,var(--gold) 35%,rgba(255,255,255,.12));
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.08) 0%,transparent 48%),
+      linear-gradient(150deg,color-mix(in srgb,var(--gold) 10%,var(--preview-paper)) 0%,var(--preview-paper) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.16),inset 0 -3.5px 0 rgba(0,0,0,.5),0 10px 24px -6px rgba(0,0,0,.55);
+  }
+  .tt-preview .tt-preview__start,
+  .tt-preview .tt-reader-practice-btn{
+    border:1px solid rgba(255,255,255,.45);
+    background:linear-gradient(145deg,#e0ad5a 0%,var(--gold) 62%,var(--practice-start-end,#9c6c1b) 100%);
+    color:var(--on-gold,#24180c);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.65),inset 0 -3px 0 rgba(90,56,8,.28),0 6px 16px -3px color-mix(in srgb,var(--gold) 44%,transparent);
+  }
+  .tt-preview__toc{
+    border-radius:var(--radius-card);
+    border:1px solid color-mix(in srgb,var(--gold) 22%,rgba(255,255,255,.8));
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.04) 24%),
+      linear-gradient(160deg,var(--gold-light) 0%,color-mix(in srgb,var(--gold-muted) 26%,var(--card)) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.92),inset 0 -3.5px 0 rgba(120,84,32,.14),0 10px 22px -8px rgba(60,40,10,.16);
+  }
+  .tt-preview[data-read-bg='dark'] .tt-preview__toc{
+    border-color:rgba(255,255,255,.14);
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.07) 0%,transparent 24%),
+      linear-gradient(160deg,color-mix(in srgb,var(--preview-ink) 5%,var(--preview-paper)) 0%,var(--preview-paper) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.16),inset 0 -3.5px 0 rgba(0,0,0,.52),0 10px 24px -6px rgba(0,0,0,.55);
+  }
+  .tt-preview .tt-preview__toc-header{
+    background:linear-gradient(180deg,rgba(255,255,255,.42) 0%,rgba(255,255,255,.05) 100%),var(--gold-muted);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.75);
+  }
+  .tt-preview[data-read-bg='dark'] .tt-preview__toc-header{
+    background:linear-gradient(180deg,rgba(255,255,255,.08) 0%,transparent 100%),color-mix(in srgb,var(--gold) 12%,var(--preview-paper));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.1);
+  }
+  .tt-preview .tt-preview__toc-header small{
+    border-radius:999px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.45);
+  }
+  .tt-preview .tt-preview__chapter-number{
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.52),inset 0 -2px 0 rgba(80,48,8,.24),0 2px 6px rgba(120,80,20,.2);
+  }
+  .tt-preview .tt-reader-top-bar,
+  .tt-preview .chapter-nav{
+    background:linear-gradient(180deg,rgba(255,255,255,.42) 0%,rgba(255,255,255,0) 65%),var(--bg2);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 3px 10px -4px rgba(60,40,10,.14);
+  }
+  .tt-preview[data-read-bg='dark'] .tt-reader-top-bar,
+  .tt-preview[data-read-bg='dark'] .chapter-nav{
+    background:linear-gradient(180deg,rgba(255,255,255,.06) 0%,transparent 65%),var(--bg2);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 4px 12px rgba(0,0,0,.45);
+  }
+  .tt-preview .tt-reader-back-btn{
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,.78);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.88),inset 0 -2px 0 rgba(60,40,10,.12),0 3px 8px -2px rgba(60,40,10,.14);
+  }
+  .tt-preview[data-read-bg='dark'] .tt-reader-back-btn{
+    border-color:rgba(255,255,255,.16);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.18),inset 0 -2px 0 rgba(0,0,0,.46),0 4px 10px rgba(0,0,0,.4);
+  }
 </style>

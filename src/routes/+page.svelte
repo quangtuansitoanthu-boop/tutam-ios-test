@@ -10,6 +10,7 @@
   import BuddhistDailyArtCard from '$lib/components/home/BuddhistDailyArtCard.svelte';
   import DailyDhammapadaCard from '$lib/components/home/DailyDhammapadaCard.svelte';
   import CorePracticePortals from '$lib/components/home/CorePracticePortals.svelte';
+  import HomeDivinationLinks from '$lib/components/home/HomeDivinationLinks.svelte';
   import HomeDailyReminders from '$lib/components/home/HomeDailyReminders.svelte';
   import FixedPracticeGuideBanners from '$lib/components/guide/FixedPracticeGuideBanners.svelte';
   import ContentUpdateControl from '$lib/components/home/ContentUpdateControl.svelte';
@@ -394,6 +395,7 @@
   <DailyDhammapadaCard />
 
   <CorePracticePortals />
+  <HomeDivinationLinks />
 
   <!-- 7. Hướng Dẫn Tu Học & Bố Thí Pháp Cố Định -->
   <FixedPracticeGuideBanners />
@@ -434,7 +436,7 @@
     --home-section-gap: 24px;
     max-width: 960px;
     margin: 0 auto;
-    padding: 20px 20px 48px;
+    padding: 20px 20px 24px;
     display: flex;
     flex-direction: column;
     gap: var(--home-section-gap);
@@ -445,14 +447,14 @@
   .admin-notice {
     position: fixed;
     right: 24px;
-    bottom: 24px;
+    bottom: calc(max(var(--bottom-nav-clearance), var(--audio-player-top, 0px)) + 24px);
     z-index: 1200;
     max-width: min(420px, calc(100vw - 32px));
     padding: 11px 18px;
     border-radius: 22px;
-    background: var(--brown-dark);
+    background: var(--text);
     box-shadow: var(--shadow-lg);
-    color: #fff;
+    color: var(--bg);
     font-size: 12px;
     font-weight: 600;
   }
@@ -460,11 +462,10 @@
     .home-calendar{grid-template-columns:minmax(0,1fr);gap:16px}
     .home-container {
       --home-section-gap: 20px;
-      padding: 20px 16px 36px;
+      padding: 20px 16px 12px;
     }
     .admin-notice {
       right: 16px;
-      bottom: 92px;
       left: 16px;
       text-align: center;
     }

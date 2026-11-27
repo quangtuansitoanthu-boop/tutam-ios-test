@@ -145,14 +145,9 @@ function createNativeStorage() {
       try { await Filesystem.stat({ path: file, directory: Directory.Data }); }
       catch (error) { if (missing(error)) continue; throw error; }
       presentSlots.push(slot);
-      let raw: { data: string | Blob };
-      try { raw = await Filesystem.readFile({ path: file, directory: Directory.Data, encoding: Encoding.UTF8 }); }
-      catch (error) {
-        // Lỗi bridge đọc journal không chứng minh commit hỏng; không lui về lượt cũ.
-        if (base === journalPath) throw error;
-        corrupt = true;
-        continue;
-      }
+      // A bridge read failure does not prove corruption. Falling back could
+      // overwrite an intact newer draft with the older slot on the next save.
+      const raw = await Filesystem.readFile({ path: file, directory: Directory.Data, encoding: Encoding.UTF8 });
       try {
         const envelope = JSON.parse(String(raw.data)) as NativeEnvelope;
         if (!Number.isSafeInteger(envelope.sequence) || envelope.sequence < 0 || typeof envelope.payload !== 'string'

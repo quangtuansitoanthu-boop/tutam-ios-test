@@ -7,8 +7,10 @@ import {
   createPrincipalStorage,
 } from './principal-storage';
 import { getBrowserStorage, type StorageLike } from './storage-contract';
+import { isPermanentOutboxRejection, quarantineOutboxOperation, readOutboxRejections, removeOutboxRejection } from './outbox-rejections';
 
 export const PRACTICE_SESSION_OUTBOX_KEY = 'quangtu_practice_session_outbox_v1';
+const REJECTED_OPERATIONS_KEY = 'quangtu_practice_session_rejections_v1';
 export const PRACTICE_ANONYMOUS_ADOPTION_DECISION_KEY = 'quangtu_practice_anonymous_adoption_v1';
 export const PRACTICE_OUTBOX_CAPACITY_ERROR = 'practice_outbox_capacity_exceeded';
 export const PRACTICE_SESSION_ACCEPTED_EVENT = 'quangtu:practice-session-accepted';
@@ -81,12 +83,17 @@ export function createPracticeSessionOutbox(
     }
   };
   const getStatus = (): PracticeSessionSyncStatus => {
-    const pendingOperations = read().length;
+    const activeOperations = read().length;
+    let rejectedOperations = 0;
+    try { rejectedOperations = readOutboxRejections<PracticeSessionOperation>(principalStorage(), REJECTED_OPERATIONS_KEY).length; }
+    catch { failure = 'storage'; }
+    const pendingOperations = activeOperations + rejectedOperations;
     // Anonymous work is intentionally local until explicit account adoption.
-    const visibleFailure = failure ?? (pendingOperations && principalId() !== ANONYMOUS_STORAGE_PRINCIPAL && !session.csrfToken ? 'authentication' : null);
+    const visibleFailure = failure ?? (rejectedOperations ? 'rejected'
+      : pendingOperations && principalId() !== ANONYMOUS_STORAGE_PRINCIPAL && !session.csrfToken ? 'authentication' : null);
     return { principalId: principalId(), pendingOperations,
       phase: syncing ? 'syncing' : visibleFailure ? 'failed' : pendingOperations ? 'pending' : 'idle', failure: visibleFailure,
-      canRetry: Boolean(session.authenticated && session.csrfToken && pendingOperations && !syncing && failure !== 'rejected' && failure !== 'authentication'),
+      canRetry: Boolean(session.authenticated && session.csrfToken && activeOperations && !syncing && failure !== 'authentication'),
     };
   };
   const publish = () => { const status = getStatus(); for (const listener of listeners) listener(status); };
@@ -190,6 +197,15 @@ export function createPracticeSessionOutbox(
               signal: controller.signal,
             });
             if (!response.ok) {
+              if (generation !== capturedGeneration || principalId() !== capturedPrincipal) break;
+              if (isPermanentOutboxRejection(response.status)) {
+                try {
+                  quarantineOutboxOperation(principalStorage(capturedPrincipal), REJECTED_OPERATIONS_KEY,
+                    operation, response.status, now().toISOString());
+                } catch (cause) { failure = 'storage'; throw cause; }
+                write(read(capturedPrincipal, true).filter(item => item.id !== operation.id), capturedPrincipal);
+                continue;
+              }
               const code = response.status === 403
                 ? (await response.json().catch(() => null))?.error?.code
                 : undefined;
@@ -252,6 +268,21 @@ export function createPracticeSessionOutbox(
 
     pending(principal = principalId()): ReadonlyArray<PracticeSessionOperation> {
       return read(principal);
+    },
+
+    rejected(principal = principalId()) {
+      return readOutboxRejections<PracticeSessionOperation>(principalStorage(principal), REJECTED_OPERATIONS_KEY);
+    },
+
+    retryRejected(id: string): boolean {
+      const scoped = principalStorage();
+      const entry = readOutboxRejections<PracticeSessionOperation>(scoped, REJECTED_OPERATIONS_KEY)
+        .find(item => item.operation.id === id);
+      if (!entry || read(principalId(), true).some(item => item.id === id)) return false;
+      enqueue(entry.operation);
+      removeOutboxRejection(scoped, REJECTED_OPERATIONS_KEY, entry.operation);
+      failure = null; publish();
+      return true;
     },
 
     setSession(next: PracticeSessionClientSession): void {

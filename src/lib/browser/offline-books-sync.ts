@@ -184,7 +184,13 @@ export async function downloadBookOffline(
   }
 
   // 3. Cache thông tin chi tiết bài viết
-  await storeDownloadedBookResponse(`/api/articles/${encodeURIComponent(book.id)}`, book);
+  await storeDownloadedBookResponse(`/api/articles/${encodeURIComponent(book.id)}`, {
+    id: book.id, tieu_de: book.originalTitle ?? book.title, tom_tat: book.originalSummary ?? book.summary,
+    noi_dung: book.content, danh_muc: book.category, tags: book.tags.join(','), tac_gia: book.originalAuthor ?? book.author,
+    anh_url: book.imageUrl, noi_bat: book.featured ? 1 : 0, ngay_dang: book.publishedAt,
+    has_muc_luc: book.hasTableOfContents ? 1 : 0, so_tap: book.volumeCount, trang_thai: book.status,
+    pdf_url: book.pdfUrl, link_ngoai: book.externalUrl ?? '', created_at: book.createdAt, updated_at: book.updatedAt,
+  });
   // Chỉ thay mục lục cũ sau khi mọi chương đã đầy đủ; cache từng chương vẫn giữ để thử lại.
   await storeDownloadedBookResponse(chaptersEndpoint, chapters);
 

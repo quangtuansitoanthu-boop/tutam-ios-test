@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { contentExperienceNotice, hasContentExperienceNotice } from '../../src/lib/i18n/content-experience-notice';
 
@@ -66,5 +67,16 @@ describe('All story notices', () => {
     }
     expect(hasContentExperienceNotice('unrelated-book')).toBe(false);
     expect(contentExperienceNotice('unrelated-book', 'vi')).toBeNull();
+  });
+
+  it('exposes a manual close button with accessible touch area and 3D crystal styling on ContentExperienceNotice', () => {
+    const source = readFileSync('src/lib/components/shared/ContentExperienceNotice.svelte', 'utf8');
+    expect(source).toContain('let dismissed = $state(false);');
+    expect(source).toContain('dismissed = false;');
+    expect(source).toContain('!dismissed');
+    expect(source).toContain('class="cen-close"');
+    expect(source).toContain('Đóng thông báo');
+    expect(source).toContain('Close notice');
+    expect(source).toContain('border-radius:var(--radius-card)');
   });
 });

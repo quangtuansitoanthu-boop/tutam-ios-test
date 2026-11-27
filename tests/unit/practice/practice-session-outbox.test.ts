@@ -17,6 +17,52 @@ class MemoryStorage implements StorageLike {
 describe('automatic practice session outbox', () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([400, 404, 422])('isolates HTTP %s durably and drains later valid sessions without retrying poison work', async status => {
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status })).mockResolvedValue(Response.json({ ok: true }));
+    const outbox = createPracticeSessionOutbox(fetcher, storage);
+    outbox.setSession({ authenticated: true, csrfToken: 'csrf-a', user: { id: 'a' } });
+    const rejected = outbox.enqueueStart(start('invalid'));
+    outbox.enqueueStart(start('valid'));
+    await expect(outbox.flush()).resolves.toBe(1);
+    expect(outbox.pending()).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const reloaded = createPracticeSessionOutbox(fetcher, storage);
+    reloaded.setSession({ authenticated: true, csrfToken: 'csrf-a', user: { id: 'a' } });
+    expect(reloaded.rejected()).toEqual([expect.objectContaining({ operation: rejected, status })]);
+    await reloaded.flush();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    reloaded.setSession({ authenticated: true, csrfToken: 'csrf-b', user: { id: 'b' } });
+    expect(reloaded.rejected()).toEqual([]);
+  });
+
+  it.each([401, 403, 408, 429, 503])('retains HTTP %s as retryable or authentication work without quarantine', async status => {
+    const fetcher = vi.fn(async () => new Response(null, { status }));
+    const outbox = createPracticeSessionOutbox(fetcher, new MemoryStorage());
+    outbox.setSession({ authenticated: true, csrfToken: 'csrf-a', user: { id: 'a' } });
+    outbox.enqueueStart(start('first'));
+    outbox.enqueueStart(start('later'));
+    await expect(outbox.flush()).rejects.toThrow(`practice_session_${status}`);
+    expect(outbox.pending()).toHaveLength(2);
+    expect(outbox.rejected()).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the original outbox when saving a rejected record exceeds storage quota', async () => {
+    const storage = new MemoryStorage();
+    const outbox = createPracticeSessionOutbox(vi.fn(async () => new Response(null, { status: 422 })), storage);
+    outbox.setSession({ authenticated: true, csrfToken: 'csrf-a', user: { id: 'a' } });
+    outbox.enqueueStart(start('preserved'));
+    const original = outbox.pending();
+    const write = vi.spyOn(storage, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    try {
+      await expect(outbox.flush()).rejects.toThrow('quota');
+      expect(outbox.pending()).toEqual(original);
+      expect(outbox.rejected()).toEqual([]);
+      expect(outbox.getStatus()).toMatchObject({ phase: 'failed', failure: 'storage' });
+    } finally { write.mockRestore(); }
+  });
+
   describe('durable storage safety', () => {
     it('keeps startup alive and reports storage failure when the browser storage getter is blocked', async () => {
       const target = Object.defineProperty({}, 'localStorage', {
@@ -100,7 +146,7 @@ describe('automatic practice session outbox', () => {
     });
   });
 
-  it('shares the browser owner and reports rejected operations without dropping or reordering them', async () => {
+  it('shares the browser owner and reports quarantined operations while later work drains and explicit retry recovers the original', async () => {
     const storage = new MemoryStorage();
     const fetcher = vi.fn().mockResolvedValueOnce(new Response('', { status: 422 })).mockResolvedValue(Response.json({ ok: true }));
     const outbox = getBrowserPracticeSessionOutbox(fetcher, storage);
@@ -110,9 +156,11 @@ describe('automatic practice session outbox', () => {
     const stop = outbox.subscribe(status => states.push(status.phase));
     outbox.enqueueStart(start('status-a'));
     outbox.enqueueCompletion('status-a', finish());
-    await expect(outbox.flush()).rejects.toThrow('practice_session_422');
-    expect(outbox.getStatus()).toMatchObject({ pendingOperations: 2, phase: 'failed', failure: 'rejected', canRetry: false });
-    expect(outbox.pending().map(operation => operation.kind)).toEqual(['start', 'complete']);
+    await expect(outbox.flush()).resolves.toBe(1);
+    expect(outbox.getStatus()).toMatchObject({ pendingOperations: 1, phase: 'failed', failure: 'rejected', canRetry: false });
+    expect(outbox.pending()).toEqual([]);
+    expect(outbox.rejected().map(entry => entry.operation.kind)).toEqual(['start']);
+    expect(outbox.retryRejected('start:start-status-a')).toBe(true);
     await outbox.flush();
     expect(outbox.getStatus()).toMatchObject({ pendingOperations: 0, phase: 'idle', failure: null });
     expect(states).toContain('syncing');

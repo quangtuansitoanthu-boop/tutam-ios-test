@@ -17,11 +17,14 @@ public class ExternalLinksPlugin extends Plugin {
             call.reject("Invalid Play Store URL");
             return;
         }
-        getActivity().runOnUiThread(() -> {
+        final android.app.Activity activity = getBridge() == null ? null : getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
+        activity.runOnUiThread(() -> {
+            if (activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
             try {
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                 intent.setPackage("com.android.vending");
-                getActivity().startActivity(intent);
+                activity.startActivity(intent);
                 call.resolve();
             } catch (ActivityNotFoundException error) {
                 openBrowser(call);
@@ -35,11 +38,14 @@ public class ExternalLinksPlugin extends Plugin {
     public void openBrowser(PluginCall call) {
         String value = call.getString("url");
         Uri uri = value == null ? null : Uri.parse(value);
-        if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) {
+        if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getHost().isEmpty() || uri.getUserInfo() != null) {
             call.reject("Invalid HTTPS URL");
             return;
         }
-        getActivity().runOnUiThread(() -> {
+        final android.app.Activity activity = getBridge() == null ? null : getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
+        activity.runOnUiThread(() -> {
+            if (activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
             try {
                 Intent intent = new Intent(Intent.ACTION_VIEW, uri);
                 intent.addCategory(Intent.CATEGORY_BROWSABLE);
@@ -48,11 +54,11 @@ public class ExternalLinksPlugin extends Plugin {
                 selector.addCategory(Intent.CATEGORY_APP_BROWSER);
                 intent.setSelector(selector);
                 try {
-                    getActivity().startActivity(intent);
+                    activity.startActivity(intent);
                 } catch (ActivityNotFoundException selectorFallback) {
                     Intent fallback = new Intent(Intent.ACTION_VIEW, uri);
                     fallback.addCategory(Intent.CATEGORY_BROWSABLE);
-                    getActivity().startActivity(fallback);
+                    activity.startActivity(fallback);
                 }
                 call.resolve();
             } catch (RuntimeException error) {

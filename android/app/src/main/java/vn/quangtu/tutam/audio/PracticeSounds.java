@@ -41,9 +41,13 @@ final class PracticeSounds {
             next.setDataSource(asset.getFileDescriptor(), asset.getStartOffset(), asset.getLength());
             next.setLooping(true);
             next.setVolume(volume, volume);
-            next.setOnPreparedListener(player -> { if (ambient == player) { ambientPrepared = true; if (!suspended) player.start(); } });
+            next.setOnPreparedListener(player -> {
+                if (ambient != player) return;
+                ambientPrepared = true;
+                if (!suspended) resumeAmbient(player);
+            });
             next.setOnErrorListener((player, what, extra) -> {
-                if (ambient == player) { ambient = null; player.release(); }
+                releaseAmbient(player);
                 android.util.Log.w("PracticeSounds", "Ambient playback error: " + what);
                 return true;
             });
@@ -110,13 +114,40 @@ final class PracticeSounds {
     void suspend(boolean value) {
         suspended = value;
         if (value) stop("cue");
-        if (ambient != null && ambientPrepared) {
-            if (value) ambient.pause();
-            else ambient.start();
+        MediaPlayer player = ambient;
+        if (player != null && ambientPrepared) {
+            try { if (value) player.pause(); else player.start(); }
+            catch (IllegalStateException error) {
+                releaseAmbient(player);
+                android.util.Log.w("PracticeSounds", "Ambient playback unavailable", error);
+            }
         }
     }
 
-    void volume(float value) { if (ambient != null) ambient.setVolume(value, value); }
+    private void resumeAmbient(MediaPlayer player) {
+        try { player.start(); }
+        catch (IllegalStateException error) {
+            releaseAmbient(player);
+            android.util.Log.w("PracticeSounds", "Ambient playback unavailable", error);
+        }
+    }
+
+    private void releaseAmbient(MediaPlayer player) {
+        if (ambient != player) return;
+        ambient = null;
+        ambientPrepared = false;
+        player.release();
+    }
+
+    void volume(float value) {
+        MediaPlayer player = ambient;
+        if (player == null) return;
+        try { player.setVolume(value, value); }
+        catch (IllegalStateException error) {
+            releaseAmbient(player);
+            android.util.Log.w("PracticeSounds", "Ambient volume unavailable", error);
+        }
+    }
 
     private void beat() {
         MediaPlayer next = new MediaPlayer();
@@ -125,7 +156,14 @@ final class PracticeSounds {
             next.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build());
             next.setDataSource(asset.getFileDescriptor(), asset.getStartOffset(), asset.getLength());
             next.setVolume(0.8f, 0.8f);
-            next.setOnPreparedListener(player -> { if (beats.contains(player)) player.start(); });
+            next.setOnPreparedListener(player -> {
+                if (!beats.contains(player)) return;
+                try { player.start(); }
+                catch (IllegalStateException error) {
+                    if (beats.remove(player)) player.release();
+                    android.util.Log.w("PracticeSounds", "Wooden fish unavailable", error);
+                }
+            });
             next.setOnCompletionListener(player -> { if (beats.remove(player)) player.release(); });
             next.setOnErrorListener((player, what, extra) -> { if (beats.remove(player)) player.release(); return true; });
             next.prepareAsync();

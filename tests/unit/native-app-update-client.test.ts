@@ -78,6 +78,44 @@ it('checks once per iOS opening and ignores duplicate foreground events', async 
   expect(remove).toHaveBeenCalledTimes(2);
 });
 
+it.each(['ios', 'android'] as const)('reserves update priority on %s visibility before asynchronous native resume and dedupes both signals', async platform => {
+  mocks.platform.mockReturnValue(platform);
+  let visibilityState = 'visible';
+  const document = new EventTarget();
+  Object.defineProperty(document, 'visibilityState', { get: () => visibilityState });
+  vi.stubGlobal('document', document);
+  const onCheckingChange = vi.fn();
+  dispose = watchNativeAppUpdates(vi.fn(), onCheckingChange);
+  await vi.waitFor(() => expect(onCheckingChange).toHaveBeenLastCalledWith(false));
+  visibilityState = 'hidden';
+  document.dispatchEvent(new Event('visibilitychange'));
+  if (platform === 'ios') listeners.get('pause')?.();
+  else listeners.get('appStateChange')?.({ isActive: false });
+
+  // Permission listeners must already see the priority gate on this DOM event.
+  const permissionResume = vi.fn(() => onCheckingChange.mock.lastCall?.[0]);
+  document.addEventListener('visibilitychange', permissionResume);
+  visibilityState = 'visible';
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(permissionResume).toHaveReturnedWith(true);
+  if (platform === 'ios') listeners.get('resume')?.();
+  else listeners.get('appStateChange')?.({ isActive: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+  await vi.waitFor(() => expect(fetchPolicy).toHaveBeenCalledTimes(2));
+  expect(onCheckingChange.mock.calls.filter(([checking]) => checking)).toHaveLength(2);
+  expect(permissionResume).toHaveBeenCalledTimes(2);
+  document.removeEventListener('visibilitychange', permissionResume);
+  dispose();
+  dispose = undefined;
+  const callsBefore = onCheckingChange.mock.calls.length;
+  visibilityState = 'hidden';
+  document.dispatchEvent(new Event('visibilitychange'));
+  visibilityState = 'visible';
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(onCheckingChange).toHaveBeenCalledTimes(callsBefore);
+  expect(fetchPolicy).toHaveBeenCalledTimes(2);
+});
+
 it('keeps unlisted Android quiet and ignores the result from an opening that already ended', async () => {
   mocks.platform.mockReturnValue('android');
   let complete: ((response: Response) => void) | undefined;

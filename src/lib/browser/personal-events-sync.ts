@@ -56,6 +56,7 @@ function read(owner: string): StoredEvents {
   if (raw) {
     const parsed = JSON.parse(raw) as StoredEvents;
     if (parsed.version !== 2 || !Array.isArray(parsed.events) || !Array.isArray(parsed.base)) throw new Error('Invalid personal event storage');
+    if (parsed.status === 'syncing') parsed.status = parsed.remote ? 'conflict' : parsed.pending ? 'pending' : 'synced';
     return parsed;
   }
   // Keep legacy bytes intact. A login transfers the guest copy through the
@@ -140,7 +141,12 @@ export function loadPersonalEventData(strict = false): PersonalLunarEvent[] {
 }
 export function getPersonalEventsSyncStatus(): PersonalEventsSyncStatus {
   if (typeof localStorage === 'undefined') return 'local';
-  try { const owner = selectOwner(); return owner ? read(owner).status || 'local' : 'local'; } catch { return 'error'; }
+  try {
+    const owner = selectOwner();
+    if (!owner) return 'local';
+    if (inFlight.get(owner)?.generation === generation) return 'syncing';
+    return read(owner).status || 'local';
+  } catch { return 'error'; }
 }
 export function getPersonalEventsConflict(): { local: PersonalLunarEvent[]; remote: PersonalLunarEvent[] } | null {
   if (typeof localStorage === 'undefined') return null;
@@ -233,7 +239,10 @@ export async function syncPersonalEventData(events?: PersonalLunarEvent[]): Prom
   inFlight.set(owner, { generation: token, promise });
   try { await promise; }
   finally {
-    if (inFlight.get(owner)?.promise === promise) inFlight.delete(owner);
+    if (inFlight.get(owner)?.promise === promise) {
+      inFlight.delete(owner);
+      if (current(owner, token)) announce();
+    }
   }
 }
 async function flush(owner: string, token: number): Promise<void> {
@@ -255,7 +264,6 @@ async function flush(owner: string, token: number): Promise<void> {
       record = read(owner);
       if (!record.pending || record.remote) return;
       const init: RequestInit = { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify({ events: record.events, revision: record.revision, ownerId: owner }) };
-      write(owner, { ...record, status: 'syncing' });
       announce();
       const response = await fetchWithSessionRefresh('/api/personal-events', init);
       if (!current(owner, token)) return;

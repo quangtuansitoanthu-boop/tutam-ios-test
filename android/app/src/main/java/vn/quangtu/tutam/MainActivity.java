@@ -19,23 +19,42 @@ import com.getcapacitor.BridgeWebViewClient;
 import com.codetrixstudio.capacitor.GoogleAuth.GoogleAuth;
 
 public class MainActivity extends BridgeActivity {
+    private static final long STARTUP_MIN_READING_MS = 3000;
+    private static final long STARTUP_FADE_MS = 280;
+    private static final long STARTUP_FAILSAFE_MS = 30000;
     private android.widget.FrameLayout startupScreen;
     private final android.os.Handler startupHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private boolean startupReady;
-    private boolean startupArtworkDrawn;
-    private final Runnable startupTimeout = () -> removeStartupScreen();
+    private long earliestStartupFadeAt = -1;
+    private boolean entranceFinished;
+    private boolean startupDrawn;
+    private boolean awaitingStartupFrame;
+    private boolean initialStartupHandled;
+    private final Runnable dismissStartup = this::removeStartupScreen;
+    private final Runnable startupFailsafe = () -> removeStartupScreen(false);
 
     private void showStartupScreen() {
-        if (startupScreen != null) return;
+        if (startupScreen != null) {
+            // A second launcher can arrive after this cover painted but before it fades.
+            if (earliestStartupFadeAt >= 0) StartupActivity.finishBehindMain();
+            return;
+        }
         android.view.ViewGroup content = findViewById(android.R.id.content);
         if (content == null) return;
         Intent launch = getIntent();
-        int index = launch != null && launch.hasExtra(StartupArtworkView.EXTRA_INDEX)
+        boolean fromLauncher = launch != null && launch.hasExtra(StartupArtworkView.EXTRA_INDEX);
+        int index = fromLauncher
             ? launch.getIntExtra(StartupArtworkView.EXTRA_INDEX, 0) : StartupArtworkView.nextIndex(this);
         android.widget.FrameLayout artwork = StartupArtworkView.create(this, index);
         startupScreen = artwork;
-        startupArtworkDrawn = false;
+        earliestStartupFadeAt = -1;
+        entranceFinished = false;
+        startupDrawn = false;
+        awaitingStartupFrame = false;
         content.addView(artwork, new android.view.ViewGroup.LayoutParams(-1, -1));
+        WindowInsetsCompat rootInsets = ViewCompat.getRootWindowInsets(content);
+        if (rootInsets != null) ViewCompat.dispatchApplyWindowInsets(artwork, rootInsets);
+        ViewCompat.requestApplyInsets(artwork);
         // Retire the launcher only after its replacement has actually painted.
         // Finishing a separate launcher task during the fade can reveal Home.
         artwork.getViewTreeObserver().addOnDrawListener(new android.view.ViewTreeObserver.OnDrawListener() {
@@ -48,12 +67,54 @@ public class MainActivity extends BridgeActivity {
                     if (isDestroyed()) return;
                     StartupActivity.finishBehindMain();
                     if (startupScreen != artwork) return;
-                    startupArtworkDrawn = true;
-                    maybeDismissStartupScreen();
+                    startupDrawn = true;
+                    awaitReadableStartupFrame();
                 });
             }
         });
-        startupHandler.postDelayed(startupTimeout, 15000);
+        startupHandler.postDelayed(startupFailsafe, STARTUP_FAILSAFE_MS);
+    }
+
+    @Override public void onEnterAnimationComplete() {
+        super.onEnterAnimationComplete();
+        if (entranceFinished) return;
+        entranceFinished = true;
+        if (startupScreen != null) {
+            if (earliestStartupFadeAt >= 0) startupHandler.removeCallbacks(dismissStartup);
+            earliestStartupFadeAt = -1;
+            awaitReadableStartupFrame();
+        }
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) awaitReadableStartupFrame();
+        else if (startupScreen != null && earliestStartupFadeAt >= 0) {
+            startupHandler.removeCallbacks(dismissStartup);
+            earliestStartupFadeAt = -1;
+        }
+    }
+
+    private void awaitReadableStartupFrame() {
+        android.view.View screen = startupScreen;
+        if (!startupDrawn || screen == null || !screen.hasWindowFocus()
+            || earliestStartupFadeAt >= 0 || awaitingStartupFrame) return;
+        awaitingStartupFrame = true;
+        Runnable startReading = () -> {
+            if (screen != startupScreen) return;
+            awaitingStartupFrame = false;
+            if (!screen.hasWindowFocus()) return;
+            earliestStartupFadeAt = android.os.SystemClock.uptimeMillis() + STARTUP_MIN_READING_MS;
+            maybeDismissStartupScreen();
+        };
+        // OnDraw can precede the first foreground buffer by several frames during a cold launch.
+        // Let the compositor receive the artwork before starting the user's reading time.
+        if (android.os.Build.VERSION.SDK_INT >= 29 && screen.isHardwareAccelerated()) {
+            screen.getViewTreeObserver().registerFrameCommitCallback(() -> screen.postOnAnimation(startReading));
+            screen.invalidate();
+        } else {
+            screen.postOnAnimation(() -> screen.postOnAnimation(startReading));
+        }
     }
 
     public void finishStartupScreen() {
@@ -61,19 +122,44 @@ public class MainActivity extends BridgeActivity {
         maybeDismissStartupScreen();
     }
 
+    void setStartupLocale(String locale) {
+        StartupArtworkView.rememberLocale(this, locale);
+        HomeScreenShortcuts.publish(this, locale);
+        if (StartupArtworkView.updateLocale(startupScreen, locale)) {
+            // An upgrade may learn the app language after the artwork's first frame.
+            startupHandler.removeCallbacks(dismissStartup);
+            earliestStartupFadeAt = -1;
+            awaitReadableStartupFrame();
+        }
+    }
+
     private void maybeDismissStartupScreen() {
-        if (startupArtworkDrawn && startupReady) removeStartupScreen();
+        if (startupScreen == null || !startupReady || earliestStartupFadeAt < 0) return;
+        startupHandler.removeCallbacks(dismissStartup);
+        if (android.os.SystemClock.uptimeMillis() < earliestStartupFadeAt) {
+            startupHandler.postAtTime(dismissStartup, earliestStartupFadeAt);
+        } else {
+            removeStartupScreen();
+        }
     }
 
     private void removeStartupScreen() {
-        startupHandler.removeCallbacks(startupTimeout);
+        removeStartupScreen(true);
+    }
+
+    private void removeStartupScreen(boolean animate) {
+        startupHandler.removeCallbacks(dismissStartup);
+        startupHandler.removeCallbacks(startupFailsafe);
         android.widget.FrameLayout screen = startupScreen;
         startupScreen = null;
         if (screen == null) return;
-        screen.animate().alpha(0).setDuration(180).withEndAction(() -> {
+        StartupActivity.finishBehindMain();
+        Runnable detach = () -> {
             if (screen.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) screen.getParent()).removeView(screen);
             screen.removeAllViews();
-        }).start();
+        };
+        if (animate) screen.animate().alpha(0).setDuration(STARTUP_FADE_MS).withEndAction(detach).start();
+        else { screen.animate().cancel(); detach.run(); }
     }
 
     @Override
@@ -87,8 +173,10 @@ public class MainActivity extends BridgeActivity {
     protected void onNewIntent(Intent intent) {
         if (intent != null) setIntent(intent);
         super.onNewIntent(intent);
-        if (intent != null && intent.hasExtra(StartupArtworkView.EXTRA_INDEX)) {
-            showStartupScreen();
+        // Capacitor also dispatches the initial Intent here during super.onCreate().
+        if (initialStartupHandled && intent != null && intent.hasExtra(StartupArtworkView.EXTRA_INDEX)) {
+            if (startupReady) StartupActivity.finishBehindMain();
+            else showStartupScreen();
         }
     }
 
@@ -103,12 +191,14 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ImageExportPlugin.class);
         registerPlugin(ExternalLinksPlugin.class);
         registerPlugin(ScreenWakeLockPlugin.class);
+        registerPlugin(DivinationHistoryPlugin.class);
         registerPlugin(vn.quangtu.tutam.audio.DharmaAudioPlugin.class);
         registerPlugin(vn.quangtu.tutam.reminders.DurableRemindersPlugin.class);
         registerPlugin(vn.quangtu.tutam.widgets.BuddhistCalendarWidgetPlugin.class);
         registerPlugin(vn.quangtu.tutam.widgets.PracticeWidgetPlugin.class);
         super.onCreate(savedInstanceState);
         showStartupScreen();
+        initialStartupHandled = true;
         HomeScreenShortcuts.publish(this);
 
         try {
@@ -132,6 +222,8 @@ public class MainActivity extends BridgeActivity {
                 WebView webView = bridge.getWebView();
                 // Một owner tính cả bàn phím, tránh vừa bị che input vừa cộng inset hai lần.
                 ViewCompat.setOnApplyWindowInsetsListener(webView, (view, windowInsets) -> {
+                    // API 24–29 stops sibling dispatch after WebView consumes insets.
+                    if (startupScreen != null) ViewCompat.dispatchApplyWindowInsets(startupScreen, windowInsets);
                     Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()
                         | WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.ime());
                     android.view.ViewGroup.MarginLayoutParams margins =
@@ -146,6 +238,7 @@ public class MainActivity extends BridgeActivity {
                 ViewCompat.requestApplyInsets(webView);
                 webView.setBackgroundColor(android.graphics.Color.rgb(255, 250, 242));
                 android.webkit.WebSettings settings = webView.getSettings();
+                settings.setBuiltInZoomControls(false);
                 settings.setSupportZoom(false);
                 settings.setMediaPlaybackRequiresUserGesture(false);
                 settings.setDomStorageEnabled(true);
@@ -221,7 +314,7 @@ public class MainActivity extends BridgeActivity {
             }
 
             private String getMimeType(String path) {
-                String lower = path.toLowerCase();
+                String lower = path.toLowerCase(java.util.Locale.ROOT);
                 if (lower.endsWith(".mp4")) return "video/mp4";
                 if (lower.endsWith(".mp3")) return "audio/mpeg";
                 if (lower.endsWith(".m4a")) return "audio/mp4";
@@ -253,22 +346,25 @@ public class MainActivity extends BridgeActivity {
                         } else {
                             intent = new Intent(Intent.ACTION_VIEW, Uri.parse(rawUrl));
                         }
+                        String fallbackUrl = intent.getStringExtra("browser_fallback_url");
+                        intent.removeExtra("browser_fallback_url");
+                        intent = sanitizeExternalIntent(intent, getPackageName(), getString(R.string.custom_url_scheme));
                         if (intent != null) {
                             try {
                                 startActivity(intent);
                                 return true;
-                            } catch (ActivityNotFoundException ignored) {
-                                String fallbackUrl = intent.getStringExtra("browser_fallback_url");
-                                if (fallbackUrl != null) {
-                                    Intent fallbackIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(fallbackUrl));
-                                    startActivity(fallbackIntent);
-                                    return true;
-                                }
-                            }
+                            } catch (ActivityNotFoundException | SecurityException ignored) {}
+                        }
+                        Uri fallback = browserFallbackUri(fallbackUrl);
+                        if (fallback != null) {
+                            try {
+                                startActivity(new Intent(Intent.ACTION_VIEW, fallback).addCategory(Intent.CATEGORY_BROWSABLE));
+                            } catch (ActivityNotFoundException | SecurityException ignored) {}
                         }
                     } catch (Exception ignored) {
-                        return false;
+                        // Consume unsupported or malformed external schemes instead of loading them in WebView.
                     }
+                    return true;
                 }
                 return false;
             }
@@ -276,14 +372,38 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    static Intent sanitizeExternalIntent(Intent intent, String ownPackage, String ownScheme) {
+        if (intent == null) return null;
+        intent.setComponent(null);
+        intent.setSelector(null);
+        intent.setAction(Intent.ACTION_VIEW);
+        intent.addCategory(Intent.CATEGORY_BROWSABLE);
+        intent.setFlags(0);
+        intent.setClipData(null);
+        Uri data = intent.getData();
+        if (ownPackage.equals(intent.getPackage()) && (data == null || !ownScheme.equals(data.getScheme()))) return null;
+        return intent;
+    }
+
+    static Uri browserFallbackUri(String value) {
+        if (value == null) return null;
+        Uri uri = Uri.parse(value);
+        String scheme = uri.getScheme();
+        return ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+            && uri.getHost() != null && !uri.getHost().isEmpty() && uri.getUserInfo() == null ? uri : null;
+    }
+
     @com.getcapacitor.annotation.CapacitorPlugin(name = "ScreenWakeLock")
     public static class ScreenWakeLockPlugin extends com.getcapacitor.Plugin {
         @com.getcapacitor.PluginMethod
         public void setKeepScreenOn(com.getcapacitor.PluginCall call) {
             final boolean enabled = call.getBoolean("enabled", false);
-            getActivity().runOnUiThread(() -> {
+            final android.app.Activity activity = getBridge() == null ? null : getActivity();
+            if (activity == null || activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
+            activity.runOnUiThread(() -> {
+                if (activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
                 try {
-                    android.view.Window window = getActivity().getWindow();
+                    android.view.Window window = activity.getWindow();
                     if (window != null) {
                         if (enabled) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                         else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);

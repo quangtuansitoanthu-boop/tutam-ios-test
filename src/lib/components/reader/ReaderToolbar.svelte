@@ -114,10 +114,10 @@
 
   const backgroundOptions = $derived([
     { key: 'auto', label: t.bgAuto, color: 'var(--bg)', border: 'var(--border)' },
-    { key: 'white', label: t.bgWhite, color: '#fff', border: '#ccc' },
-    { key: 'cream', label: t.bgCream, color: '#f4ecd8', border: '#e0d8c8' },
-    { key: 'gray', label: t.bgGray, color: '#e8e8e8', border: '#ccc' },
-    { key: 'dark', label: t.bgDark, color: '#15120d', border: '#3a3226' },
+    { key: 'white', label: t.bgWhite, color: 'var(--reading-paper-white)', border: 'var(--reading-paper-white-border)' },
+    { key: 'cream', label: t.bgCream, color: 'var(--reading-paper-reader-cream)', border: 'var(--reading-paper-cream-border)' },
+    { key: 'gray', label: t.bgGray, color: 'var(--reading-paper-gray)', border: 'var(--reading-paper-gray-border)' },
+    { key: 'dark', label: t.bgDark, color: 'var(--reading-paper-dark)', border: 'var(--reading-paper-dark-border)' },
     { key: 'purple', label: t.bgPurple, color: 'var(--reading-paper-purple)', border: 'var(--reading-paper-purple-border)' },
   ]);
 
@@ -261,7 +261,7 @@
         class="action-button media-action-btn"
         class:active={mediaInfo.count === mediaInfo.total && mediaInfo.total > 0}
         type="button"
-        title={mediaInfo.type === 'video' ? 'Quản lý tải video ngoại tuyến' : 'Quản lý tải ảnh minh họa ngoại tuyến'}
+        title={mediaInfo.type === 'video' ? (localeStore.current === 'en' ? 'Manage offline video downloads' : 'Quản lý tải video ngoại tuyến') : (localeStore.current === 'en' ? 'Manage offline illustration downloads' : 'Quản lý tải ảnh minh họa ngoại tuyến')}
         onclick={mediaInfo.onOpenModal}
       >
         {#if mediaInfo.type === 'video'}

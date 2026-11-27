@@ -1,9 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { availableContent, availableContentResponse, blockedContentRequest, isContentAvailable } from '../../src/lib/browser/ios-content-policy';
+import { filterIosContent } from '../../src/lib/domain/ios-content-policy';
 
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => false, getPlatform: () => 'web' } }));
 afterEach(() => vi.unstubAllEnvs());
 describe('iOS content availability', () => {
+  it('filters availability string IDs and album play rows without changing the source snapshot', () => {
+    const snapshot = { ids: ['tt_1781529439696', 'book_tt_tro_ve_tu_xu_tuyet', 'kept'],
+      mtIds: ['tt_1781529533555', 'kept'], entries: [{ file: 'book_tt_1781529470187.json' }, { file: 'kept.json' }],
+      plays: [{ albumId: 'pt_1782208869321', playCount: 1 }, { albumId: 'kept', playCount: 2 }] };
+    const before = structuredClone(snapshot);
+    expect(filterIosContent(snapshot)).toEqual({ ids: ['kept'], mtIds: ['kept'], entries: [{ file: 'kept.json' }],
+      plays: [{ albumId: 'kept', playCount: 2 }] });
+    expect(snapshot).toEqual(before);
+  });
   it('preserves web data and responses', async () => {
     vi.stubEnv('VITE_CONTENT_PLATFORM', '');
     const rows = [{ id: 'tt_tro_ve_tu_xu_tuyet' }];

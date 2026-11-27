@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
+import { deferStartupNotification, settleClient, useNativeApiWithLocalBackend } from './runtime-helpers';
 
 test.afterEach(async ({ page }, info) => {
   if (info.title === 'reconnecting flushes the existing completed session once without refreshing the user session') {
@@ -41,6 +41,7 @@ test('a failed durable start does not advance beads and the next tap retries aft
 });
 
 test('reconnecting flushes the existing completed session once without refreshing the user session', async ({ page, baseURL }) => {
+  await deferStartupNotification(page);
   await useNativeApiWithLocalBackend(page);
   const headers = { 'access-control-allow-origin': new URL(baseURL || 'http://localhost:8787').origin, 'access-control-allow-credentials': 'true' };
   const session = {

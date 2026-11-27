@@ -37,6 +37,24 @@ const pendingReceipt: MindfulPostReceipt = {
   isOwn: true, status: 'hidden', reviewState: 'pending', reviewDueAt: '2026-11-23T09:00:00.000Z',
   createdAt: '2026-11-21T09:00:00.000Z', reactionCount: 0, viewerReacted: false,
 };
+
+it('keeps the community nickname with the current journal owner across visits', async () => {
+  const first = createPersonalPracticeStorage(localStorage, 'journal-first');
+  const second = createPersonalPracticeStorage(localStorage, 'journal-second');
+  const input = () => document.querySelector<HTMLInputElement>('.meta-field--nickname input')!;
+  await readyJournal(first);
+  fill(input(), 'Đồng Tu');
+  input().dispatchEvent(new Event('change', { bubbles: true }));
+  expect(first.getNickname()).toBe('Đồng Tu');
+  await unmount(component!);
+  localStorage.setItem('tt_last_community_nickname', 'Biệt danh cũ trên máy');
+  await readyJournal(second);
+  expect(input().value).toBe('');
+  expect(second.getNickname()).toBe('');
+  await unmount(component!);
+  await readyJournal(first);
+  expect(input().value).toBe('Đồng Tu');
+});
 async function confirmShare() {
   [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Gửi cộng đồng sám hối')!.click();
   await settle();
@@ -51,16 +69,40 @@ it('uploads only after confirmation and shows an authoritative pending receipt w
   fill(document.querySelector('textarea')!, 'từ '.repeat(50));
   [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Gửi cộng đồng sám hối')!.click(); await settle();
   expect(share).not.toHaveBeenCalled();
+  expect(alertInApp).not.toHaveBeenCalled();
   const confirmation = document.querySelector('.practice-confirm')!;
   expect(confirmation.textContent).toContain('duyệt trong 48 giờ');
   expect(confirmation.textContent).toContain('Tài khoản có thể bị khóa vĩnh viễn.');
   expect(document.getElementById(confirmation.getAttribute('aria-describedby')!)?.textContent).toContain('duyệt trong 48 giờ');
   document.querySelector<HTMLButtonElement>('.practice-confirm__primary')!.click(); await settle();
   expect(share).toHaveBeenCalledExactlyOnceWith('repentance', pendingReceipt.content, 'Đồng Tu');
-  expect(document.querySelector('.reflection-review-notice[data-review-state=pending] time[datetime="2026-11-23T09:00:00.000Z"]')).not.toBeNull();
-  expect(document.querySelector('[role=status]')?.textContent).toContain('Đang chờ xét duyệt');
-  expect(document.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('từ '.repeat(50));
+  expect(alertInApp).toHaveBeenCalledExactlyOnceWith('Đã gửi bài, vui lòng chờ quản trị viên duyệt trong 48 giờ !');
+  const notices = document.querySelectorAll('.reflection-review-notice[data-review-state=pending]');
+  expect(notices).toHaveLength(1);
+  const notice = notices[0];
+  expect(notice.textContent).toContain('Đã gửi bài · Chờ duyệt');
+  const details = notice.querySelector('button')!;
+  expect(details.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(details);
+  expect(notice.querySelector('time')).toBeNull();
+  details.click(); await settle();
+  expect(notice.querySelector('time[datetime="2026-11-23T09:00:00.000Z"]')).not.toBeNull();
+  details.click(); await settle();
+  expect(notice.querySelector('time')).toBeNull();
+  expect(alertInApp).toHaveBeenCalledTimes(1);
+  expect(document.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('');
   expect(owner.getReflections()[0].repentance).toBe('từ '.repeat(50));
+});
+
+it('ignores a pending receipt that arrives after leaving the journal', async () => {
+  const owner = storage(); owner.saveNickname('Đồng Tu');
+  let accept!: (receipt: MindfulPostReceipt) => void;
+  await readyJournal(owner, () => new Promise(resolve => { accept = resolve; }));
+  fill(document.querySelector('textarea')!, 'từ '.repeat(50));
+  await confirmShare();
+  await unmount(component!); component = undefined;
+  accept(pendingReceipt); await settle();
+  expect(alertInApp).not.toHaveBeenCalled();
 });
 
 it('prevents a duplicate pending submission but allows an edited draft and the other kind', async () => {
@@ -72,6 +114,9 @@ it('prevents a duplicate pending submission but allows an edited draft and the o
   const fields = document.querySelectorAll<HTMLTextAreaElement>('.journal-columns textarea');
   fill(fields[0], 'từ '.repeat(50)); await confirmShare();
   const sendButton = document.querySelectorAll<HTMLButtonElement>('.journal-columns .actions button')[1];
+  expect(fields[0].value).toBe('');
+  expect(sendButton.disabled).toBe(true);
+  fill(fields[0], `  ${'từ '.repeat(50).normalize('NFD')} `); await settle();
   expect(sendButton.disabled).toBe(true);
   expect(sendButton.textContent?.trim()).toBe('Đang chờ duyệt');
   // A stale enabled DOM control still must not reopen the same accepted intent.
@@ -79,8 +124,6 @@ it('prevents a duplicate pending submission but allows an edited draft and the o
   expect(document.querySelector('.practice-confirm')).toBeNull();
   expect(share).toHaveBeenCalledTimes(1);
   sendButton.disabled = true;
-  fill(fields[0], `  ${'từ '.repeat(50).normalize('NFD')} `); await settle();
-  expect(sendButton.disabled).toBe(true);
   fill(fields[1], 'Thiện '.repeat(50));
   const goodButton = document.querySelectorAll<HTMLButtonElement>('.journal-columns .actions button')[3];
   expect(goodButton.disabled).toBe(false);
@@ -94,15 +137,31 @@ it('prevents a duplicate pending submission but allows an edited draft and the o
   expect(owner.getReflections()[0].repentance).toBe(edited);
 });
 
-it.each(['legacy', 'published'] as const)('keeps the send action available after a %s accepted response', async mode => {
+it.each([undefined, 'approved'] as const)('clears confirmed published posts with review state %s and accepts a new draft', async reviewState => {
   const owner = storage(); owner.saveNickname('Đồng Tu');
-  const share = vi.fn(async (): Promise<MindfulPostReceipt | void> => mode === 'published'
-    ? { ...pendingReceipt, status: 'published', reviewState: 'approved' } : undefined);
+  const share = vi.fn(async (): Promise<MindfulPostReceipt> => ({ ...pendingReceipt, status: 'published', reviewState }));
   await readyJournal(owner, share);
-  fill(document.querySelector('textarea')!, 'từ '.repeat(50)); await confirmShare();
+  const editor = document.querySelector('textarea')!;
+  fill(editor, 'từ '.repeat(50)); await confirmShare();
   const button = document.querySelectorAll<HTMLButtonElement>('.journal-columns .actions button')[1];
+  expect(editor.value).toBe('');
+  expect(button.disabled).toBe(true);
+  expect(document.querySelector('[role=status]')?.textContent).toContain('Đã chia sẻ lên cộng đồng');
+  expect(alertInApp).not.toHaveBeenCalled();
+  expect(owner.getReflections()[0].repentance).toBe('từ '.repeat(50));
+  fill(editor, 'Mới '.repeat(50));
   expect(button.disabled).toBe(false);
   expect(button.textContent?.trim()).toBe('Gửi cộng đồng sám hối');
+});
+
+it('keeps a draft without claiming success when the callback returns no receipt', async () => {
+  const owner = storage(); owner.saveNickname('Đồng Tu');
+  await readyJournal(owner, async () => undefined);
+  const editor = document.querySelector('textarea')!;
+  fill(editor, 'từ '.repeat(50)); await confirmShare();
+  expect(editor.value).toBe('từ '.repeat(50));
+  expect(document.querySelector('[role=status]')?.textContent).toContain('Chưa gửi được bài');
+  expect(alertInApp).not.toHaveBeenCalled();
 });
 
 it.each([

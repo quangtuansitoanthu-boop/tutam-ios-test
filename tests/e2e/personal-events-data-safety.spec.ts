@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { solarToLunar } from '../../src/lib/components/lunar/lunar-calendar';
+import { deferStartupNotification } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 test('personal event date-only draft survives reopen and calendar tabs preserve the chosen date', async ({ page }) => {
   await page.clock.setFixedTime(new Date(2026, 10, 6, 10));
@@ -100,6 +103,7 @@ test('keeps failed anniversary writes, retries with CSRF, and isolates the next 
   await page.locator('.personal-add-first-btn').click();
   await page.locator('#pem-input-title').fill('Kỷ niệm riêng của A');
   await page.locator('.pem-form button[type="submit"]').click();
+  await page.getByRole('dialog', { name: 'Đã thêm ngày lễ cá nhân', exact: true }).getByRole('button', { name: 'Đóng', exact: true }).click();
   await expect(page.locator('.pem-list')).toContainText('Kỷ niệm riêng của A');
   await expect(page.locator('.pem-dialog')).toContainText('Chưa đồng bộ được');
   expect(writes).toHaveLength(1);

@@ -434,17 +434,23 @@
 
       // 1. Ghi nhận lịch sử thỉnh ngầm (không await để tránh làm chậm điều hướng)
       if (session.authenticated && session.user?.id) {
-        void fetchWithSessionRefresh('/api/phap-bao/claim', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': 'public' },
-          body: JSON.stringify({
-            itemId: items.find((i) => i.link_shopee === shopeeUrl)?.id || items[0]?.id || null,
-            itemTitle: isEn ? 'Buddhist Scriptures & Dharma Treasures (Shopee fee 5,000₫ · Free items 0₫)' : 'Ấn Phẩm Kinh & Pháp Bảo (Phí sàn 5.000đ · Pháp bảo 0đ)',
-            itemLoai: 'hon_hop',
-            danhHieu: isEn ? (targetTitleConfig.displayNameEn || targetTitleConfig.displayName) : targetTitleConfig.displayName,
-            shopeeUrl
-          })
-        }).catch(() => {});
+        const principal = session.user.id;
+        void (async () => {
+          const csrf = await requireBrowserCsrf();
+          if (!session.authenticated || session.user?.id !== principal) return;
+          const response = await fetchWithSessionRefresh('/api/phap-bao/claim', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({
+              itemId: items.find((i) => i.link_shopee === shopeeUrl)?.id || items[0]?.id || null,
+              itemTitle: isEn ? 'Buddhist Scriptures & Dharma Treasures (Shopee fee 5,000₫ · Free items 0₫)' : 'Ấn Phẩm Kinh & Pháp Bảo (Phí sàn 5.000đ · Pháp bảo 0đ)',
+              itemLoai: 'hon_hop',
+              danhHieu: isEn ? (targetTitleConfig.displayNameEn || targetTitleConfig.displayName) : targetTitleConfig.displayName,
+              shopeeUrl
+            })
+          });
+          if (!response.ok) throw new Error('phap-bao-claim-unavailable');
+        })().catch(() => { console.warn('phap-bao-claim-unavailable'); });
       }
 
       // Xoá bản nháp sau khi chuyển sang link Shopee
@@ -1308,9 +1314,10 @@
   .pb-header {
     background: var(--bg2);
     border-bottom: 1px solid var(--border2);
-    padding: 0 20px;
-    height: 56px;
-    min-height: 56px;
+    box-sizing: border-box;
+    padding: var(--app-safe-top,env(safe-area-inset-top,0px)) max(20px,env(safe-area-inset-right,0px)) 0 max(20px,env(safe-area-inset-left,0px));
+    height: calc(56px + var(--app-safe-top,env(safe-area-inset-top,0px)));
+    min-height: calc(56px + var(--app-safe-top,env(safe-area-inset-top,0px)));
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -1975,8 +1982,8 @@
   }
   .pb-congrats-badge {
     display: inline-block;
-    background: linear-gradient(135deg, var(--gold), var(--brown));
-    color: #fff;
+    background: linear-gradient(135deg, var(--gold), var(--gold2));
+    color: var(--on-gold);
     font-size: 11px;
     font-weight: 800;
     padding: 3px 12px;
@@ -2406,7 +2413,7 @@
       display: none;
     }
     .pb-header {
-      padding: max(10px, env(safe-area-inset-top)) 14px 10px;
+      padding: calc(10px + var(--app-safe-top,env(safe-area-inset-top,0px))) max(14px,env(safe-area-inset-right,0px)) 10px max(14px,env(safe-area-inset-left,0px));
       height: auto;
       min-height: 48px;
     }
@@ -2553,4 +2560,5 @@
     background: var(--gold);
     color: #1a140a;
   }
+  .pb-header :is(.pb-btn-header-action,.pb-close-btn){min-width:var(--touch-target-size);min-height:var(--touch-target-size)}
 </style>

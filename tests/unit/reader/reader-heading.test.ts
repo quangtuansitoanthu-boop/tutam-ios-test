@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { startsWithReaderHeading } from '../../../src/lib/browser/reader-heading';
+import { renderReaderContent } from '../../../src/lib/components/reader/content-renderer';
 
 describe('duplicate reader chapter banner', () => {
   it('suppresses only the extra banner, leaving canonical rendered content mounted', () => {
@@ -36,5 +37,16 @@ describe('duplicate reader chapter banner', () => {
   it('suppresses duplicate banner when banner title has numeric prefix but source heading omits it', () => {
     expect(startsWithReaderHeading('<p style="text-align:center"><strong>THIẾU NIÊN BẤT LƯƠNG</strong></p><p>Nội dung</p>', '03. THIẾU NIÊN BẤT LƯƠNG')).toBe(true);
     expect(startsWithReaderHeading('<p>Lời người dịch</p><p>Cuốn sách này...</p>', '01. Lời người dịch')).toBe(true);
+  });
+  it('recognizes tt-content__line centered heading and story-prefixed chapter titles (Sứ Mệnh Độ Vong)', () => {
+    const introHtml = renderReaderContent('{align:center|**MỞ ĐẦU**}\n\nMỞ ĐẦU\nTôi tên là Đỗ Chân Đức.');
+    expect(startsWithReaderHeading(introHtml, 'MỞ ĐẦU')).toBe(true);
+    expect(introHtml.match(/MỞ ĐẦU/gu)?.length).toBe(1);
+
+    const ch1Html = renderReaderContent('{align:center|**ĂN CỨT 10 NĂM**}\nNgười đời thường nói.');
+    expect(startsWithReaderHeading(ch1Html, 'Câu chuyện 1: ĂN CỨT 10 NĂM')).toBe(true);
+
+    const enCh1Html = renderReaderContent('{align:center|**STORY 1: TEN YEARS OF TORMENT**}\nPeople often say.');
+    expect(startsWithReaderHeading(enCh1Html, 'Story 1: Ten Years of Torment')).toBe(true);
   });
 });

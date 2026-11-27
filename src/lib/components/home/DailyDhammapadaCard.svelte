@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { watchCalendarDay } from '$lib/browser/calendar-day-rollover';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
   import {
     getTodayDharmaQuote,
@@ -17,6 +19,14 @@
   let copied = $state(false);
   let quoteImageOpen = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  onMount(() => {
+    const stopDay = watchCalendarDay(today => { quote = getTodayDharmaQuote(today); });
+    return () => {
+      stopDay();
+      if (copyTimer) clearTimeout(copyTimer);
+    };
+  });
 
   function shuffleQuote(): void {
     triggerHaptic('light');

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsMember } from './runtime-helpers';
+import { deferStartupNotification, loginAsMember } from './runtime-helpers';
 
 const variations = [
   { days: 0, badges: [], selectedBadge: null, title: null, avatarBadge: null },
@@ -13,6 +13,7 @@ for (const { days, badges, selectedBadge, title, avatarBadge } of variations) {
   test(`account shows practice rank for ${days} days (${selectedBadge ?? 'automatic'})`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 375, height: 844 });
     await page.addInitScript(() => localStorage.setItem('tutam_locale', 'vi'));
+    await deferStartupNotification(page);
     await loginAsMember(page);
     let progressReads = 0;
     await page.route('**/api/practice/progress', route => {
@@ -74,7 +75,7 @@ for (const { days, badges, selectedBadge, title, avatarBadge } of variations) {
       await expect(rank).toHaveCount(0);
       await expect(award).toHaveCount(0);
     }
-    await page.locator('.cn-subpage-back-btn').click();
+    await page.getByRole('navigation', { name: 'Tu Tập Phật Pháp', exact: true }).getByRole('button', { name: 'Quay lại', exact: true }).click();
     await account.click();
     await expect(page.getByText('e2e-member@example.com', { exact: false })).toBeVisible();
     if (title) await expect(rank).toHaveText(title);

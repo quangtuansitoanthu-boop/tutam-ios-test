@@ -10,7 +10,9 @@ export interface PendingArticleView {
   timestamp: number;
 }
 
-let isFlushing = false;
+const MAX_VIEWS_PER_FLUSH = 10;
+const FLUSH_COOLDOWN_MS = 30_000;
+const flushStates = new WeakMap<Storage, { isFlushing: boolean; nextFlushAt: number }>();
 let removeListeners: (() => void) | null = null;
 
 function getStorage(): Storage | null {
@@ -78,8 +80,8 @@ async function sendViewRequest(articleId: string): Promise<number | null | undef
 
   if (!response || !response.ok) return null;
   const payload = await response.json().catch(() => ({}));
-  const count = Number(payload?.so_luot);
-  return Number.isFinite(count) ? count : null;
+  const count: unknown = payload?.so_luot;
+  return typeof count === 'number' && Number.isFinite(count) && count >= 0 ? count : null;
 }
 
 /**
@@ -87,8 +89,12 @@ async function sendViewRequest(articleId: string): Promise<number | null | undef
  */
 export async function flushPendingArticleViews(): Promise<number> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return 0;
-  if (isFlushing) return 0;
-  isFlushing = true;
+  const storage = getStorage();
+  if (!storage) return 0;
+  let state = flushStates.get(storage);
+  if (!state) { state = { isFlushing: false, nextFlushAt: 0 }; flushStates.set(storage, state); }
+  if (state.isFlushing || Date.now() < state.nextFlushAt) return 0;
+  state.isFlushing = true;
 
   let successCount = 0;
   try {
@@ -97,7 +103,7 @@ export async function flushPendingArticleViews(): Promise<number> {
 
     const acknowledged = new Set<string>();
     let failedId: string | null = null;
-    for (const item of queue) {
+    for (const item of queue.slice(0, MAX_VIEWS_PER_FLUSH)) {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         break;
       }
@@ -111,6 +117,9 @@ export async function flushPendingArticleViews(): Promise<number> {
       acknowledged.add(item.id);
       successCount++;
     }
+    if (failedId !== null || successCount === MAX_VIEWS_PER_FLUSH && queue.length > successCount) {
+      state.nextFlushAt = Date.now() + FLUSH_COOLDOWN_MS;
+    }
     // Đọc lại hàng đợi để không xóa lượt xem mới được thêm trong lúc chờ mạng.
     if (acknowledged.size || failedId !== null) {
       const remaining = readPendingViews().filter(item => !acknowledged.has(item.id));
@@ -121,7 +130,7 @@ export async function flushPendingArticleViews(): Promise<number> {
       ]);
     }
   } finally {
-    isFlushing = false;
+    state.isFlushing = false;
   }
   return successCount;
 }

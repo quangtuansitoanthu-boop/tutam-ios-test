@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { NativeTalkAudio, cacheNativeTalk, nativeTalkUrl, type NativeAudioState } from '../../../src/lib/browser/native-talk-audio';
+import { NativeTalkAudio, cacheNativeTalk, evictNativeTalkCache, nativeTalkUrl, type NativeAudioState } from '../../../src/lib/browser/native-talk-audio';
 
 const album = { id: 'talks', title: 'Pháp thoại', description: 'Quang Từ', tracks: [
   { title: 'Bài một', url: 'https://media.quangtu.vn/one.mp3' },
@@ -26,6 +26,33 @@ beforeEach(() => {
   };
 });
 afterEach(() => vi.unstubAllGlobals());
+
+it('orders native eviction after an existing write and before a replacement download of the same key', async () => {
+  let releaseWrite!: () => void;
+  const order: string[] = [];
+  const cache = { cacheStatus: vi.fn(async () => ({ bytes: 0 })), cacheChunk: vi.fn(async () => {
+    order.push('write');
+    if (order.length === 1) await new Promise<void>(resolve => { releaseWrite = resolve; });
+  }) };
+  const eviction = { evictCache: vi.fn(async () => { order.push('evict'); }) };
+  const key = album.tracks[0].url;
+  const first = cacheNativeTalk(key, new Blob(['first']), cache);
+  await vi.waitFor(() => expect(releaseWrite).toBeTypeOf('function'));
+  const removing = evictNativeTalkCache([key, key], () => true, eviction);
+  const next = cacheNativeTalk(key, new Blob(['next']), cache);
+  expect(eviction.evictCache).not.toHaveBeenCalled();
+  releaseWrite();
+  await Promise.all([first, removing, next]);
+  expect(order).toEqual(['write', 'evict', 'write']);
+  expect(eviction.evictCache).toHaveBeenCalledWith({ keys: [key] });
+});
+
+it('does not evict cache for a stale principal or hide a native I/O failure', async () => {
+  const eviction = { evictCache: vi.fn(async () => { throw new Error('disk failure'); }) };
+  await expect(evictNativeTalkCache([album.tracks[0].url], () => false, eviction)).rejects.toMatchObject({ name: 'AbortError' });
+  expect(eviction.evictCache).not.toHaveBeenCalled();
+  await expect(evictNativeTalkCache([album.tracks[0].url], () => true, eviction)).rejects.toThrow('disk failure');
+});
 
 it('gives Android the entire playlist and restores the selected position', async () => {
   const audio = new NativeTalkAudio(plugin);

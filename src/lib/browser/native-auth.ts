@@ -8,6 +8,7 @@ import type { PageSessionDTO } from '$lib/server/auth/types';
 import { APPLE_SIGN_IN_UNAVAILABLE, GOOGLE_IOS_CONFIGURATION_REQUIRED, SESSION_VERIFICATION_UNAVAILABLE } from '$lib/i18n/native-auth';
 import { detectDeviceLocale } from '$lib/stores/locale.svelte';
 import type { SignInWithApplePlugin } from '@capacitor-community/apple-sign-in';
+import nativeGoogleConfig from '$lib/contracts/native-google-auth.json';
 
 // Web Client ID: chỉ dùng cho serverClientId/verify idToken.
 // Android phải dùng Android OAuth Client (SHA-1 + package vn.quangtu.tutam),
@@ -16,7 +17,9 @@ const GOOGLE_WEB_CLIENT_ID =
   '18472854734-2hpib1tghifb2li4s42vqaqvthfbn1jp.apps.googleusercontent.com';
 
 function nativeGoogleClientId(): string {
-  return nativePlatform() === 'ios' ? String(import.meta.env.VITE_GOOGLE_IOS_CLIENT_ID ?? '').trim() : GOOGLE_WEB_CLIENT_ID;
+  return nativePlatform() === 'ios'
+    ? String(import.meta.env.VITE_GOOGLE_IOS_CLIENT_ID ?? '').trim() || nativeGoogleConfig.iosClientId
+    : GOOGLE_WEB_CLIENT_ID;
 }
 
 function isGoogleLoginCancelled(error: unknown): boolean {

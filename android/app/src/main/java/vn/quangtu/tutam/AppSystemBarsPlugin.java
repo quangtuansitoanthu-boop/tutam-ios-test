@@ -24,7 +24,9 @@ public class AppSystemBarsPlugin extends Plugin {
 
     @PluginMethod
     public void getAppearance(PluginCall call) {
-        call.resolve(appearance(getActivity().getResources().getConfiguration()));
+        final android.app.Activity activity = getBridge() == null ? null : getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
+        call.resolve(appearance(activity.getResources().getConfiguration()));
     }
 
     private void publishAppearance(Configuration configuration) {
@@ -42,15 +44,19 @@ public class AppSystemBarsPlugin extends Plugin {
 
     @Override
     protected void handleOnResume() {
-        publishAppearance(getActivity().getResources().getConfiguration());
+        final android.app.Activity activity = getBridge() == null ? null : getActivity();
+        if (activity != null && !activity.isFinishing() && !activity.isDestroyed()) publishAppearance(activity.getResources().getConfiguration());
     }
 
     @PluginMethod
     public void setFullscreen(PluginCall call) {
         final boolean enabled = call.getBoolean("enabled", false);
-        getActivity().runOnUiThread(() -> {
+        final android.app.Activity activity = getBridge() == null ? null : getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
+        activity.runOnUiThread(() -> {
+            if (activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
             try {
-                android.view.Window window = getActivity().getWindow();
+                android.view.Window window = activity.getWindow();
                 WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
                 // Giữ owner inset của MainActivity; chỉ ẩn/hiện thanh trạng thái.
                 if (enabled) controller.hide(WindowInsetsCompat.Type.statusBars());
@@ -73,11 +79,14 @@ public class AppSystemBarsPlugin extends Plugin {
             call.reject("Invalid system bar background color");
             return;
         }
-        getActivity().runOnUiThread(() -> {
+        final androidx.appcompat.app.AppCompatActivity activity = getBridge() == null ? null : getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
+        activity.runOnUiThread(() -> {
+            if (activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable"); return; }
             try {
-                android.view.Window window = getActivity().getWindow();
+                android.view.Window window = activity.getWindow();
                 SystemBarStyle style = dark ? SystemBarStyle.dark(background) : SystemBarStyle.light(background, background);
-                EdgeToEdge.enable(getActivity(), style, style);
+                EdgeToEdge.enable(activity, style, style);
                 WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
                 controller.setAppearanceLightStatusBars(!dark);
                 controller.setAppearanceLightNavigationBars(!dark);

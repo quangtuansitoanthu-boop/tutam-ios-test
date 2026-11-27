@@ -33,12 +33,13 @@ describe('public Buddha profiles', () => {
   });
 
   it.each([
-    ['ty-lo-gia-na', 'name-benefits', 'đảnh lễ câu: Nam mô Thanh Tịnh Pháp Thân Tỳ Lô Xá Na Phật'],
-    ['hu-khong-tang', 'name-recitation-benefits', 'xưng niệm tôn danh: Nam mô Đại Bi Hư Không Tạng Bồ Tát'],
+    ['ty-lo-gia-na', 'name-benefits', 'đảnh lễ câu: Nam Mô Thanh Tịnh Pháp Thân Tỳ Lô Giá Na Phật'],
+    ['hu-khong-tang', 'name-recitation-benefits', 'xưng niệm tôn danh: Nam Mô Đại Bi Hư Không Tạng Bồ Tát'],
   ])('introduces the instructed recitation with Nam mô while preserving the full name: %s', (id, sectionId, formula) => {
     const paragraphs = getBuddhaProfile(id)!.sections.find(section => section.id === sectionId)!.paragraphs;
     expect(paragraphs[0]).toContain(formula);
     expect(paragraphs.join(' ')).not.toContain('Nam mô Nam mô');
+    expect(paragraphs.join(' ')).not.toContain('Nam Mô Nam Mô');
   });
 
   it('preserves all ten Samantabhadra practices and their full canonical explanations from the existing library', () => {
@@ -146,5 +147,39 @@ describe('public Buddha profiles', () => {
     expect(section.paragraphs[0]).toContain('HT Thích Trí Quảng biên soạn');
     expect(section.paragraphs[0]).not.toContain('Trí Tịnh');
     for (const vow of vows) expect(vow.length).toBeGreaterThan(100);
+  });
+
+  it('standardizes terminology, fixes typos, aligns Maitreya naming, and removes unverified miracle-book citations', () => {
+    const diLacCard = buddhas.find(buddha => buddha.id === 'di-lac')!;
+    const diLacProfile = getBuddhaProfile('di-lac')!;
+    expect(diLacCard.name).toBe('Bồ Tát Di Lặc');
+    expect(diLacProfile.name).toBe('Bồ Tát Di Lặc');
+
+    const serialized = JSON.stringify(profiles);
+    expect(serialized).not.toContain('Bồ-tát');
+    expect(serialized).not.toContain('dâm tâm');
+    expect(serialized).not.toContain('tiều tụy tiều tụy');
+    expect(serialized).not.toContain('Gyō状');
+    expect(serialized).not.toContain('(C)');
+
+    const unverifiedTitles = [
+      'Dược Sư Cảm Ứng Dị Thảo',
+      'Dược Sư Diên Thọ Cảm Ứng Lục',
+      'Kinh Quán Dược Vương Dược Thượng Cảm Ứng Lục',
+      'Quán Âm Từ Hỷ Cảm Ứng Ký',
+      'Dược Sư Linh Cảm Ký',
+    ];
+    for (const title of unverifiedTitles) {
+      expect(serialized).not.toContain(title);
+    }
+
+    for (const profile of profiles) {
+      const stories = profile.sections.find(section => section.id === 'su-tich-cam-ung')!;
+      expect(stories.paragraphs.length).toBeGreaterThanOrEqual(3);
+      expect(profile.references.length).toBeGreaterThanOrEqual(4);
+      for (const section of profile.sections) {
+        expect(section.paragraphs.length).toBeGreaterThanOrEqual(3);
+      }
+    }
   });
 });

@@ -22,31 +22,22 @@ function foldVietnameseWord(word: string): string {
   return word.normalize('NFD').replace(/\p{M}/gu, '').replace(/[đĐ]/gu, 'd').toLowerCase();
 }
 
-function hasVietnameseDiacritic(word: string): boolean {
-  const nfd = word.normalize('NFD');
-  return /\p{M}/u.test(nfd) || /[đĐ]/u.test(word);
-}
-
 /**
- * Reconciles user-typed name copying text against the canonical phrase.
- * Completed words (followed by whitespace, or on explicit commit) whose base letters
- * match the target word snap to canonical uppercase Vietnamese. While still typing the
- * last word without trailing space, plain ASCII stays untouched so Telex/VNI tone keys
- * can complete naturally; once a Vietnamese diacritic is typed (even the wrong tone),
- * a matching final word snaps immediately.
+ * Khớp từ đã chốt với danh hiệu mẫu; giữ nguyên âm tiết đang nhập để bộ gõ
+ * Telex/VNI còn hoàn thiện dấu. Từ cuối chỉ tự chốt khi đủ đúng dấu và thanh,
+ * hoặc khi người dùng xác nhận bằng khoảng trắng/Enter/Tab/blur.
  */
 export function reconcileNameCopyingInput(
   phrase: NameCopyingPhrase,
   incoming: string,
   commit = false
 ): string {
-  const upper = incoming.normalize('NFC').toLocaleUpperCase('vi-VN');
-  if (!upper.trim()) return upper;
+  if (!incoming.trim()) return incoming;
 
   const targetWords = phrase.normalize('NFC').trim().split(/\s+/u).map((w) => w.toLocaleUpperCase('vi-VN'));
-  const hasTrailingSpace = /\s$/u.test(upper);
-  const trimmedStart = upper.trimStart();
-  const leadingSpace = upper.slice(0, upper.length - trimmedStart.length);
+  const hasTrailingSpace = /\s$/u.test(incoming);
+  const trimmedStart = incoming.trimStart();
+  const leadingSpace = incoming.slice(0, incoming.length - trimmedStart.length);
   const tokens = trimmedStart.trimEnd().split(/(\s+)/u);
 
   let wordIdx = 0;
@@ -60,7 +51,9 @@ export function reconcileNameCopyingInput(
     const isLastTypedWord = idx === wordCount - 1;
     const isCompletedWord = !isLastTypedWord || hasTrailingSpace || commit;
     if (foldVietnameseWord(token) !== foldVietnameseWord(targetWord)) return token;
-    if (isCompletedWord || (isLastTypedWord && idx === targetWords.length - 1 && hasVietnameseDiacritic(token))) {
+    const exactFinalWord = isLastTypedWord && idx === targetWords.length - 1
+      && token.normalize('NFC').toLocaleUpperCase('vi-VN') === targetWord;
+    if (isCompletedWord || exactFinalWord) {
       return targetWord;
     }
     return token;

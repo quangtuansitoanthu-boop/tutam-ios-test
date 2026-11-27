@@ -16,7 +16,14 @@ final class HomeScreenShortcuts {
     private HomeScreenShortcuts() {}
 
     static void publish(Context context) {
+        publish(context, null);
+    }
+
+    static void publish(Context context, String locale) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) return;
+        context = locale == null
+            ? vn.quangtu.tutam.widgets.PracticeWidgetProvider.localizedContext(context)
+            : vn.quangtu.tutam.widgets.PracticeWidgetProvider.localizedContext(context, locale);
         ShortcutManager manager = context.getSystemService(ShortcutManager.class);
         if (manager == null) return;
 

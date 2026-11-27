@@ -34,8 +34,8 @@ afterEach(async () => {
   if (scrollIntoView) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', scrollIntoView);
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
 });
-async function setup(target: string | null = null, reaction: string | null = null) {
-  component = mount(Harness, { target: document.body, props: { client, target, reaction } }); await settle();
+async function setup(target: string | null = null, reaction: string | null = null, canModerate = false) {
+  component = mount(Harness, { target: document.body, props: { client, target, reaction, canModerate } }); await settle();
 }
 function click(selector: string) { document.querySelector<HTMLButtonElement>(selector)!.click(); }
 
@@ -169,7 +169,7 @@ it('removes deleted post context and inbox entries after cancelling a delayed in
   const inbox = { pages: [{ principal: 'A', enabled: true, items: [event], nextCursor: null }], pageParams: [null] };
   client.setQueryData(serverStateKeys.mindfulCommunity.posts('A', 'mine'), { pages: [{ enabled: true, items: [post()], nextCursor: null }], pageParams: [null] });
   client.setQueryData(inboxKey, inbox);
-  await setup('p', event.id);
+  await setup('p', event.id, true);
   await vi.waitFor(() => expect(document.querySelector('.target-post')).not.toBeNull());
   let finish!: (value: typeof inbox) => void;
   let signal!: AbortSignal;

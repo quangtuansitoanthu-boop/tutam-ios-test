@@ -498,6 +498,7 @@ public class BuddhistCalendarWidgetProvider extends AppWidgetProvider {
             }
         }
         AlarmManager alarms = context.getSystemService(AlarmManager.class);
+        if (alarms == null) return;
         PendingIntent tick = PendingIntent.getBroadcast(context, 1510301,
             new Intent(context, BuddhistCalendarWidgetProvider.class).setAction(TICK), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         if (!active) { alarms.cancel(tick); return; }
@@ -512,10 +513,12 @@ public class BuddhistCalendarWidgetProvider extends AppWidgetProvider {
     @Override public void onAppWidgetOptionsChanged(Context context, AppWidgetManager manager, int id, Bundle options) { update(context, manager, id, getClass(), readCalendar(context)); }
     @Override public void onDeleted(Context context, int[] ids) { updateAll(context); }
     @Override public void onReceive(Context context, Intent intent) {
+        if (intent == null) return;
         super.onReceive(context, intent);
         String action = intent.getAction();
         if (TICK.equals(action) || Intent.ACTION_BOOT_COMPLETED.equals(action) || Intent.ACTION_DATE_CHANGED.equals(action)
             || Intent.ACTION_TIME_CHANGED.equals(action) || Intent.ACTION_TIMEZONE_CHANGED.equals(action)
-            || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action) || Intent.ACTION_CONFIGURATION_CHANGED.equals(action)) updateAll(context);
+            || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action) || Intent.ACTION_CONFIGURATION_CHANGED.equals(action)
+            || Intent.ACTION_LOCALE_CHANGED.equals(action)) updateAll(context);
     }
 }

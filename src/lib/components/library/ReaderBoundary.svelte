@@ -5,7 +5,7 @@
   import { hasPreservedOfflinePdf } from '$lib/browser/pdf-book-transition';
   import { acquireScrollLock } from '$lib/browser/scroll-lock';
   let releaseBodyScroll: (() => void) | null = null;
-  import { fetchEnglishChapters } from '$lib/browser/english-pack';
+  import { fetchEnglishChapters, loadEnglishSingleArticleContent } from '$lib/browser/english-pack';
   import { createReaderProgressSync } from '$lib/browser/reader-progress-sync';
   import { fallbackReaderMedia } from '$lib/browser/public-media-fallback';
   import { onDestroy, onMount, tick, untrack } from 'svelte';
@@ -71,7 +71,8 @@
     ENGLISH_TRANSLATION_NOTICE,
     prepareLocalizedReadingContent,
     localizeChapterTitle,
-    offlineBooksEn
+    offlineBooksEn,
+    resolveVietnameseArticleTitle
   } from '$lib/domain/library/localized-article';
 
   interface Chapter { id:string; tieu_de:string; tom_tat:string; noi_dung:string; so_thu_tu:number; contentLoaded?:boolean; }
@@ -208,20 +209,29 @@
   const filteredChapters = $derived.by(() => {
     const q = tocSearch.trim().toLowerCase();
     const entries = chapters.map((chapter, index) => ({ chapter, index }));
-    if (article?.id?.replace(/^book_/u, '') === 'tuyen-tap-phap-facebook-quang-tu') {
+    const videoFirst = article?.id?.replace(/^book_/u, '') === 'tuyen-tap-phap-facebook-quang-tu';
+    if (videoFirst) {
       // Only the table of contents is reordered. Reader navigation keeps the original chapter index.
       entries.sort((a, b) => Number(hasChapterVideo(b.chapter)) - Number(hasChapterVideo(a.chapter)));
+      // Đặt bài mới ở mục 20 mà vẫn giữ chỉ số của các liên kết cũ.
+      const chapterTwentyIndex = entries.findIndex(({ chapter }) => String(chapter.id) === '14532');
+      if (chapterTwentyIndex > 19) {
+        const [chapterTwenty] = entries.splice(chapterTwentyIndex, 1);
+        entries.splice(19, 0, chapterTwenty);
+      }
     }
-    if (!q) return entries;
+    // Số hiển thị theo mục lục đã sắp xếp, index gốc dành cho liên kết và tiến độ.
+    const numberedEntries = entries.map((entry, position) => ({ ...entry, displayNumber: position + 1 }));
+    if (!q) return numberedEntries;
     const isVideoFilter = q === 'video' || q === 'có video';
-    return entries
-      .filter(({ chapter, index }) => {
+    return numberedEntries
+      .filter(({ chapter, index, displayNumber }) => {
         if (!chapter) return false;
         if (isVideoFilter && hasChapterVideo(chapter)) return true;
         const chapTitle = getChapterTitle(chapter, index);
         const titleMatch = (chapter.tieu_de || '').toLowerCase().includes(q) || chapTitle.toLowerCase().includes(q);
         const summaryMatch = chapter.tom_tat ? chapter.tom_tat.toLowerCase().includes(q) : false;
-        const numberMatch = String(index + 1) === q || String(chapter.so_thu_tu ?? '') === q;
+        const numberMatch = String(displayNumber) === q || (!videoFirst && String(chapter.so_thu_tu ?? '') === q);
         return titleMatch || summaryMatch || numberMatch;
       });
   });
@@ -245,15 +255,9 @@
     }
     if (targetArticle.hasTableOfContents || targetArticle.volumeCount > 0) return;
     try {
-      const res = await fetch('/offline-data/articles-en.json');
-      if (res.ok && !isHtmlResponse(res)) {
-        const map = await res.json();
-        if (request === singleArticleEnglishRequest && generation === articleGeneration && article?.id === targetArticle.id && localeStore.current === 'en') {
-          const item = map[targetArticle.id] || map[targetArticle.id.replace(/^book_/u, '')] || map[`book_${targetArticle.id}`];
-          if (item?.noi_dung) {
-            singleArticleEnContent = item.noi_dung;
-          }
-        }
+      const content = await loadEnglishSingleArticleContent(targetArticle.id);
+      if (content && request === singleArticleEnglishRequest && generation === articleGeneration && article?.id === targetArticle.id && localeStore.current === 'en') {
+        singleArticleEnContent = content;
       }
     } catch {}
   }
@@ -264,6 +268,7 @@
       : ((localeStore.current === 'en' && singleArticleEnContent) ? singleArticleEnContent : (article?.content || ''))
   );
   let bookImageUrls = $state(new Map<string, string>());
+  // URL video do ReaderVideoDownload sở hữu và thu hồi; map này chỉ tham chiếu.
   let quangTuVideoBlobUrls = $state(new Map<string, string>());
   const optionalBookImages = $derived(isMissionBook(article?.id));
   const isQuangTuBook = $derived(isQuangTuFacebookBook(article?.id));
@@ -308,12 +313,6 @@
     }
     if (optionalBookImages) {
       cachedMissionCount = await cachedMissionImageCount();
-      if (cachedMissionCount > 0) {
-        try {
-          const sources = missionImageSources(renderedContent);
-          bookImageUrls = await readMissionImageUrls(sources);
-        } catch {}
-      }
     }
     // Tự động hiển thị hộp thoại hỏi tải media trong lần đọc đầu tiên nếu chưa tải đủ
     if (article?.id) {
@@ -334,21 +333,37 @@
     }
   });
 
+  function clearBookImageUrls(): void {
+    revokeMissionImageUrls(bookImageUrls);
+    bookImageUrls = new Map();
+  }
+
   $effect(() => {
-    if (optionalBookImages && cachedMissionCount > 0) {
+    let stale = false;
+    if (article?.id && optionalBookImages && cachedMissionCount > 0) {
       const sources = missionImageSources(renderedContent);
       if (sources.length > 0) {
-        let stale = false;
         void readMissionImageUrls(sources).then((urls) => {
-          if (!stale && urls.size > 0) {
-            bookImageUrls = urls;
+          if (stale) {
+            revokeMissionImageUrls(urls);
+            return;
           }
+          clearBookImageUrls();
+          bookImageUrls = urls;
         }).catch(() => {});
-        return () => {
-          stale = true;
-        };
       }
     }
+    return () => {
+      stale = true;
+      clearBookImageUrls();
+    };
+  });
+
+  $effect(() => {
+    const articleId = article?.id;
+    return () => {
+      if (articleId) quangTuVideoBlobUrls = new Map();
+    };
   });
 
   async function handleMediaModalDownloadAll(): Promise<void> {
@@ -390,8 +405,8 @@
         quangTuVideoBlobUrls = new Map();
         await clearAllQuangTuVideos();
       } else if (optionalBookImages) {
-        bookImageUrls.clear();
-        bookImageUrls = new Map();
+        cachedMissionCount = 0;
+        clearBookImageUrls();
         await clearMissionImagesCache();
       }
       await refreshMediaStats();
@@ -448,7 +463,7 @@
   const localizedBookTitle = $derived(
     localeStore.current === 'en' && article
       ? (getEnglishBookMeta(article.id)?.title || article.title)
-      : (article?.originalTitle || (article ? getCanonicalVietnameseArticle(article.id)?.title : null) || article?.title || '')
+      : (article ? resolveVietnameseArticleTitle(article.id, article.title, article.originalTitle) : '')
   );
   const localizedAuthor = $derived(
     localeStore.current === 'en' && article
@@ -654,10 +669,13 @@
     } finally { if(request===speechRequest)preparingSpeech=false; }
   }
   function stopAutoScroll(){if(autoFrame!==null)cancelAnimationFrame(autoFrame);autoFrame=null;autoFrameTime=0;autoScrollActive=false}
+  function handleReaderVisibilityChange(): void {
+    if (document.visibilityState === 'hidden') stopAutoScroll();
+  }
   function autoScrollFrame(time:number){
     if(!autoScrollActive||!scrollArea)return stopAutoScroll();
     if(scrollArea.scrollTop+scrollArea.clientHeight>=scrollArea.scrollHeight-1)return stopAutoScroll();
-    if(autoFrameTime)scrollArea.scrollTop+=autoScrollSpeed*((time-autoFrameTime)/16.667);
+    if(autoFrameTime)scrollArea.scrollTop+=autoScrollSpeed*(Math.min(100,Math.max(0,time-autoFrameTime))/16.667);
     autoFrameTime=time;
     autoFrame=requestAnimationFrame(autoScrollFrame);
   }
@@ -723,7 +741,7 @@
     }
     close();
   }
-  function fallbackCopy(value:string){const textArea=document.createElement('textarea');textArea.value=value;textArea.style.position='fixed';textArea.style.top='0';textArea.style.left='0';document.body.appendChild(textArea);textArea.focus();textArea.select();try{notify(document.execCommand('copy')?'Đã copy link bài viết!':'Trình duyệt không hỗ trợ copy tự động')}catch{notify(localizeUi('Lỗi khi copy link!'))}finally{textArea.remove()}}
+  function fallbackCopy(value:string){const textArea=document.createElement('textarea');textArea.value=value;textArea.style.position='fixed';textArea.style.top='0';textArea.style.left='0';document.body.appendChild(textArea);textArea.focus();textArea.select();try{notify(document.execCommand('copy')?localizeUi('Đã copy link bài viết!'):localizeUi('Trình duyệt không hỗ trợ copy tự động'))}catch{notify(localizeUi('Lỗi khi copy link!'))}finally{textArea.remove()}}
   function getShareUrl(): string {
     if (!article) return typeof location !== 'undefined' ? location.href : '';
     return resolvePublicUrl(`/?article=${encodeURIComponent(article.id)}`);
@@ -858,6 +876,13 @@
     chaptersReady=false;
     loadingChapters=Boolean(targetArticle.hasTableOfContents||targetArticle.volumeCount>0);
     void loadSingleArticleEnglish(targetArticle, generation);
+    if (!targetArticle.hasTableOfContents && targetArticle.volumeCount <= 0 && targetArticle.content?.trim()) {
+      chapters = [];
+      loadingChapters = false;
+      chaptersReady = true;
+      await applyPendingTextResume(targetArticle, generation);
+      return;
+    }
     try{
       const endpoint = `/api/articles/${encodeURIComponent(targetArticle.id)}/chapters?order=so_thu_tu.asc&limit=5000`;
       let payload: unknown = [];
@@ -1031,7 +1056,7 @@
               id: `${targetArticle.id}_chap_${idx + 1}`,
               bai_viet_id: targetArticle.id,
               so_thu_tu: idx,
-              tieu_de: typeof item === 'string' ? item : item?.tieu_de || `Chương ${idx + 1}`,
+              tieu_de: typeof item === 'string' ? item : item?.tieu_de || (localeStore.current === 'en' ? `Chapter ${idx + 1}` : `Chương ${idx + 1}`),
               tom_tat: typeof item === 'object' && item ? item.tom_tat || '' : '',
               noi_dung: typeof item === 'object' && item ? item.noi_dung || '' : ''
             }));
@@ -1336,7 +1361,7 @@
     if(scrollArea){scrollArea.scrollTop=0;scrollArea.scrollLeft=0}
   }
 
-  $effect(()=>{const activeArticle=article;if(!activeArticle)return;const generation=++articleGeneration;untrack(()=>{prepareQuoteNavigation();previousFocus=document.activeElement as HTMLElement;fontSize=Math.min(45,Math.max(13,Number(localStorage.getItem('tutam_read_fontsize')||15)||15));bold=localStorage.getItem('tutam_read_bold')==='1';fontFamily=localStorage.getItem('tutam_read_font')||'bookerly';lineHeight=Number(localStorage.getItem('tutam_read_line_height')||1.9)||1.9;textAlign=(localStorage.getItem('tutam_read_align')==='left'?'left':'justify');ttsSpeed=Number(localStorage.getItem('tutam_read_tts_speed')||1)||1;ttsVoice=localStorage.getItem('tutam_read_tts_voice')||'female';ttsController.setRate(ttsSpeed);ttsController.setVoice(ttsVoice);zenMode=false;zenScrollLastY=0;const isDark=isDarkThemeActive();background=getResolvedBackground(isDark);autoScrollSpeed=Number(localStorage.getItem('tutam_auto_scroll_speed')||0.5);const bookmark=bookmarkAdapter().find(activeArticle.id);bookmarked=Boolean(bookmark);pendingBookmarkResume=(activeArticle.pdfUrl&&!(activeArticle.hasTableOfContents||activeArticle.volumeCount>0))?null:bookmark;const cachedRow=initialTextProgress??readingClient?.cachedProgress().find((row)=>row.contentId===activeArticle.id&&(row.contentKind==='book'||row.contentKind==='article'||row.contentKind==='practice'))??null;pendingProgressResume=cachedRow;progressRevision=cachedRow?cachedRow.revision:0;progressLoadSettled=Boolean(cachedRow);progressReadyForPrincipal=false;chapters=[];chaptersReady=false;chapterIndex=null;showTocModal=false;lastReadChapterIndex=null;tocSearch='';viewCount=activeArticle.viewCount??null;stopAutoScroll();stopTts();if(scrollArea){scrollArea.scrollTop=0;scrollArea.scrollLeft=0}releaseBodyScroll ??= acquireScrollLock();void initializeReadingFormat(activeArticle,generation);void registerView(activeArticle.id).then((count)=>{if(count!==null&&generation===articleGeneration&&article?.id===activeArticle.id)viewCount=count}).catch(()=>{});tick().then(()=>{if(generation===articleGeneration)dialog?.focus()})});return()=>{progressWriter.flush();if(generation===articleGeneration)articleGeneration+=1;releaseBodyScroll?.(); releaseBodyScroll = null;}});
+  $effect(()=>{const activeArticle=article;if(!activeArticle)return;const generation=++articleGeneration;untrack(()=>{prepareQuoteNavigation();previousFocus=document.activeElement as HTMLElement;fontSize=Math.min(45,Math.max(13,Number(localStorage.getItem('tutam_read_fontsize')||15)||15));bold=localStorage.getItem('tutam_read_bold')==='1';fontFamily=localStorage.getItem('tutam_read_font')||'bookerly';lineHeight=Number(localStorage.getItem('tutam_read_line_height')||1.9)||1.9;textAlign=(localStorage.getItem('tutam_read_align')==='left'?'left':'justify');ttsSpeed=Number(localStorage.getItem('tutam_read_tts_speed')||1)||1;ttsVoice=localStorage.getItem('tutam_read_tts_voice')||'female';ttsController.setRate(ttsSpeed);ttsController.setVoice(ttsVoice);zenMode=false;zenScrollLastY=0;const isDark=isDarkThemeActive();background=getResolvedBackground(isDark);autoScrollSpeed=Number(localStorage.getItem('tutam_auto_scroll_speed')||0.5);const bookmark=bookmarkAdapter().find(activeArticle.id);bookmarked=Boolean(bookmark);pendingBookmarkResume=(activeArticle.pdfUrl&&!(activeArticle.hasTableOfContents||activeArticle.volumeCount>0))?null:bookmark;const cachedRow=initialTextProgress??readingClient?.cachedProgress().find((row)=>row.contentId===activeArticle.id&&(row.contentKind==='book'||row.contentKind==='article'||row.contentKind==='practice'))??null;pendingProgressResume=cachedRow;progressRevision=cachedRow?cachedRow.revision:0;progressLoadSettled=Boolean(cachedRow);progressReadyForPrincipal=false;chapters=[];chaptersReady=false;chapterIndex=null;showTocModal=false;lastReadChapterIndex=null;tocSearch='';viewCount=activeArticle.viewCount??null;stopAutoScroll();stopTts();if(scrollArea){scrollArea.scrollTop=0;scrollArea.scrollLeft=0}releaseBodyScroll ??= acquireScrollLock();void initializeReadingFormat(activeArticle,generation);void registerView(activeArticle.id).then((count)=>{if(count!==null&&generation===articleGeneration&&article?.id===activeArticle.id)viewCount=count}).catch(()=>{});tick().then(()=>{if(generation===articleGeneration)dialog?.focus()})});return()=>{stopAutoScroll();progressWriter.flush();if(generation===articleGeneration)articleGeneration+=1;releaseBodyScroll?.(); releaseBodyScroll = null;}});
 
   $effect(() => {
     if (typeof document === 'undefined') return;
@@ -1442,28 +1467,31 @@
       }
     };
     const onReaderBack = (event: Event) => {
+      if (!article) return;
       event.preventDefault();
       back();
     };
     window.addEventListener('quangtu:reader-back', onReaderBack);
+    document.addEventListener('visibilitychange', handleReaderVisibilityChange);
     window.addEventListener('popstate', onReaderPopState);
     window.addEventListener('quangtu:login-modal-state',updateLoginModalState);
     window.addEventListener(SESSION_CHANGE_EVENT,updateSession);
     return()=>{
       window.removeEventListener('quangtu:reader-back', onReaderBack);
+      document.removeEventListener('visibilitychange', handleReaderVisibilityChange);
       window.removeEventListener('popstate', onReaderPopState);
       window.removeEventListener('quangtu:login-modal-state',updateLoginModalState);
       window.removeEventListener('quangtu:offline-pdf-changed', updateDownloadedReadingFormat);window.removeEventListener(SESSION_CHANGE_EVENT,updateSession);
     };
   });
-  onDestroy(()=>{progressWriter.flush();progressSync.flush();principalGuard.invalidate();void readingClient?.flush().catch(()=>{});ttsController.destroy();if(toastTimer)clearTimeout(toastTimer);if(toastFrame!==null)cancelAnimationFrame(toastFrame)});
+  onDestroy(()=>{stopAutoScroll();clearBookImageUrls();progressWriter.flush();progressSync.flush();principalGuard.invalidate();void readingClient?.flush().catch(()=>{});ttsController.destroy();if(toastTimer)clearTimeout(toastTimer);if(toastFrame!==null)cancelAnimationFrame(toastFrame)});
 </script>
 
 <svelte:window onkeydown={keydown} />
 {#if article}
   <div class="reader-overlay" role="presentation" inert={loginModalOpen} aria-hidden={loginModalOpen ? 'true' : undefined} onclick={(event)=>{if(event.target===event.currentTarget&&!loginModalOpen)close()}}>
     <div use:nativeSystemBarsSurface class={`reader-modal bg-${background}`} class:zen-mode={zenMode} class:pdf-reader={showPdf} role="dialog" aria-modal={loginModalOpen || lightboxSource ? 'false' : 'true'} aria-label={currentChapter?.tieu_de || article.title} tabindex="-1" bind:this={dialog} inert={loginModalOpen || Boolean(lightboxSource)} aria-hidden={loginModalOpen || lightboxSource ? 'true' : undefined}>
-      {#if bookmarked}<button class="bookmark-ribbon" type="button" aria-label="Đi tới vị trí đã đánh dấu" title="Nhấn để đến vị trí đã đánh dấu" onclick={()=>void goToBookmark()}>
+      {#if bookmarked}<button class="bookmark-ribbon" type="button" aria-label={localizeUi('Đi tới vị trí đã đánh dấu')} title={localizeUi('Nhấn để đến vị trí đã đánh dấu')} onclick={()=>void goToBookmark()}>
         <svg width="30" height="58" viewBox="0 0 30 58" aria-hidden="true">
           <defs><linearGradient id="reader-bookmark-gradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d9a23c"/><stop offset="1" stop-color="#edbd58"/></linearGradient></defs>
           <path d="M0 0h30v58L15 48 0 58z" fill="url(#reader-bookmark-gradient)"/>
@@ -1656,9 +1684,9 @@
                   {#if filteredChapters.length === 0}
                     <p class="toc-empty">{t.reader.tocNoMatch.replace('{q}', tocSearch)}</p>
                   {:else}
-                    {#each filteredChapters as { chapter, index }}
+                    {#each filteredChapters as { chapter, index, displayNumber } (index)}
                       <button class="toc-item" class:is-active={index === lastReadChapterIndex} type="button" onclick={()=>void openChapter(index)}>
-                        <span class="toc-number" class:active-num={index === lastReadChapterIndex}>{index+1}</span>
+                        <span class="toc-number" class:active-num={index === lastReadChapterIndex}>{displayNumber}</span>
                         <span class="toc-text">
                           <span class="toc-title-row">
                             <strong>{getChapterTitle(chapter, index)}</strong>
@@ -1666,7 +1694,7 @@
                               <span class="toc-active-badge">{t.reader.tocReading}</span>
                             {/if}
                             {#if hasChapterVideo(chapter)}
-                              <span class="toc-video-badge" title="Bài pháp có video kèm theo">
+                              <span class="toc-video-badge" title={localeStore.current === 'en' ? 'Teaching with video' : 'Bài pháp có video kèm theo'}>
                                 <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                                   <path d="M4 5a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2v-3.333l3.414 1.707A1 1 0 0023 14.472V9.528a1 1 0 00-1.586-.895L18 10.333V7a2 2 0 00-2-2H4zm10 2v10H4V7h10z" />
                                 </svg>
@@ -1841,7 +1869,7 @@
               {#if filteredChapters.length === 0}
                 <p class="toc-empty">{t.reader.tocNoMatch.replace('{q}', tocSearch)}</p>
               {:else}
-                {#each filteredChapters as { chapter, index }}
+                {#each filteredChapters as { chapter, index, displayNumber } (index)}
                   <button
                     class="toc-modal-item"
                     class:is-active={chapterIndex === index}
@@ -1851,7 +1879,7 @@
                       void openChapter(index);
                     }}
                   >
-                    <span class="toc-modal-num" class:active-num={chapterIndex === index}>{index + 1}</span>
+                    <span class="toc-modal-num" class:active-num={chapterIndex === index}>{displayNumber}</span>
                     <div class="toc-modal-text">
                       <div class="toc-modal-item-title">
                         <strong>{getChapterTitle(chapter, index)}</strong>
@@ -1920,7 +1948,7 @@
   .reader-modal.bg-dark{--bg:#15120d;--bg2:#1c1813;--bg3:#241e17;--card:#15120d;--text:#ede8df;--text2:#cfc8be;--muted:#8e8477;--border:#3a3227;--border2:#28221a;--gold:#d4a84b;--gold-light:#221c13;--gold-muted:#3a2e1d;--brown:#f5eedf;background:#15120d;color:#ede8df}
 
   /* Compact, unified top navigation header */
-  .reader-top-bar{position:relative;z-index:25;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;width:100%;min-height:50px;height:50px;padding:0 14px;background:var(--bg2);border-bottom:1px solid var(--border2);transition:transform .24s cubic-bezier(.4,0,.2,1),opacity .24s ease,max-height .24s ease,border-color .24s ease}
+  .reader-top-bar{position:relative;z-index:25;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;width:100%;min-height:50px;height:50px;padding:0 max(14px,env(safe-area-inset-right,0px)) 0 max(14px,env(safe-area-inset-left,0px));background:var(--bg2);border-bottom:1px solid var(--border2);transition:transform .24s cubic-bezier(.4,0,.2,1),opacity .24s ease,max-height .24s ease,border-color .24s ease}
   .reader-modal.zen-mode .reader-top-bar{transform:translateY(-100%);opacity:0;pointer-events:none;max-height:0!important;min-height:0!important;padding-top:0!important;padding-bottom:0!important;border-bottom-width:0!important;border-bottom-color:transparent!important;overflow:hidden!important;margin:0!important}
   .reader-top-left{display:inline-flex;align-items:center;gap:8px;flex-shrink:0}
   .reader-back{display:inline-flex;align-items:center;gap:8px;min-height:36px;height:36px;padding:0 16px 0 12px;border:1px solid color-mix(in srgb,var(--gold) 20%,transparent);border-radius:18px;background:color-mix(in srgb,var(--gold) 9%,transparent);color:var(--gold);cursor:pointer;font:inherit;font-size:15px;font-weight:700;text-align:left;transition:background-color .15s,color .15s,transform .12s}
@@ -2087,9 +2115,9 @@
   /* Ultra-optimized mobile header and reader space with Safe Area Inset support */
   @media(max-width:768px){
     .reader-top-bar{
-      min-height: calc(48px + env(safe-area-inset-top, 0px));
-      height: calc(48px + env(safe-area-inset-top, 0px));
-      padding: env(safe-area-inset-top, 0px) max(env(safe-area-inset-right, 0px), 12px) 0 max(env(safe-area-inset-left, 0px), 12px);
+      min-height: calc(48px + var(--app-safe-top,env(safe-area-inset-top,0px)));
+      height: calc(48px + var(--app-safe-top,env(safe-area-inset-top,0px)));
+      padding: var(--app-safe-top,env(safe-area-inset-top,0px)) max(env(safe-area-inset-right, 0px), 12px) 0 max(env(safe-area-inset-left, 0px), 12px);
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -2186,7 +2214,7 @@
   /* TOC Modal Bottom Sheet / Drawer */
   .toc-modal-backdrop{position:absolute;inset:0;z-index:90;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);animation:tocFadeIn .2s ease-out}
   @keyframes tocFadeIn{from{opacity:0}to{opacity:1}}
-  .toc-modal-sheet{display:flex;flex-direction:column;width:100%;max-width:680px;max-height:85vh;height:80vh;border-radius:20px 20px 0 0;border:1px solid var(--dialog-surface-border,var(--border));background:var(--dialog-surface-background,var(--card));box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));overflow:hidden;animation:tocSlideUp .24s cubic-bezier(.16,1,.3,1)}
+  .toc-modal-sheet{display:flex;flex-direction:column;width:100%;max-width:680px;max-height:85vh;max-height:85dvh;height:80vh;height:80dvh;border-radius:20px 20px 0 0;border:1px solid var(--dialog-surface-border,var(--border));background:var(--dialog-surface-background,var(--card));box-shadow:var(--dialog-surface-shadow,var(--shadow-xl));overflow:hidden;animation:tocSlideUp .24s cubic-bezier(.16,1,.3,1)}
   @keyframes tocSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
   .toc-modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;border-bottom:1px solid var(--border2);background:transparent}
   .toc-modal-title{display:flex;align-items:center;gap:10px}
@@ -2199,7 +2227,7 @@
   .toc-modal-input{width:100%;height:var(--touch-target-size);padding:0 44px 0 14px;border:1.5px solid var(--border);border-radius:999px;background:var(--bg);color:var(--text);font:inherit;font-size:16px;outline:none;transition:border-color .15s}
   .toc-modal-input:focus{border-color:var(--gold)}
   .toc-modal-clear{position:absolute;right:16px;top:50%;transform:translateY(-50%);width:var(--touch-target-size);height:var(--touch-target-size);display:grid;place-items:center;border:0;background:transparent;color:var(--muted);font-size:16px;font-weight:700;cursor:pointer}
-  .toc-modal-list{flex:1;overflow-y:auto;padding:8px 12px;overscroll-behavior:contain;display:flex;flex-direction:column;gap:3px}
+  .toc-modal-list{flex:1;overflow-y:auto;padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));overscroll-behavior:contain;display:flex;flex-direction:column;gap:3px}
   .toc-modal-item{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:0;border-radius:10px;background:transparent;color:var(--text);text-align:left;cursor:pointer;transition:background .15s}
   .toc-modal-item:hover{background:color-mix(in srgb,var(--gold) 10%,transparent)}
   .toc-modal-item.is-active{background:color-mix(in srgb,var(--gold) 18%,transparent)!important;outline:1.5px solid var(--gold)}
@@ -2394,7 +2422,7 @@
     .reader-top-actions{min-width:0;flex-shrink:1;justify-content:flex-start;overflow-x:auto;overscroll-behavior-x:contain}
   }
   @media(max-width:380px){
-    .reader-top-bar{padding:env(safe-area-inset-top,0px) max(env(safe-area-inset-right,0px),8px) 0 max(env(safe-area-inset-left,0px),8px)}
+    .reader-top-bar{padding:var(--app-safe-top,env(safe-area-inset-top,0px)) max(env(safe-area-inset-right,0px),8px) 0 max(env(safe-area-inset-left,0px),8px)}
   }
   @media(max-width:768px){
     .reader-top-bar{flex-wrap:nowrap;gap:calc(var(--dialog-action-gap)/2)}
@@ -2424,4 +2452,123 @@
     --dialog-glass-background:color-mix(in srgb,var(--card) 78%,transparent);
     --dialog-glass-border:color-mix(in srgb,var(--card) 70%,var(--border));
   }
+
+  /* Phong cách 3D Pha lê gọn gàng cho giao diện Đọc sách (giữ nguyên mặt giấy đọc văn bản) */
+  .reader-modal .reader-top-bar{
+    background:linear-gradient(180deg,rgba(255,255,255,.45) 0%,rgba(255,255,255,0) 65%),var(--bg2);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.68),0 3px 10px -4px rgba(60,40,10,.14);
+  }
+  .reader-modal.bg-dark .reader-top-bar{
+    background:linear-gradient(180deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,0) 65%),var(--bg2);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 4px 12px rgba(0,0,0,.45);
+  }
+  .reader-modal :is(.reader-back,.reader-top-font-group,.reader-top-font-select-wrap,.reader-top-speak-btn:not(.active),.reader-top-scroll-btn:not(.active),.reader-top-bookmark-btn:not(.active)){
+    border:1px solid color-mix(in srgb,var(--border) 55%,rgba(255,255,255,.85));
+    background:linear-gradient(180deg,rgba(255,255,255,.72) 0%,var(--card) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.9),inset 0 -2px 0 rgba(60,40,10,.12),0 3px 8px -2px rgba(60,40,10,.14);
+  }
+  .reader-modal.bg-dark :is(.reader-back,.reader-top-font-group,.reader-top-font-select-wrap,.reader-top-speak-btn:not(.active),.reader-top-scroll-btn:not(.active),.reader-top-bookmark-btn:not(.active)){
+    border-color:rgba(255,255,255,.16);
+    background:linear-gradient(180deg,rgba(255,255,255,.1) 0%,var(--bg2) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.18),inset 0 -2px 0 rgba(0,0,0,.48),0 4px 10px rgba(0,0,0,.4);
+  }
+  .reader-modal .reader-category{
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,.78);
+    background:linear-gradient(180deg,rgba(255,255,255,.55) 0%,transparent 100%),var(--gold-muted);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1.5px 0 rgba(60,40,10,.14),0 2px 6px rgba(60,40,10,.08);
+  }
+  .reader-modal .reader-view-count{
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,.75);
+    background:linear-gradient(180deg,rgba(255,255,255,.75) 0%,var(--bg2) 100%);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.88),0 2px 5px rgba(60,40,10,.07);
+  }
+  .reader-modal.bg-dark .reader-category{
+    border-color:color-mix(in srgb,var(--gold) 35%,rgba(255,255,255,.14));
+    background:linear-gradient(180deg,rgba(212,168,75,.22) 0%,rgba(212,168,75,.1) 100%);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 2px 6px rgba(0,0,0,.35);
+    color:var(--gold);
+  }
+  .reader-modal.bg-dark .reader-view-count{
+    border-color:rgba(255,255,255,.14);
+    background:linear-gradient(180deg,rgba(255,255,255,.1) 0%,rgba(255,255,255,.04) 100%);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 2px 6px rgba(0,0,0,.35);
+    color:var(--text2);
+  }
+  .reader-modal .reader-resume-banner{
+    border-radius:var(--radius-card);
+    border:1px solid color-mix(in srgb,var(--gold) 36%,rgba(255,255,255,.82));
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.72) 0%,rgba(255,255,255,.04) 48%),
+      linear-gradient(145deg,var(--gold-light) 0%,color-mix(in srgb,var(--gold-muted) 45%,var(--card)) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.94),inset 0 -3px 0 rgba(140,96,24,.16),0 8px 18px -6px rgba(140,96,24,.2);
+  }
+  .reader-modal.bg-dark .reader-resume-banner{
+    border-color:color-mix(in srgb,var(--gold) 45%,rgba(255,255,255,.12));
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.08) 0%,rgba(255,255,255,0) 48%),
+      linear-gradient(145deg,var(--bg2) 0%,var(--card) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.16),inset 0 -3px 0 rgba(0,0,0,.5),0 8px 20px -6px rgba(0,0,0,.5);
+  }
+  .reader-modal .reader-resume-btn{
+    border:1px solid rgba(255,255,255,.45);
+    border-radius:999px;
+    background:linear-gradient(145deg,#e0ad5a 0%,var(--gold) 65%,#9c6c1b 100%);
+    color:#24180c;
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.62),inset 0 -2.5px 0 rgba(90,56,8,.26),0 4px 12px -2px color-mix(in srgb,var(--gold) 42%,transparent);
+  }
+  .reader-modal .toc{
+    border-radius:var(--radius-card);
+    border:1px solid color-mix(in srgb,var(--gold) 22%,rgba(255,255,255,.8));
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.04) 24%),
+      linear-gradient(160deg,var(--gold-light) 0%,color-mix(in srgb,var(--gold-muted) 32%,var(--card)) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.92),inset 0 -3.5px 0 rgba(120,84,32,.14),0 10px 22px -8px rgba(60,40,10,.16);
+  }
+  .reader-modal.bg-dark .toc{
+    border-color:rgba(255,255,255,.14);
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.07) 0%,transparent 24%),
+      linear-gradient(160deg,var(--bg2) 0%,var(--card) 100%);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.16),inset 0 -3.5px 0 rgba(0,0,0,.52),0 10px 24px -6px rgba(0,0,0,.55);
+  }
+  .reader-modal .toc-header{
+    background:linear-gradient(180deg,rgba(255,255,255,.42) 0%,rgba(255,255,255,.05) 100%),var(--gold-muted);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.75);
+  }
+  .reader-modal.bg-dark .toc-header{
+    background:linear-gradient(180deg,rgba(255,255,255,.08) 0%,transparent 100%),var(--bg3);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.1);
+  }
+  .reader-modal .toc-search-input{
+    border-radius:999px;
+    box-shadow:inset 0 1.5px 3px rgba(60,40,10,.08),0 1px 0 rgba(255,255,255,.72);
+  }
+  .reader-modal .toc-number{
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.52),inset 0 -2px 0 rgba(80,48,8,.24),0 2px 6px rgba(120,80,20,.2);
+  }
+  .reader-modal .toc-item{border-radius:var(--radius-control)}
+  .reader-modal .toc-item.is-active{
+    outline:none;
+    border:1px solid var(--gold);
+    background:linear-gradient(180deg,rgba(255,255,255,.72) 0%,color-mix(in srgb,var(--gold-muted) 65%,var(--card)) 100%);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -2px 0 rgba(160,110,30,.14),0 4px 10px -3px rgba(179,125,34,.2);
+  }
+  .reader-modal.bg-dark .toc-item.is-active{
+    background:linear-gradient(180deg,rgba(212,168,75,.2) 0%,rgba(212,168,75,.09) 100%);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 4px 12px rgba(0,0,0,.4);
+  }
+  .reader-modal .chapter-footer-btn,
+  .reader-modal .chapter-footer-toc-btn{
+    border-radius:var(--radius-control);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.78),inset 0 -2.5px 0 rgba(60,40,10,.12),0 4px 12px -4px rgba(60,40,10,.14);
+  }
+  .reader-modal.bg-dark .chapter-footer-btn,
+  .reader-modal.bg-dark .chapter-footer-toc-btn{
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.14),inset 0 -2.5px 0 rgba(0,0,0,.48),0 6px 14px rgba(0,0,0,.42);
+  }
+  .reader-modal .reader-top-bar{box-sizing:border-box;height:auto;min-height:calc(50px + var(--app-safe-top,env(safe-area-inset-top,0px)));padding-top:var(--app-safe-top,env(safe-area-inset-top,0px))}
+  .toc-search-input{min-height:var(--touch-target-size);height:var(--touch-target-size);padding-right:var(--touch-target-size)}
+  .toc-search-clear{right:0;width:var(--touch-target-size);height:var(--touch-target-size)}
 </style>

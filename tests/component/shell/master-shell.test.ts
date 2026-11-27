@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
 import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as localeContext from '../../../src/lib/stores/locale.svelte';
 import LunarDate from '../../../src/lib/components/lunar/LunarDate.svelte';
 import MasterShell from '../../../src/lib/components/layout/MasterShell.svelte';
 import MobileBottomNav from '../../../src/lib/components/layout/MobileBottomNav.svelte';
@@ -10,26 +12,23 @@ import PresenceChip from '../../../src/lib/components/presence/PresenceChip.svel
 import QueryTestHarness from '../query-test-harness.svelte';
 
 describe('master shell', () => {
-  it('hides back button on root /tu-tap and keeps it on practice subroutes', () => {
-    const rootBody = render(QueryTestHarness, { props: { Target: SiteHeader, targetProps: { currentPath: '/tu-tap', theme: 'dark' } } }).body;
-    expect(rootBody.match(/class="notification-bell-btn(?:\s|")/gu) ?? []).toHaveLength(1);
-    expect(rootBody).toContain('tt-topbar');
-    expect(rootBody).not.toContain('tt-back-btn');
-    expect(rootBody).toContain('tt-topbar-title');
-    expect(rootBody).toContain('tt-theme-btn');
-    expect(rootBody).toContain('tt-topbar-logo');
-    expect(rootBody).not.toContain('class="nav qts-nav');
-  });
-  it('keeps back button and notification bell on practice subroute /tu-tap/chep-kinh', () => {
-    const currentPath = '/tu-tap/chep-kinh';
+  it.each([
+    { currentPath: '/tu-tap', showBack: false },
+    { currentPath: '/tu-tap/', showBack: false },
+    { currentPath: '/tu-tap/chep-kinh', showBack: true },
+  ])('renders the shared header on $currentPath with Back visible: $showBack', ({ currentPath, showBack }) => {
     const body = render(QueryTestHarness, { props: { Target: SiteHeader, targetProps: { currentPath, theme: 'dark' } } }).body;
-    expect(body.match(/class="notification-bell-btn(?:\s|")/gu) ?? []).toHaveLength(1);
-    expect(body).toContain('tt-topbar');
-    expect(body).toContain('tt-back-btn');
-    expect(body).toContain('tt-topbar-title');
-    expect(body).toContain('tt-theme-btn');
-    expect(body).toContain('tt-topbar-logo');
-    expect(body).not.toContain('class="nav qts-nav');
+    const page = JSDOM.fragment(body);
+    expect(page.querySelectorAll('nav.qts-nav')).toHaveLength(1);
+    expect(page.querySelector('.tt-topbar')).toBeNull();
+    const header = page.querySelector('nav.qts-nav')!;
+    expect(header.querySelectorAll('button.notification-bell-btn')).toHaveLength(1);
+    expect(header.querySelectorAll('button.nav-theme-btn[aria-label]')).toHaveLength(1);
+    expect(header.querySelector('a.nav-logo[href="/"] img')).not.toBeNull();
+    expect(header.querySelector('.nl-name')?.textContent?.trim()).toMatch(/^Tu Tập\s+Phật Pháp$/u);
+    expect(header.classList.contains('qts-nav--subpage')).toBe(showBack);
+    expect(header.querySelectorAll('button.nav-back-circle-btn')).toHaveLength(showBack ? 1 : 0);
+    if (showBack) expect(header.querySelector('.nav-back-circle-btn')?.getAttribute('aria-label')).toBe('Quay lại');
   });
   it('renders one semantic shell with the production navigation destinations', () => {
     const children = createRawSnippet(() => ({render: () => '<p id="shell-payload">Content</p>'}));
@@ -39,7 +38,7 @@ describe('master shell', () => {
     expect(body).toContain('shell-payload');
     for (const href of ['/kinh-sach','/tu-tap','/phap-thoai','/ca-nhan']) expect(body).toContain('href="'+href+'"');
     expect(body).toContain('aria-current="page"');
-    expect(render(QueryTestHarness,{props:{Target:MasterShell,targetProps:{children,currentPath:'/huong-dan'}}}).body).toContain('qts-footer');
+    expect(render(QueryTestHarness,{props:{Target:MasterShell,targetProps:{children,currentPath:'/huong-dan'}}}).body).not.toContain('qts-footer');
   });
 
   it('keeps the five mobile actions and an accessible theme toggle', () => {
@@ -48,6 +47,19 @@ describe('master shell', () => {
     for(const href of ['/','/kinh-sach','/tu-tap','/phap-thoai','/ca-nhan']) expect(body).toContain('href="'+href+'"');
     const header = render(QueryTestHarness,{props:{Target:SiteHeader,targetProps:{currentPath:'/',theme:'light'}}}).body;
     expect(header).toContain('aria-label="Chuyển sang chế độ tối"');
+  });
+
+  it.each([
+    ['light', 'Switch to dark mode'],
+    ['dark', 'Switch to light mode'],
+  ])('announces the available theme action in English when the theme is %s', (theme, label) => {
+    const locale = vi.spyOn(localeContext, 'getLocaleContext').mockReturnValue(localeContext.createLocaleStore('en'));
+    try {
+      const { body } = render(QueryTestHarness, { props: { Target: SiteHeader, targetProps: { theme } } });
+      expect(JSDOM.fragment(body).querySelector('.nav-theme-btn')?.getAttribute('aria-label')).toBe(label);
+    } finally {
+      locale.mockRestore();
+    }
   });
 
   it('carries a sign-in fallback for a signed-out visitor and drops it once signed in', () => {

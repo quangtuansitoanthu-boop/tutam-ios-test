@@ -187,6 +187,18 @@ for (const status of [false, true]) {
     expect(JSON.parse(request.body)).toEqual({ preserveSessionCookie: true });
     expect(mocks.clearBrowser).not.toHaveBeenCalled();
   });
+  it(`expires the native cookie only while the logout transaction owns its lease (topbar=${status})`, async () => {
+    mocks.native.mockReturnValue(true);
+    mocks.request.mockImplementationOnce(async (_path, request) => {
+      expect(isNativeAuthMutationActive()).toBe(true);
+      expect(JSON.parse(request.body)).toEqual({ preserveSessionCookie: false });
+      return Response.json({ error: 'unavailable' }, { status: 503 });
+    });
+    await showLogout(status); confirmLogout(); await settle();
+    expect(mocks.request).toHaveBeenCalledOnce();
+    expect(mocks.clearBrowser).not.toHaveBeenCalled();
+    expect(isNativeAuthMutationActive()).toBe(false);
+  });
   it(`does not submit logout for a replacement principal after delayed CSRF (topbar=${status})`, async () => {
     let finish!: (value: string) => void;
     mocks.csrf.mockImplementation(() => new Promise<string>(resolve => { finish = resolve; }));

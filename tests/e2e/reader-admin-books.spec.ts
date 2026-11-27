@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { principalStorageKey } from "../../src/lib/browser/principal-storage";
 import { READING_PROGRESS_CACHE_KEY } from "../../src/lib/browser/reading-activity-client";
-import { loginAsAdmin, loginAsMember, settleClient, choosePdfOnline, openReaderTools, TEST_MEMBER_ID } from "./runtime-helpers";
+import { loginAsAdmin, loginAsMember, deferStartupNotification, settleClient, choosePdfOnline, openReaderTools, TEST_MEMBER_ID } from "./runtime-helpers";
 
 const READER_BOOKMARK_KEY = "tutam_bookmarks_v1";
 const PDF_BOOKMARK_KEY = "tutam_pdf_bookmarks_v1";
@@ -20,6 +20,10 @@ async function resetBookProgress(page: import('@playwright/test').Page): Promise
 }
 
 test.describe("reader and books admin", () => {
+  test.beforeEach(async ({ page }) => {
+    await deferStartupNotification(page);
+  });
+
   test("member reads chapters, changes display settings and restores them without file export", async ({ page }) => {
     await loginAsMember(page);
     await page.goto('/kinh-sach');
@@ -794,32 +798,38 @@ test.describe("reader and books admin", () => {
     await loginAsMember(page);
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
-    await page.route(
-      "**/assets/pdfs/bai-viet-mau-gieo-nhan-lanh.pdf",
-      async (route) => {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    let pdfRequested = false;
+    await page.route(url => url.pathname.endsWith('/assets/pdfs/bai-viet-mau-gieo-nhan-lanh.pdf'), async route => {
+      if (route.request().method() !== 'GET') {
         await route.continue();
-      },
-    );
-
-    await page.goto('/kinh-sach');
-    await settleClient(page);
-    await page
-      .getByRole("button", { name: "Đọc ngay Bài PDF kiểm thử E2E" })
-      .click();
-    await choosePdfOnline(page);
-    const pdfReader = page.getByRole("dialog", {
-      name: "Bài PDF kiểm thử E2E",
+        return;
+      }
+      pdfRequested = true;
+      await pending;
+      await route.continue();
     });
-    await expect(pdfReader).toBeVisible();
-    await page.keyboard.press("Escape");
 
-    await page.getByRole("button", { name: "Đọc ngay Sách nhiều tập E2E" }).click();
-    const ebookReader = page.getByRole("dialog", {
-      name: /Sách nhiều tập E2E/,
-    });
-    await expect(ebookReader.locator(".toc-count")).toBeVisible();
-    await page.waitForTimeout(700);
+    const pdfReader = page.getByRole("dialog", { name: "Bài PDF kiểm thử E2E" });
+    const ebookReader = page.getByRole("dialog", { name: /Sách nhiều tập E2E/ });
+    try {
+      await page.goto('/kinh-sach');
+      await settleClient(page);
+      await page.getByRole("button", { name: "Đọc ngay Bài PDF kiểm thử E2E" }).click();
+      await page.getByRole('button', { name: 'Đọc online', exact: true }).click();
+      await expect.poll(() => pdfRequested).toBe(true);
+      await expect(pdfReader.locator('canvas[data-rendered]')).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(pdfReader).toHaveCount(0);
+      await page.getByRole("button", { name: "Đọc ngay Sách nhiều tập E2E" }).click();
+      await expect(ebookReader.locator(".toc-count")).toBeVisible();
+    } finally {
+      release();
+    }
+    await page.unrouteAll({ behavior: 'wait' });
+    await expect(ebookReader).toBeVisible();
+    await expect(pdfReader).toHaveCount(0);
     expect(pageErrors).toEqual([]);
   });
 

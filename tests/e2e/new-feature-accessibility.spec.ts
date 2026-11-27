@@ -173,7 +173,7 @@ test.describe('New feature keyboard and viewport accessibility', () => {
       activeText: document.activeElement?.textContent?.trim(),
     })));
     await expectFocusInside(meditation, 'Chooser teardown does not steal focus from the session');
-    await expectTabWrap(page, meditation, meditation.getByRole('button', { name: 'Đổi nền', exact: true }), meditation.getByRole('button', { name: 'Tạm dừng', exact: true }));
+    await expectTabWrap(page, meditation, meditation.getByRole('button', { name: /^Âm lượng nhạc thiền \(/ }), meditation.getByRole('button', { name: 'Tạm dừng', exact: true }));
 
     const focusMode = meditation.getByRole('button', { name: 'Tập trung', exact: true });
     const exitFocus = meditation.getByRole('button', { name: 'Thoát tập trung', exact: true });
@@ -181,6 +181,7 @@ test.describe('New feature keyboard and viewport accessibility', () => {
     await focusMode.click();
     await expect(exitFocus).toBeFocused();
     await expect(focusMode).toBeHidden();
+    await expectTabWrap(page, meditation, exitFocus, exitFocus);
     if (supportsFullscreen) {
       await expect.poll(() => meditation.evaluate((element) => document.fullscreenElement === element)).toBe(true);
     }

@@ -77,11 +77,10 @@
 </script>
 
 <script lang="ts">
-  import { createBrowserId } from '$lib/browser/random-id';
   import { confirmInApp, promptInApp } from '$lib/browser/app-dialog';
   import { ChevronDown, ChevronUp, Pencil, Plus, Search, Trash2, X } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
-  import { encodeMediaFileNameHeader } from '$lib/browser/media-upload';
+  import { mediaFileContentType, uploadMediaFile } from '$lib/browser/media-upload';
   import { fetchWithSessionRefresh, requireBrowserCsrf } from '$lib/browser/session-csrf';
   import { renderReaderContent } from '$lib/components/reader/content-renderer';
   import ChapterComposer from './ChapterComposer.svelte';
@@ -312,20 +311,7 @@
 
   async function uploadInlineImage(file: File) {
     const csrf = await requireBrowserCsrf();
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
-    const encoded = btoa(String.fromCharCode(...digest)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
-    const response = await fetchWithSessionRefresh('/api/media', {
-      method: 'POST',
-      headers: {
-        'content-type': file.type,
-        'x-content-sha256': encoded,
-        'x-csrf-token': csrf,
-        'x-file-name': encodeMediaFileNameHeader(file.name),
-        'x-media-prefix': 'content',
-        'idempotency-key': createBrowserId()
-      },
-      body: file
-    });
+    const response = await uploadMediaFile(file, 'content', csrf);
     const data = await response.json();
     if (!response.ok) throw new Error(data?.error?.message || `Không thể tải ${file.name}.`);
     return String(data.url || data.objectKey);
@@ -333,7 +319,7 @@
 
   async function insertImages(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
-    const files = [...(input.files || [])].filter((file) => file.type.startsWith('image/'));
+    const files = [...(input.files || [])].filter((file) => mediaFileContentType(file).startsWith('image/'));
     const targetEditor = editor;
     const targetChapterKey = chapterKey(currentChapter, selected);
     if (!files.length || imageBusy) return;

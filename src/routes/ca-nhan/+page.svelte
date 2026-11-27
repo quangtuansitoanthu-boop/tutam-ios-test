@@ -376,7 +376,7 @@
     {
       key: "be-vietnam-pro",
       label: t.settings.fontBeVietnam,
-      style: 'font-family: "Be Vietnam Pro", sans-serif',
+      style: 'font-family: var(--font-app)',
     },
   ]);
 
@@ -588,22 +588,6 @@
     const email = "tutap.phatphap26@gmail.com";
     const subject = encodeURIComponent("Góp ý ứng dụng Tu Tập Phật Pháp");
     const mailtoUrl = "mailto:" + email + "?subject=" + subject;
-    const isAndroid = isNativeApp()
-      ? nativePlatform() === "android"
-      : typeof navigator !== "undefined" &&
-        /android/i.test(navigator.userAgent);
-    if (isAndroid) {
-      const intentUrl =
-        "intent://co?to=" +
-        email +
-        "&subject=" +
-        subject +
-        "#Intent;scheme=googlegmail;package=com.google.android.gm;S.browser_fallback_url=" +
-        encodeURIComponent(mailtoUrl) +
-        ";end";
-      window.location.href = intentUrl;
-      return;
-    }
     window.location.href = mailtoUrl;
   }
 
@@ -637,41 +621,6 @@
     triggerHaptic("light");
     if (!url) return;
 
-    const isAndroid = isNativeApp()
-      ? nativePlatform() === "android"
-      : typeof navigator !== "undefined" &&
-        /android/i.test(navigator.userAgent);
-    const isIOS = isNativeApp()
-      ? nativePlatform() === "ios"
-      : typeof navigator !== "undefined" &&
-        /iphone|ipad|ipod/i.test(navigator.userAgent);
-
-    if (url.includes("m.me")) {
-      if (isAndroid) {
-        const rawNoProtocol = url.replace(/^https?:\/\//, "");
-        const intentUrl = `intent://${rawNoProtocol}#Intent;scheme=https;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent(url)};end`;
-        window.location.href = intentUrl;
-        return;
-      }
-      if (isIOS) {
-        void openExternalBrowser(url);
-        return;
-      }
-    }
-
-    if (url.includes("facebook.com")) {
-      if (isAndroid) {
-        const rawNoProtocol = url.replace(/^https?:\/\//, "");
-        const intentUrl = `intent://${rawNoProtocol}#Intent;scheme=https;package=com.facebook.katana;S.browser_fallback_url=${encodeURIComponent(url)};end`;
-        window.location.href = intentUrl;
-        return;
-      }
-      if (isIOS) {
-        void openExternalBrowser(url);
-        return;
-      }
-    }
-
     void openExternalBrowser(url);
   }
 
@@ -701,7 +650,7 @@
           "content-type": "application/json",
           "x-csrf-token": csrfToken,
         },
-        body: JSON.stringify({ preserveSessionCookie: true }),
+        body: JSON.stringify({ preserveSessionCookie: !isNativeApp() }),
       });
       if (!isCurrent()) return;
       if (!res.ok) {
@@ -714,10 +663,17 @@
           isNativeApp() &&
           nativePlatform() === "ios"
         ) {
+          // The challenge response has settled. Reauthorization and CSRF refresh
+          // must run without the cookie lease that blocks session verification.
+          release?.();
+          release = null;
           const credentials = await authorizeAppleAccountDeletion(isCurrent);
           if (!isCurrent()) return;
           const retryCsrfToken = await requireBrowserCsrf();
           if (!isCurrent()) return;
+          release = beginNativeAuthMutation();
+          if (!release)
+            throw new Error(SESSION_VERIFICATION_UNAVAILABLE[localeStore.current]);
           res = await fetchWithSessionRefresh("/api/auth/delete-account", {
             method: "POST",
             headers: {
@@ -726,7 +682,7 @@
             },
             body: JSON.stringify({
               ...credentials,
-              preserveSessionCookie: true,
+              preserveSessionCookie: !isNativeApp(),
             }),
           });
           if (!isCurrent()) return;
@@ -796,7 +752,7 @@
           "content-type": "application/json",
           "x-csrf-token": csrfToken,
         },
-        body: JSON.stringify({ preserveSessionCookie: true }),
+        body: JSON.stringify({ preserveSessionCookie: !isNativeApp() }),
       });
       if (!current() || request.signal.aborted) return;
       if (!response.ok) throw new Error("logout_failed");
@@ -835,6 +791,22 @@
   const previewTextColor = $derived(
     background === "dark" ? "#ece5db" : "#252019",
   );
+  $effect(() => {
+    if (typeof document === 'undefined') return;
+    const isSub = currentTab !== 'main';
+    document.dispatchEvent(new CustomEvent('qts:subpage-header', {
+      detail: {
+        active: isSub,
+        onBack: goBackToMain,
+        backLabel: t.profile.backToMenu,
+      },
+    }));
+    return () => {
+      document.dispatchEvent(new CustomEvent('qts:subpage-header', {
+        detail: { active: false },
+      }));
+    };
+  });
 </script>
 
 <svelte:head>
@@ -874,8 +846,8 @@
                 void goto("/");
               }
             }}
-            aria-label="Quay lại Trang chủ"
-            title="Quay lại Trang chủ"
+            aria-label={localeStore.current === "en" ? "Back to Home" : "Quay lại Trang chủ"}
+            title={localeStore.current === "en" ? "Back to Home" : "Quay lại Trang chủ"}
           >
             <svg
               width="18"
@@ -926,7 +898,7 @@
               />
             {:else}
               <span class="cn-welcome-initials"
-                >{getInitials(userGreetingName)}</span
+                >{userGreetingName.slice(0, 1).toLocaleUpperCase()}</span
               >
             {/if}
             {#if rank}
@@ -936,34 +908,30 @@
             {/if}
           </div>
           <div class="cn-welcome-body">
-            <p class="cn-welcome-greeting">
-              {localeStore.current === "en" ? "Hello" : "Xin chào"}
-              <strong class="cn-welcome-name">{userGreetingName}</strong>, {localeStore.current ===
-              "en"
-                ? "wishing you a peaceful day and diligent practice"
-                : "chúc bạn một ngày mới an lạc, tinh tấn tu tập"} 🙏
-            </p>
+            <div class="cn-welcome-line">
+              <span class="cn-welcome-hello">{localeStore.current === "en" ? "Welcome," : "Xin chào,"}</span>
+              <strong class="cn-welcome-name">{userGreetingName}</strong>
+            </div>
             <div class="cn-welcome-meta">
-              <span
-                class="cn-role-badge"
-                class:badge-admin={role === "admin"}
-              >
-                {roleLabel}
-              </span>
               {#if rank}
                 <a
                   href="/tien-do-tu-tap"
-                  class="cn-practice-rank"
+                  class="cn-practice-rank cn-practice-rank--home"
                   class:earned={Boolean(rank)}
                   title={localeStore.current === "en"
                     ? "View achievement badges"
                     : "Xem chi tiết huy hiệu thành tựu"}
                   style="text-decoration: none;"
                 >
-                  <PracticeBadgeIcon badgeId={avatarBadge?.id} />
                   <span>{rank}</span>
                 </a>
               {/if}
+              <span
+                class="cn-role-badge"
+                class:badge-admin={role === "admin"}
+              >
+                {roleLabel}
+              </span>
               <span class="cn-status-badge">
                 <span class="cn-status-dot"></span>
                 <span
@@ -1024,7 +992,7 @@
           >
         </div>
       </section>
-      <div class="cn-big-tabs-list" role="navigation" aria-label="Menu cá nhân">
+      <div class="cn-big-tabs-list" role="navigation" aria-label={localeStore.current === "en" ? "Account menu" : "Menu cá nhân"}>
         <!-- TAB TO 1: TÀI KHOẢN (GỘP TÀI KHOẢN & CÁ NHÂN / QUẢN TRỊ) -->
         <button
           type="button"
@@ -1157,8 +1125,8 @@
             </h2>
             <p class="cn-big-tab-desc">
               {localeStore.current === "en"
-                ? "Email, Messenger & Facebook of author Quang Tu"
-                : "Email, Messenger & Facebook tác giả Quang Từ"}
+                ? "Send feedback email directly to author Quang Tu"
+                : "Gửi email góp ý trực tiếp đến tác giả Quang Từ"}
             </p>
           </div>
           <span class="cn-big-tab-arrow" aria-hidden="true">›</span>
@@ -1170,14 +1138,6 @@
       <!-- ========================================================================= -->
     {:else if currentTab === "account"}
       <div class="cn-subpage-header">
-        <button
-          type="button"
-          class="cn-subpage-back-btn"
-          onclick={goBackToMain}
-        >
-          <span class="cn-back-arrow" aria-hidden="true">←</span>
-          <span>{t.profile.backToMenu}</span>
-        </button>
         <div class="cn-subpage-title-box">
           <h1 class="cn-subpage-title">{t.profile.tabLoginTitle}</h1>
           <p class="cn-subpage-sub">{t.profile.tabLoginSub}</p>
@@ -1562,14 +1522,6 @@
       <!-- ========================================================================= -->
     {:else if currentTab === "settings"}
       <div class="cn-subpage-header">
-        <button
-          type="button"
-          class="cn-subpage-back-btn"
-          onclick={goBackToMain}
-        >
-          <span class="cn-back-arrow" aria-hidden="true">←</span>
-          <span>{t.profile.backToMenu}</span>
-        </button>
         <div class="cn-subpage-title-box">
           <h1 class="cn-subpage-title">{t.profile.tabAppSettingsTitle}</h1>
           <p class="cn-subpage-sub">{t.profile.tabAppSettingsSub}</p>
@@ -1605,6 +1557,7 @@
                   type="button"
                   class="cn-toggle-btn cn-app-theme-choice"
                   class:active={appThemeChoice === choice.value}
+                  data-palette={choice.value}
                   aria-pressed={appThemeChoice === choice.value}
                   onclick={() =>
                     choice.value === "auto" || choice.value === "dark"
@@ -1616,10 +1569,10 @@
                     data-palette={choice.value}
                     aria-hidden="true"
                   ></span>
-                  <span>{choice.label}</span>
-                  <span class="cn-app-theme-check" aria-hidden="true"
-                    >{appThemeChoice === choice.value ? "✓" : ""}</span
-                  >
+                  <span class="cn-app-theme-label">{choice.label}</span>
+                  {#if appThemeChoice === choice.value}
+                    <span class="cn-app-theme-check" aria-hidden="true">✓</span>
+                  {/if}
                 </button>
               {/each}
             </div>
@@ -1874,7 +1827,7 @@
             </div>
             <div
               class="cn-preview-box"
-              style={`background:${previewBgColor}; color:${previewTextColor}; font-family:${fontFamily === "bookerly" ? "Bookerly, Georgia, serif" : fontFamily === "merriweather" ? "Merriweather, serif" : fontFamily === "literata" ? "Literata, serif" : '"Be Vietnam Pro", sans-serif'}; font-size:${fontSize}px; line-height:${lineHeight}; font-weight:${bold ? 700 : 400}`}
+              style={`background:${previewBgColor}; color:${previewTextColor}; font-family:${fontFamily === "bookerly" ? "Bookerly, Georgia, serif" : fontFamily === "merriweather" ? "Merriweather, serif" : fontFamily === "literata" ? "Literata, serif" : 'var(--font-app)'}; font-size:${fontSize}px; line-height:${lineHeight}; font-weight:${bold ? 700 : 400}`}
             >
               <div class="cn-preview-title">{t.settings.previewTitle}</div>
               <p>{t.settings.previewQuote}</p>
@@ -1888,14 +1841,6 @@
       <!-- ========================================================================= -->
     {:else if currentTab === "author"}
       <div class="cn-subpage-header">
-        <button
-          type="button"
-          class="cn-subpage-back-btn"
-          onclick={goBackToMain}
-        >
-          <span class="cn-back-arrow" aria-hidden="true">←</span>
-          <span>{t.profile.backToMenu}</span>
-        </button>
         <div class="cn-subpage-title-box">
           <h1 class="cn-subpage-title">{t.profile.tabAuthorTitle}</h1>
           <p class="cn-subpage-sub">
@@ -2011,14 +1956,6 @@
       <!-- ========================================================================= -->
     {:else if currentTab === "testimonials"}
       <div class="cn-subpage-header">
-        <button
-          type="button"
-          class="cn-subpage-back-btn"
-          onclick={goBackToMain}
-        >
-          <span class="cn-back-arrow" aria-hidden="true">←</span>
-          <span>{t.profile.backToMenu}</span>
-        </button>
         <div class="cn-subpage-title-box">
           <h1 class="cn-subpage-title">{testimonialsCopy.title}</h1>
           <p class="cn-subpage-sub">{testimonialsCopy.subtitle}</p>
@@ -2050,14 +1987,6 @@
       </div>
     {:else if currentTab === "feedback"}
       <div class="cn-subpage-header">
-        <button
-          type="button"
-          class="cn-subpage-back-btn"
-          onclick={goBackToMain}
-        >
-          <span class="cn-back-arrow" aria-hidden="true">←</span>
-          <span>{t.profile.backToMenu}</span>
-        </button>
         <div class="cn-subpage-title-box">
           <h1 class="cn-subpage-title">
             {localeStore.current === "en"
@@ -2155,93 +2084,6 @@
             {#if copiedEmailError}<p class="cn-copy-error" role="alert">
                 {t.feedback.copyAddressFailed}
               </p>{/if}
-          </div>
-
-          <!-- 2. Messenger -->
-          <div class="cn-contact-channel-card cn-channel-messenger">
-            <div class="cn-channel-top">
-              <span class="cn-channel-icon" aria-hidden="true">💬</span>
-              <div class="cn-channel-header">
-                <h3>
-                  {localeStore.current === "en"
-                    ? "Messenger"
-                    : "Messenger Tác Giả"}
-                </h3>
-                <span class="cn-channel-badge cn-badge-blue">Messenger</span>
-              </div>
-            </div>
-            <p class="cn-channel-desc">
-              {localeStore.current === "en"
-                ? "Chat or ask questions directly via Messenger"
-                : "Nhắn tin trực tiếp với tác giả Quang Từ qua Messenger"}
-            </p>
-            <div class="cn-channel-btns">
-              <button
-                type="button"
-                class="cn-channel-btn-primary cn-btn-messenger"
-                onclick={() => handleOpenAuthorLink("https://m.me/tranan.buhd")}
-              >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <path
-                    d="M12 2C6.477 2 2 6.145 2 11.258c0 2.914 1.453 5.518 3.734 7.205V22l3.385-1.858c.917.254 1.886.39 2.881.39 5.523 0 10-4.145 10-9.274C22 6.145 17.523 2 12 2zm1.002 12.441-2.56-2.73-5 2.73 5.5-5.836 2.624 2.73 4.936-2.73-5.5 5.836z"
-                  />
-                </svg>
-                <span
-                  >{localeStore.current === "en"
-                    ? "Open Messenger"
-                    : "Mở Messenger"}</span
-                >
-              </button>
-            </div>
-          </div>
-
-          <!-- 3. Facebook -->
-          <div class="cn-contact-channel-card cn-channel-facebook">
-            <div class="cn-channel-top">
-              <span class="cn-channel-icon" aria-hidden="true">👤</span>
-              <div class="cn-channel-header">
-                <h3>
-                  {localeStore.current === "en"
-                    ? "Facebook"
-                    : "Facebook Tác Giả"}
-                </h3>
-                <span class="cn-channel-badge cn-badge-fb">Facebook</span>
-              </div>
-            </div>
-            <p class="cn-channel-desc">
-              {localeStore.current === "en"
-                ? "Visit personal page & dharma sharings"
-                : "Trang cá nhân và bài viết Phật pháp của tác giả"}
-            </p>
-            <div class="cn-channel-btns">
-              <button
-                type="button"
-                class="cn-channel-btn-primary cn-btn-facebook"
-                onclick={() =>
-                  handleOpenAuthorLink("https://www.facebook.com/tranan.buhd/")}
-              >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <path
-                    d="M13.5 22v-9h3l.45-3.5H13.5V7.27c0-1.01.28-1.7 1.73-1.7h1.85V2.44a24.8 24.8 0 0 0-2.7-.14c-2.67 0-4.5 1.63-4.5 4.62V9.5h-3V13h3v9h3.62Z"
-                  />
-                </svg>
-                <span
-                  >{localeStore.current === "en"
-                    ? "Open Facebook"
-                    : "Mở Facebook"}</span
-                >
-              </button>
-            </div>
           </div>
         </div>
       </section>
@@ -2446,18 +2288,8 @@
     .cn-welcome-banner {
       padding: 14px 16px !important;
       margin-bottom: 2px !important;
-      gap: 13px !important;
+      gap: 12px !important;
       border-radius: 16px !important;
-    }
-    .cn-welcome-avatar-img,
-    .cn-welcome-initials {
-      width: 44px !important;
-      height: 44px !important;
-      font-size: 16px !important;
-    }
-    .cn-welcome-greeting {
-      font-size: var(--font-size-body) !important;
-      line-height: 1.45 !important;
     }
     .cn-big-tabs-list {
       gap: 12px !important;
@@ -2597,61 +2429,62 @@
     color: var(--gold);
   }
 
-  /* Sub-page Top Navigation */
+  /* Sub-page Top Navigation (nút Quay lại nằm trên SiteHeader, tiêu đề căn giữa) */
   .cn-subpage-header {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 4px 2px 8px;
-    position: relative;
-  }
-
-  .cn-subpage-back-btn {
-    display: inline-flex;
     align-items: center;
+    text-align: center;
     gap: 6px;
-    padding: 6px 12px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--card);
-    color: var(--gold);
-    font-size: var(--font-size-label);
-    font-weight: 700;
-    cursor: pointer;
-    width: fit-content;
-    transition: all 0.15s ease;
-  }
-  .cn-subpage-back-btn:hover {
-    border-color: var(--gold);
-    background: color-mix(in srgb, var(--gold) 12%, var(--card));
-  }
-  .cn-subpage-back-btn:active {
-    transform: scale(0.96);
-  }
-
-  .cn-back-arrow {
-    font-size: 15px;
-    line-height: 1;
+    padding: 4px 2px 10px;
+    position: relative;
   }
 
   .cn-subpage-title-box {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    align-items: center;
+    text-align: center;
+    gap: 4px;
   }
 
   .cn-subpage-title {
     margin: 0;
-    font-size: 22px;
+    font-size: var(--font-size-section-title);
     font-weight: 800;
-    color: var(--text);
-    line-height: 1.25;
+    color: var(--brown-dark);
+    line-height: 1.3;
   }
 
   .cn-subpage-sub {
     margin: 0;
     font-size: var(--font-size-body);
-    color: var(--muted);
+    color: var(--text2);
+  }
+
+  .cn-welcome-line {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  .cn-welcome-hello {
+    font-size: var(--font-size-meta);
+    font-weight: 600;
+    color: var(--text2);
+  }
+
+  .cn-practice-rank--home {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: var(--radius-control);
+    background: color-mix(in srgb, var(--green-ok) 12%, var(--card));
+    color: var(--green-ok);
+    font-size: var(--font-size-label);
+    font-weight: 700;
+    border: 0;
   }
 
   .cn-feedback-badge-top {
@@ -2660,8 +2493,8 @@
     top: 4px;
     padding: 4px 10px;
     border-radius: 999px;
-    background: #e8f5e9;
-    color: #2e7d32;
+    background: color-mix(in srgb, var(--green-ok) 10%, var(--card));
+    color: var(--text);
     font-size: var(--font-size-meta);
     font-weight: 700;
   }
@@ -2683,35 +2516,38 @@
   }
 
   .cn-welcome-avatar {
-    flex-shrink: 0;
     position: relative;
-  }
-
-  .cn-welcome-avatar.avatar-ring {
-    --ring-size: 56px;
-    --ring-core-size: 50px;
+    width: 52px;
+    height: 52px;
+    min-width: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 25%, var(--card)), var(--card));
+    border: 2px solid var(--gold);
+    display: grid;
+    place-items: center;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    flex-shrink: 0;
   }
 
   .cn-welcome-avatar .cn-avatar-award {
-    --practice-badge-size: 22px;
-    right: -2px;
-    bottom: -2px;
+    position: absolute;
+    right: calc(-1 * var(--ring-gap, 4px) / 2);
+    bottom: calc(-1 * var(--ring-gap, 4px) / 2);
+    z-index: 3;
   }
 
-  .cn-welcome-avatar-img,
-  .cn-welcome-initials {
-    width: 48px;
-    height: 48px;
+  .cn-welcome-avatar-img {
+    width: 100%;
+    height: 100%;
     border-radius: 50%;
     object-fit: cover;
-    display: grid;
-    place-items: center;
-    background: linear-gradient(135deg, var(--gold) 0%, #b8832a 100%);
-    color: #fff;
-    font-size: 17px;
-    font-weight: 800;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    border: 2px solid var(--gold-light);
+  }
+
+  .cn-welcome-initials {
+    color: var(--gold);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
   }
 
   .cn-welcome-body {
@@ -2722,17 +2558,15 @@
     gap: 4px;
   }
 
-  .cn-welcome-greeting {
-    margin: 0;
-    font-size: var(--font-size-body);
-    line-height: 1.45;
-    color: var(--text);
-  }
-
   .cn-welcome-name {
-    color: var(--gold);
+    color: var(--text);
+    font-size: var(--font-size-card-title);
     font-weight: 800;
-    word-break: break-all;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .cn-welcome-meta {
@@ -3165,6 +2999,17 @@
 
   :root[data-theme="dark"] .cn-practice-rank.earned {
     border-color: var(--gold);
+  }
+
+  a.cn-practice-rank.cn-practice-rank--home,
+  :root[data-theme="dark"] a.cn-practice-rank.cn-practice-rank--home {
+    padding: 3px 8px;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: color-mix(in srgb, var(--green-ok) 12%, var(--card));
+    color: var(--green-ok);
+    font-size: var(--font-size-label);
+    font-weight: 700;
   }
 
   .cn-status-indicator {
@@ -3642,28 +3487,65 @@
 
   .cn-app-theme-choice {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    justify-content: center;
-    gap: var(--dialog-action-gap);
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
     position: relative;
     min-width: var(--touch-target-size);
-    min-height: calc(var(--touch-target-size) * 2);
+    min-height: var(--touch-target-size);
+    border-radius: 10px;
     font: inherit;
+    font-weight: 600;
+    font-size: var(--font-size-label);
+    text-align: left;
+  }
+  .cn-app-theme-choice[data-palette="auto"] {
+    background: var(--reading-paper-cream);
+    color: var(--reading-paper-cream-ink);
+    border-color: var(--border);
+  }
+  .cn-app-theme-choice[data-palette="cream"] {
+    background: var(--reading-paper-cream);
+    color: var(--reading-paper-cream-ink);
+    border-color: var(--reading-paper-cream-border);
+  }
+  .cn-app-theme-choice[data-palette="white"] {
+    background: var(--reading-paper-white);
+    color: var(--reading-paper-white-ink);
+    border-color: var(--reading-paper-white-border);
+  }
+  .cn-app-theme-choice[data-palette="gray"] {
+    background: var(--reading-paper-gray);
+    color: var(--reading-paper-gray-ink);
+    border-color: var(--reading-paper-gray-border);
+  }
+  .cn-app-theme-choice[data-palette="purple"] {
+    background: var(--reading-paper-purple);
+    color: var(--reading-paper-purple-ink);
+    border-color: var(--reading-paper-purple-border);
+  }
+  .cn-app-theme-choice[data-palette="dark"] {
+    background: var(--reading-paper-dark);
+    color: var(--reading-paper-dark-ink);
+    border-color: var(--reading-paper-dark-border);
+  }
+  .cn-app-theme-label {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
   }
   .cn-app-theme-swatch {
-    width: var(--space-page);
-    height: var(--space-page);
-    border: 1px solid var(--border);
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    border: 1px solid rgba(0, 0, 0, 0.15);
     border-radius: 50%;
     background: var(--reading-paper-white);
   }
   .cn-app-theme-swatch[data-palette="auto"] {
-    background: linear-gradient(
-      135deg,
-      var(--reading-paper-cream) 50%,
-      var(--reading-paper-dark) 50%
-    );
+    background: var(--reading-paper-cream);
   }
   .cn-app-theme-swatch[data-palette="cream"] {
     background: var(--reading-paper-cream);
@@ -3676,12 +3558,12 @@
   }
   .cn-app-theme-swatch[data-palette="dark"] {
     background: var(--reading-paper-dark);
+    border-color: rgba(255, 255, 255, 0.14);
   }
   .cn-app-theme-check {
-    position: absolute;
-    top: var(--dialog-action-gap);
-    right: var(--dialog-action-gap);
-    color: var(--text);
+    font-weight: 800;
+    color: inherit;
+    flex-shrink: 0;
   }
 
   .cn-toggle-btn {
@@ -3702,7 +3584,33 @@
     box-shadow: 0 2px 8px rgba(200, 150, 62, 0.2);
   }
   .cn-app-theme-choice.active {
-    color: var(--text);
+    outline: 2px solid var(--gold);
+    outline-offset: 1px;
+    box-shadow: none;
+  }
+  .cn-app-theme-choice.active[data-palette="auto"] {
+    background: var(--reading-paper-cream);
+    color: var(--reading-paper-cream-ink);
+  }
+  .cn-app-theme-choice.active[data-palette="cream"] {
+    background: var(--reading-paper-cream);
+    color: var(--reading-paper-cream-ink);
+  }
+  .cn-app-theme-choice.active[data-palette="white"] {
+    background: var(--reading-paper-white);
+    color: var(--reading-paper-white-ink);
+  }
+  .cn-app-theme-choice.active[data-palette="gray"] {
+    background: var(--reading-paper-gray);
+    color: var(--reading-paper-gray-ink);
+  }
+  .cn-app-theme-choice.active[data-palette="purple"] {
+    background: var(--reading-paper-purple);
+    color: var(--reading-paper-purple-ink);
+  }
+  .cn-app-theme-choice.active[data-palette="dark"] {
+    background: var(--reading-paper-dark);
+    color: var(--reading-paper-dark-ink);
   }
 
   .cn-bg-options-grid {
@@ -3945,8 +3853,8 @@
   .cn-author-p {
     font-family: var(--font-reader);
     margin: 0;
-    font-size: var(--font-size-body);
-    line-height: 1.65;
+    font-size: var(--font-size-ritual-reading);
+    line-height: 1.75;
     color: var(--text2);
     text-align: justify;
   }
@@ -4046,6 +3954,8 @@
     text-align: left;
   }
   .cn-auth-alert-close {
+    min-width: var(--touch-target-size);
+    min-height: var(--touch-target-size);
     border: none;
     background: transparent;
     color: inherit;
@@ -4089,6 +3999,7 @@
   .cn-btn-apple {
     background: #000;
     color: #fff;
+    border: 1px solid var(--border);
   }
   .cn-btn-ghost {
     background: var(--bg2);

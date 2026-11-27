@@ -36,6 +36,64 @@ function edit(editor: HTMLElement, inputType: string, data: string | null = null
   flushSync();
 }
 const traceRuns = [{ text: 'ABCDEF', bold: false, align: 'left' as const, line: 0 }];
+it.each(['ddaf phaatj', 'd9a2 pha6t5'])('accepts contextual raw Telex/VNI keys without composing or false mismatch: %s', keys => {
+  const view = setup({ showGhost: true, ghostRuns: [{ text: 'Đà Phật. Tâm.', bold: false, align: 'left', line: 0 }] });
+  for (const key of keys) edit(view.editor, 'insertText', key);
+  expect(view.text()).toBe('Đà Phật');
+  expect(richCopyText(view.editor)).toBe(view.text());
+  expect(instance!.mismatchWords()).toEqual([]);
+  const before = view.text();
+  edit(view.editor, 'insertText', 'j');
+  expect(view.text()).toBe(before);
+  expect(instance!.mismatchWords()).toHaveLength(1);
+  edit(view.editor, 'insertText', ' ');
+  edit(view.editor, 'insertText', 'j');
+  expect(instance!.mismatchWords()).toHaveLength(2);
+});
+
+it('rolls a rejected IME DOM back before the next composition starts in the same task', async () => {
+  const initial = 'Nam mô ';
+  const view = setup({ initial, showGhost: true, ghostRuns: [{ text: 'Nam mô A Di Đà Phật.', bold: false, align: 'left', line: 0 }] });
+  view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  const node = view.editor.querySelector('[data-copy-typed]')!.firstChild as Text;
+  node.appendData('sai');
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'sai', bubbles: true }));
+  view.editor.dispatchEvent(new CompositionEvent('compositionend', { data: 'sai', bubbles: true }));
+  view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  expect(richCopyText(view.editor)).toBe(initial);
+  expect(richCopySelection(view.editor)).toEqual([initial.length, initial.length]);
+  const correctedNode = view.editor.querySelector('[data-copy-typed]')!.firstChild as Text;
+  correctedNode.appendData('a');
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'a', bubbles: true }));
+  view.editor.dispatchEvent(new CompositionEvent('compositionend', { data: 'a', bubbles: true }));
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(view.text()).toBe(initial + 'A');
+  expect(richCopyText(view.editor)).toBe(initial + 'A');
+  view.editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })); flushSync();
+  expect(view.text()).toBe(initial);
+});
+
+it('reconciles non-cancelable raw Telex keys and keeps modifier no-ops out of undo history', () => {
+  const view = setup({ showGhost: true, ghostRuns: [{ text: 'Đà Phật.', bold: false, align: 'left', line: 0 }] });
+  for (const key of 'ddaf phaatj') {
+    const current = view.text();
+    view.editor.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: key, bubbles: true, cancelable: false }));
+    view.editor.textContent = current + key;
+    setRichCopySelection(view.editor, current.length + 1, current.length + 1);
+    view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: key, bubbles: true }));
+    flushSync();
+    expect(richCopyText(view.editor)).toBe(view.text());
+  }
+  expect(view.text()).toBe('Đà Phật');
+  expect(instance!.mismatchWords()).toEqual([]);
+  view.editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })); flushSync();
+  expect(view.text()).toBe('Đà Phậ');
+  edit(view.editor, 'insertText', 'j');
+  expect(instance!.mismatchWords()).toHaveLength(1);
+  setRichCopySelection(view.editor, 0, 1);
+  edit(view.editor, 'insertText', 'd');
+  expect(view.text()).toBe('dà Phậ');
+});
 it.each(['X', 'LỜI NGUYỆN TRƯỚC KHI TỤNG KINH\n' + 'Con thàmh tâm đảnh lễ chư Phật. '.repeat(4)])('aligns restored imperfect draft %j and caret corrections with the ghost without forcing its spelling', async initial => {
   const heading = 'LỜI NGUYỆN TRƯỚC KHI TỤNG KINH\n';
   const view = setup({ initial, showGhost: true, ghostRuns: [
@@ -232,9 +290,13 @@ it('keeps real glyph geometry aligned with the full reference at every font, wra
         { text: ' Con thành tâm đảnh lễ, cúi xin chư Phật từ bi chứng giám. '.repeat(12), bold: false, align: 'left', line: 1 }];
       const glyphs = (root: HTMLElement, maximum: number) => {
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), rects: DOMRect[] = [];
+        const range = document.createRange();
         let node: Node | null;
-        while ((node = walker.nextNode()) && rects.length < maximum) for (let i = 0; i < (node.textContent?.length ?? 0) && rects.length < maximum; i++) {
-          const range = document.createRange(); range.setStart(node, i); range.setEnd(node, i + 1); rects.push(range.getBoundingClientRect());
+        while ((node = walker.nextNode()) && rects.length < maximum) {
+          const length = Math.min(node.textContent?.length ?? 0, maximum - rects.length);
+          for (let i = 0; i < length; i++) {
+            range.setStart(node, i); range.setEnd(node, i + 1); rects.push(range.getBoundingClientRect());
+          }
         }
         return rects;
       };
@@ -333,6 +395,55 @@ it('retains an existing noncanonical draft when typing with ghost mode enabled',
   edit(view.editor, 'insertText', '?');
   expect(view.text()).toBe('My! own draft?');
 });
+
+const noteReference = [{ text: 'Nam mô A Di Đà Phật.', bold: false, align: 'left' as const, line: 0 }];
+it('renders the actual saved optional note and resumes tracing after it', () => {
+  const initial = 'Nam mô (3 lần) ';
+  const view = setup({ initial, showGhost: true, ghostRuns: noteReference });
+  expect(richCopyText(view.editor)).toBe(initial);
+  edit(view.editor, 'insertText', 'a');
+  expect(view.text()).toBe(initial + 'A');
+  expect(richCopyText(view.editor)).toBe(view.text());
+});
+
+it('accepts an optional note typed manually in ghost mode, then resumes tracing', () => {
+  const view = setup({ initial: 'Nam mô ', showGhost: true, ghostRuns: noteReference });
+  for (const letter of '(3 lần) ') edit(view.editor, 'insertText', letter);
+  expect(richCopyText(view.editor)).toBe('Nam mô (3 lần) ');
+  edit(view.editor, 'insertText', 'a');
+  expect(view.text()).toBe('Nam mô (3 lần) A');
+});
+
+it('rejects a mismatching IME commit even after its provisional spelling changes page tracing eligibility', async () => {
+  const initial = 'Nam mô ';
+  const view = setup({ initial, showGhost: true, ghostRuns: noteReference });
+  view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  view.editor.textContent = initial + 'sai';
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'sai', bubbles: true })); flushSync();
+  expect(view.text()).toBe(initial + 'sai');
+  view.editor.dispatchEvent(new CompositionEvent('compositionend', { data: 'sai', bubbles: true })); flushSync();
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(view.text()).toBe(initial);
+  expect(richCopyText(view.editor)).toBe(initial);
+  edit(view.editor, 'insertText', 'a');
+  expect(view.text()).toBe(initial + 'A');
+});
+
+it.each(['insertReplacementText', 'insertText'])('restores ink and caret after non-cancelable keyboard input %s', inputType => {
+  const initial = 'Nam mô ';
+  const view = setup({ initial, showGhost: true, ghostRuns: noteReference });
+  for (const word of ['sai', 'a']) {
+    view.editor.dispatchEvent(new InputEvent('beforeinput', { inputType, data: word, bubbles: true, cancelable: false }));
+    view.editor.textContent = initial + word;
+    setRichCopySelection(view.editor, initial.length + word.length, initial.length + word.length);
+    view.editor.dispatchEvent(new InputEvent('input', { inputType, data: word, bubbles: true }));
+    flushSync();
+    const expected = word === 'sai' ? initial : initial + 'A';
+    expect(view.text()).toBe(expected);
+    expect(richCopyText(view.editor)).toBe(expected);
+    expect(richCopySelection(view.editor)).toEqual([expected.length, expected.length]);
+  }
+});
 it('keeps a pointer-established selection when the editor receives focus', () => {
   const view = setup({ initial: 'Nam mô Phật' });
   view.editor.blur();
@@ -343,6 +454,22 @@ it('keeps a pointer-established selection when the editor receives focus', () =>
   view.editor.dispatchEvent(new FocusEvent('focus'));
   expect(richCopySelection(view.editor)).toEqual([0, 3]);
   window.dispatchEvent(new Event('pointerup')); flushSync();
+});
+it('reports selection-only caret corrections, ignores outside ranges and releases its listener on unmount', () => {
+  const view = setup({ initial: 'Nam mô Phật' });
+  setRichCopySelection(view.editor, 3, 3);
+  document.dispatchEvent(new Event('selectionchange'));
+  expect(instance!.caret().end).toBe(3);
+  const notifications = instance!.caret().notifications;
+  const outside = document.createElement('p'); outside.textContent = 'Kinh mẫu'; document.body.append(outside);
+  const range = document.createRange(); range.selectNodeContents(outside);
+  window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+  document.dispatchEvent(new Event('selectionchange'));
+  expect(instance!.caret().notifications).toBe(notifications);
+  instance!.closeEditor(); flushSync();
+  document.dispatchEvent(new Event('selectionchange'));
+  expect(instance!.caret().notifications).toBe(notifications);
+  expect(view.text()).toBe('Nam mô Phật');
 });
 it('does not replace text nodes beneath an active pointer selection during a layout refresh', () => {
   const view = setup({ initial: 'Nam mô Phật' });
@@ -393,6 +520,24 @@ it('preserves Enter, accents and the insertion point for the next sentence', () 
   setRichCopySelection(view.editor, 11, 11);
   view.editor.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertParagraph', bubbles: true, cancelable: true })); flushSync();
   paste(view.editor, 'Địa Tạng'); expect(view.text()).toBe('Nam mô Phật\nĐịa Tạng');
+});
+it.each(['NFC', 'NFD'] as const)('keeps the latest plain-text IME commit and consecutive Enter edits before rendering (%s)', normalization => {
+  const view = setup({ initial: 'Nam ' });
+  const raw = 'Nam mô'.normalize(normalization);
+  view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  view.editor.textContent = raw;
+  setRichCopySelection(view.editor, raw.length, raw.length);
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', bubbles: true }));
+  view.editor.dispatchEvent(new CompositionEvent('compositionend', { data: 'mô', bubbles: true }));
+  for (const inputType of ['insertParagraph', 'insertLineBreak']) {
+    view.editor.dispatchEvent(new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true }));
+  }
+  flushSync();
+  expect(view.text()).toBe(raw + '\n\n');
+  expect(richCopyText(view.editor)).toBe(raw + '\n\n');
+  expect(richCopySelection(view.editor)).toEqual([raw.length + 2, raw.length + 2]);
+  view.editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true })); flushSync();
+  expect(view.text()).toBe(raw + '\n');
 });
 it('treats a Vietnamese IME composition as one undoable edit', async () => {
   const view = setup({ initial: 'Nam ' }); setRichCopySelection(view.editor, 4, 4);
@@ -613,7 +758,9 @@ it('reconciles rapid consecutive Vietnamese IME words without losing sync when c
   view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: ' ', bubbles: true }));
   // Immediately start Word 2 BEFORE setTimeout(0) runs!
   view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
-  node1.appendData('khẩu'.normalize('NFD'));
+  // Composition cũ đã kết thúc: dùng range hiện tại sau khi canonical DOM được đồng bộ.
+  const node2 = view.editor.querySelector('[data-copy-typed]')!.firstChild as Text;
+  node2.appendData('khẩu'.normalize('NFD'));
   view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'khẩu'.normalize('NFD'), bubbles: true }));
   view.editor.dispatchEvent(new CompositionEvent('compositionend', { data: 'khẩu'.normalize('NFD'), bubbles: true }));
   await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
@@ -643,4 +790,39 @@ it('keeps ghost aligned to live composed text while composing and snaps to canon
   const hiddenAfterCommit = Array.from(ghostEl.querySelectorAll<HTMLElement>('span, strong'))
     .filter(el => el.style.visibility === 'hidden').map(el => el.textContent).join('');
   expect(hiddenAfterCommit).toBe('TỊNH');
+});
+
+it('traces Space and non-composing keys immediately after compositionend and keeps remaining ghost words intact while composing Telex', () => {
+  const ghostRuns = [
+    { text: 'TỊNH KHẨU NGHIỆP CHƠN NGÔN', bold: true, align: 'center' as const, line: 0 },
+  ];
+  const view = setup({ showGhost: true, ghostRuns });
+  view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  const node1 = view.editor.querySelector('[data-copy-typed]')!.firstChild as Text;
+  node1.appendData('tịnh');
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'tịnh', bubbles: true }));
+  view.editor.dispatchEvent(new CompositionEvent('compositionend', { data: 'tịnh', bubbles: true }));
+
+  // Immediately press Space + 'k' BEFORE setTimeout(0) flushes compositionCommitTimer
+  edit(view.editor, 'insertText', ' ');
+  edit(view.editor, 'insertText', 'k');
+  expect(view.text()).toBe('TỊNH K');
+
+  // Re-start composition for a longer raw Telex string "nghieepj" after "TỊNH KHẨU "
+  edit(view.editor, 'insertText', 'h');
+  edit(view.editor, 'insertText', 'a');
+  edit(view.editor, 'insertText', 'u');
+  edit(view.editor, 'insertText', ' ');
+  expect(view.text()).toBe('TỊNH KHẨU ');
+
+  view.editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  const node2 = view.editor.querySelector('[data-copy-typed]')!.firstChild as Text;
+  node2.appendData('nghieepj');
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'nghieepj', bubbles: true }));
+  flushSync();
+
+  const ghostEl = document.querySelector('.rich-copy-ghost')!;
+  const visibleGhostTail = Array.from(ghostEl.querySelectorAll<HTMLElement>('span, strong'))
+    .filter(el => el.style.visibility !== 'hidden').map(el => el.textContent).join('');
+  expect(visibleGhostTail).toBe(' CHƠN NGÔN');
 });

@@ -5,6 +5,7 @@ import { fetchWithDeadline } from './network-deadline';
 import { CONTENT_IMAGE_CACHE } from '$lib/contracts/content-updates';
 import { resolvePublicUpdateUrl } from './native-api';
 import { NATIVE_BACKEND_ORIGINS } from './native-backend-origin';
+import { openOfflineResponseCache, type OfflineResponseCache } from './offline-response-cache';
 
 const CACHE = CONTENT_IMAGE_CACHE;
 interface CoverEntry {
@@ -71,9 +72,9 @@ export function offlineImageRemoteSource(source: string): string {
 }
 
 async function loadCoverBlob(source: string, signal?: AbortSignal, requireFresh = false): Promise<Blob> {
-    let cache: Cache | undefined;
+    let cache: OfflineResponseCache | undefined;
     let saved: Response | undefined;
-    try { cache = await caches.open(CACHE); saved = await cache.match(source); } catch { /* Storage can be unavailable. */ }
+    try { cache = await openOfflineResponseCache(CACHE); saved = await cache.match(source); } catch { /* Storage can be unavailable. */ }
     const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
     if (!requireFresh && saved && (offline || Date.now() - Number(saved.headers.get('x-cover-saved-at')) < DAY)) {
       return saved.blob();
@@ -120,7 +121,7 @@ export async function saveCoverOffline(source: string, signal?: AbortSignal): Pr
   throwIfAborted(signal);
   const blob = await loadCoverBlob(source, signal, true);
   throwIfAborted(signal);
-  const cache = await caches.open(CACHE);
+  const cache = await openOfflineResponseCache(CACHE);
   await cache.put(source, new Response(blob, { headers: { 'content-type': blob.type, 'x-cover-saved-at': String(Date.now()) } }));
 }
 
@@ -135,10 +136,10 @@ export function savedContentImages(node: HTMLElement) {
       if (seen.has(image)) continue;
       seen.add(image);
       let source = image.getAttribute('src');
-      if (!source || typeof caches === 'undefined') continue;
+      if (!source) continue;
       if (!/^(?:https:|\/|blob:|data:)/u.test(source)) source = `/${source}`;
       try {
-        const response = await (await caches.open(CACHE)).match(source);
+        const response = await (await openOfflineResponseCache(CACHE)).match(source);
         if (!response || disposed || !node.contains(image)) continue;
         const blob = await response.blob();
         if (disposed || !node.contains(image)) continue;

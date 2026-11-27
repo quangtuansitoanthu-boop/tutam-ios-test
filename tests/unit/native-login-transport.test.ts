@@ -348,12 +348,13 @@ describe('native login transport and session validation', () => {
       clientId: 'ios-client.apps.googleusercontent.com',
     }));
   });
-  it('does not start the Google SDK or contact the backend when the iOS client is missing', async () => {
+  it('uses the packaged public iOS client when the local build environment omits it', async () => {
     vi.stubEnv('VITE_GOOGLE_IOS_CLIENT_ID', '');
-    expect(await loginWithGoogleNative()).toMatchObject({ success: false });
-    expect((window as any).Capacitor.Plugins.GoogleAuth.initialize).not.toHaveBeenCalled();
-    expect(mocks.request).not.toHaveBeenCalled();
-    expect(fetcher).not.toHaveBeenCalled();
+    expect(await loginWithGoogleNative()).toMatchObject({ success: true });
+    expect((window as any).Capacitor.Plugins.GoogleAuth.initialize).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: '18472854734-vgfm8pjcp8o2817e2dlg4pfun4blam3s.apps.googleusercontent.com',
+    }));
+    expect(mocks.request).toHaveBeenCalledOnce();
   });
   it.each([
     ['google', loginWithGoogleNative],

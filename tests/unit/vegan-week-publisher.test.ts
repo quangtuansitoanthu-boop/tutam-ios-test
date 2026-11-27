@@ -31,7 +31,7 @@ describe('automatic vegan week publisher', () => {
     const signatures = Array.from({ length: weeks.length * 7 }, () => new Set<string>());
     for (const region of VEGAN_MEAL_REGIONS) {
       const days = packages.flatMap(week => {
-        expect(week.recipes).toHaveLength(190);
+        expect(week.recipes).toHaveLength(250);
         expect(Buffer.byteLength(JSON.stringify(week))).toBeLessThanOrEqual(VEGAN_PACKAGE_MAX_BYTES);
         return veganMealPlan(week, region).map(day => {
           expect(day.map(meal => meal.length)).toEqual([3, 3, 3]);
@@ -43,7 +43,6 @@ describe('automatic vegan week publisher', () => {
         const rotation = days.slice(start, start + 21).flat();
         expect(new Set(rotation.map(item => item.id)).size).toBe(189);
         expect(new Set(rotation.map(item => item.name)).size).toBe(189);
-        expect(rotation.filter(item => item.id.startsWith('dish_vegan_'))).toHaveLength(40);
       }
     }
     expect(signatures.every(day => day.size === VEGAN_MEAL_REGIONS.length)).toBe(true);
@@ -81,13 +80,13 @@ describe('automatic vegan week publisher', () => {
         const meals = veganMealPlan(week, region);
         expect(new Set(meals.flat(2).map(item => item.id)).size).toBe(63);
         for (const [breakfast] of meals.slice(0, 5)) {
-          expect(breakfast.filter(item => item.minutes <= 20).length).toBeGreaterThanOrEqual(2);
+          expect(breakfast.slice(0, 2).filter(item => item.minutes <= 20).length).toBeGreaterThanOrEqual(2);
           expect(breakfast.every(item => item.minutes <= 45)).toBe(true);
         }
-        for (const [, lunch, dinner] of meals) {
-          for (const side of [lunch[2], dinner[2]]) {
+        for (const [breakfast, lunch, dinner] of meals) {
+          for (const side of [breakfast[2], lunch[2], dinner[2]]) {
             expect(side.group).toBe('sides');
-            expect(['dish_103', 'dish_265', 'dish_266']).not.toContain(side.id);
+            expect(['dish_103', 'dish_265', 'dish_266', 'dish_379', 'dish_381', 'dish_402']).not.toContain(side.id);
           }
         }
       }

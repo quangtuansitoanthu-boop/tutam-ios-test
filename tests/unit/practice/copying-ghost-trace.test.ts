@@ -3,7 +3,62 @@ import {
   canonicalizeGhostPrefix,
   nextGhostTraceText,
   reconcileGhostInput,
+  reconcileGhostTyping,
 } from '../../../src/lib/domain/practice/copying-ghost-format';
+
+describe('raw Vietnamese tracing keys without native composition', () => {
+  it.each([
+    ['Đà Phật.', 'ddaf phaatj', 'Đà Phật'],
+    ['Đà Phật.', 'd9a2 pha6t5', 'Đà Phật'],
+    ['Tịnh khẩu.', 'tinhj khaaur', 'Tịnh khẩu'],
+    ['Thường ấm.', 'thuowngf aams', 'Thường ấm'],
+    ['Đdal.', 'ddal', 'Đdal'],
+  ])('accepts only modifiers represented by the current canonical syllable (%s)', (canonical, keys, expected) => {
+    let text = '';
+    let state: Parameters<typeof reconcileGhostTyping>[3];
+    for (const key of keys) {
+      const result = reconcileGhostTyping(canonical, text, { incoming: key, inputType: 'insertText' }, state);
+      expect(result.mismatch, `key ${key} after ${text}`).toBe(false);
+      text = result.text; state = result.state;
+    }
+    expect(text).toBe(expected);
+  });
+
+  it('rejects wrong or repeated marks, modifiers after a boundary, and ordinary wrong letters', () => {
+    let text = '';
+    let state: Parameters<typeof reconcileGhostTyping>[3];
+    for (const key of 'phaatj') {
+      const result = reconcileGhostTyping('Phật tâm.', text, { incoming: key }, state);
+      text = result.text; state = result.state;
+    }
+    for (const key of ['j', 's', 'f', 'r', 'x', '1', '2', '9', 'b']) {
+      expect(reconcileGhostTyping('Phật tâm.', text, { incoming: key }, state).mismatch, key).toBe(true);
+    }
+    const boundary = reconcileGhostTyping('Phật tâm.', text, { incoming: ' ' }, state);
+    expect(reconcileGhostTyping('Phật tâm.', boundary.text, { incoming: 'j' }, boundary.state).mismatch).toBe(true);
+  });
+
+  it('keeps normal repeated letters and precomposed/NFD input independent from raw modifier state', () => {
+    let first = reconcileGhostTyping('AABC.', '', { incoming: 'a' });
+    expect(reconcileGhostTyping('AABC.', first.text, { incoming: 'a' }, first.state).text).toBe('AA');
+    for (const normalization of ['NFC', 'NFD'] as const) {
+      first = reconcileGhostTyping('Phật tâm.', '', { incoming: 'phật'.normalize(normalization) });
+      expect(first.text).toBe('Phật');
+      expect(reconcileGhostTyping('Phật tâm.', first.text, { incoming: 'j' }, first.state).mismatch).toBe(true);
+    }
+  });
+
+  it('rejects a wrong or repeated mark at the very end of the canonical text', () => {
+    let text = '';
+    let state: Parameters<typeof reconcileGhostTyping>[3];
+    for (const key of 'phaatj') {
+      const result = reconcileGhostTyping('Phật', text, { incoming: key }, state);
+      text = result.text; state = result.state;
+    }
+    expect(text).toBe('Phật');
+    for (const key of ['j', 's', 'b', '5']) expect(reconcileGhostTyping('Phật', text, { incoming: key }, state).mismatch).toBe(true);
+  });
+});
 
 describe('nextGhostTraceText accurate typing and ghost tracing', () => {
   const canonical = 'Nam Mô A Di Đà Phật.';
@@ -115,6 +170,10 @@ describe('reconcileGhostInput & canonicalizeGhostPrefix (IME & accent auto-snap)
     });
   });
 
+  it.each(['Con lễ Phật. Dòng riêng', 'con le phat...'])('keeps a saved draft beyond the end of the model when enabling tracing: %s', draft => {
+    expect(canonicalizeGhostPrefix('Con lễ Phật.', draft)).toEqual({ text: draft, matched: false });
+  });
+
   it('advances past trailing punctuation and newline when pressing Enter so lines never stick together', () => {
     const multiLine = 'Nam Mô A Di Đà Phật.\nCon thành tâm đảnh lễ.';
     const beforePeriod = 'Nam Mô A Di Đà Phật';
@@ -153,5 +212,19 @@ describe('reconcileGhostInput & canonicalizeGhostPrefix (IME & accent auto-snap)
     const opacityMatch = tokensSrc.match(/--copy-ghost-opacity:\s*([0-9.]+)/);
     expect(opacityMatch).not.toBeNull();
     expect(Number(opacityMatch![1])).toBeLessThanOrEqual(0.35);
+  });
+
+  it('continues matching canonical words after optional parenthetical notes or minor earlier divergence', () => {
+    const scripture = 'Nam mô A Di Đà Phật.\nCon thành tâm.';
+    expect(canonicalizeGhostPrefix(scripture, 'Nam mô (3 lần) A Di Đà')).toEqual({
+      text: 'Nam mô (3 lần) A Di Đà',
+      matched: true,
+    });
+
+    const afterNote = reconcileGhostInput(scripture, 'Nam mô (3 lần) ', { incoming: 'a di da phat' });
+    expect(afterNote).toEqual({ text: 'Nam mô (3 lần) A Di Đà Phật', mismatch: false });
+
+    const afterSkipped = reconcileGhostInput(scripture, 'Nam mô Di Đà ', { incoming: 'phat' });
+    expect(afterSkipped).toEqual({ text: 'Nam mô Di Đà Phật', mismatch: false });
   });
 });

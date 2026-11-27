@@ -4,7 +4,7 @@
   import { downloadVeganWeek, latestVeganWeek, needsVeganWeekUpdate, readVeganWeek } from '$lib/browser/vegan-week';
   import { modalDialog } from '$lib/browser/modal-dialog';
   import { solarToLunar } from '$lib/components/lunar/lunar-calendar';
-  import { ingredientMeasureHint, matchesVeganRegion, quantityText, recipeStep, sameVeganDish, shoppingItems, veganMealPlan, ROTATING_VEGAN_VERSION, VEGAN_GROUPS, VEGAN_MEAL_REGIONS, VEGAN_REGIONS, vietnamWeek, weekDate, type OfflineRecipe, type VeganMealRegion, type VeganWeek } from '$lib/contracts/vegan-week';
+  import { hasDessertRotation, ingredientMeasureHint, isVeganDessert, matchesVeganRegion, quantityText, recipeStep, sameVeganDish, shoppingItems, veganMealPlan, ROTATING_VEGAN_VERSION, VEGAN_GROUPS, VEGAN_MEAL_REGIONS, VEGAN_REGIONS, vietnamWeek, weekDate, type OfflineRecipe, type VeganMealRegion, type VeganWeek } from '$lib/contracts/vegan-week';
   import { veganUi } from '$lib/i18n/vegan-ui';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
 
@@ -35,6 +35,7 @@
   let timer: ReturnType<typeof setTimeout>;
   const recipeId = $props.id();
 
+  const regionalMeals = $derived(menu ? hasDessertRotation(menu) : false);
   const mealPlan = $derived(menu ? veganMealPlan(menu, mealRegion) : []);
   const todaysIngredients = $derived(ingredientsFor([calendar.day]));
   const shopping = $derived(ingredientsFor(wholeWeek ? dayIndices : [day]));
@@ -72,7 +73,7 @@
 
   function checklistKey(index: number | 'week') {
     if (!menu) return '';
-    const regional = menu.version === ROTATING_VEGAN_VERSION && mealRegion;
+    const regional = regionalMeals && mealRegion;
     return menu.week + ':' + index + (regional ? ':' + regional : '');
   }
 
@@ -220,7 +221,7 @@
 {/snippet}
 
 {#snippet meals(index: number)}
-  {#if menu?.version === ROTATING_VEGAN_VERSION}
+  {#if regionalMeals}
   <section class="card meal-region" aria-labelledby={recipeId + '-meal-region'}>
     <h2 id={recipeId + '-meal-region'}>{c.mealRegion}</h2>
     <div class="meal-region-options">
@@ -237,9 +238,14 @@
     {#each mealPlan[index] ?? [] as items, meal (meal)}
       <div class="meal">
         <h3><Soup size={19} aria-hidden="true" />{c.meals[meal]}</h3>
-        {#each items as item (item.id)}
+        {#each items as item, dishIndex (item.id)}
           <button class="row dish" type="button" onclick={event => openRecipe(event, item)}>
-            <span>{item.name}</span>
+            <span class="dish-info">
+              {#if menu?.version === ROTATING_VEGAN_VERSION && dishIndex === 2 && isVeganDessert(item)}
+                <em class="dish-tag">{c.dessertLabel}</em>
+              {/if}
+              <span>{item.name}</span>
+            </span>
             <span class="dish-view">{c.viewRecipe}<ArrowRight size={16} aria-hidden="true" /></span>
           </button>
         {/each}
@@ -371,11 +377,10 @@
 <style>
   .vegan {
     --vegan-page-gutter: clamp(var(--radius-sm),3vw,var(--space-page));
-    --vegan-header-height: var(--practice-topbar-height,calc(64px + var(--app-safe-top,env(safe-area-inset-top,0px))));
+    --vegan-header-height: var(--site-header-height,calc(56px + var(--app-safe-top,env(safe-area-inset-top,0px))));
     max-width:52rem;
     margin:auto;
     padding-block:var(--space-page);
-    padding-top:calc(var(--vegan-header-height) + var(--space-page));
     padding-left:max(var(--vegan-page-gutter),env(safe-area-inset-left,0px));
     padding-right:max(var(--vegan-page-gutter),env(safe-area-inset-right,0px));
     color:var(--text);
@@ -386,7 +391,7 @@
       var(--bg);
   }
   .meal-tools,.row,.picker,.search{display:flex;align-items:center;gap:var(--radius-sm)}
-  .heading{margin-bottom:var(--space-page)}
+  .heading{margin-bottom:var(--space-page);text-align:center}
   h1,h2,h3,p{margin:0}
   h1{font-size:clamp(1.3rem,5vw,1.85rem)}
   h2{font-size:1.15rem}
@@ -456,6 +461,9 @@
     background:color-mix(in srgb,var(--gold) 25%,var(--card));
   }
   .meal .dish{padding-inline:var(--radius-sm);background:transparent}
+  .dish-info{display:flex;align-items:center;flex-wrap:wrap;gap:calc(var(--radius-sm) * .6);min-width:0}
+  .dish-tag{font-style:normal;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--vegan-green) 16%,var(--card));color:var(--vegan-green-deep);border:1px solid color-mix(in srgb,var(--vegan-green) 35%,transparent);white-space:nowrap}
+  :global([data-theme='dark']) .dish-tag{color:#a7f3d0}
   .dish-view{display:inline-flex;align-items:center;gap:var(--radius-sm);flex-shrink:0;padding:calc(var(--radius-sm) / 2) var(--radius-sm);border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--gold-light);font-weight:700;white-space:nowrap}
   .row{min-height:44px;justify-content:space-between;border-bottom:1px solid var(--border);padding-block:var(--radius-sm)}
   .row:last-child{border-bottom:0}

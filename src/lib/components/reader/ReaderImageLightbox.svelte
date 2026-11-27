@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { getLocaleContext } from '$lib/stores/locale.svelte';
 
   interface Props {
     source: string;
@@ -8,6 +9,8 @@
   }
 
   let { source, alt, onClose }: Props = $props();
+  const locale = getLocaleContext();
+  const isEn = $derived(locale.current === 'en');
   let dialog = $state<HTMLElement | null>(null);
   let closeButton = $state<HTMLButtonElement | null>(null);
 
@@ -51,12 +54,12 @@
     class="reader-lightbox__dialog"
     role="dialog"
     aria-modal="true"
-    aria-label={alt ? `Xem ảnh: ${alt}` : 'Xem ảnh minh họa'}
+    aria-label={alt ? (isEn ? `View image: ${alt}` : `Xem ảnh: ${alt}`) : (isEn ? 'View illustration' : 'Xem ảnh minh họa')}
     tabindex="-1"
     bind:this={dialog}
     onkeydown={trapFocus}
   >
-    <button class="reader-lightbox__close" type="button" aria-label="Đóng ảnh" bind:this={closeButton} onclick={onClose}>✕</button>
+    <button class="reader-lightbox__close" type="button" aria-label={isEn ? 'Close image' : 'Đóng ảnh'} bind:this={closeButton} onclick={onClose}>✕</button>
     <img src={source} {alt} />
   </div>
 </div>

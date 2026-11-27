@@ -29,6 +29,7 @@ export const serverStateKeys = {
   },
   scriptureCopying: {
     all: ['scripture-copying'] as const,
+    latest: (owner: string) => ['scripture-copying', owner, 'latest'] as const,
     chapter: (owner: string, sutra: string, chapter: number) => ['scripture-copying', owner, sutra, chapter] as const,
   },
   articles: {

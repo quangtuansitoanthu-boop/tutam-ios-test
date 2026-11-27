@@ -1,8 +1,6 @@
 import { dev, version } from "$app/environment";
 import { isNativeApp } from "./native-platform";
-import { OFFLINE_ILLUSTRATION_CACHE } from '$lib/contracts/book-illustrations';
-import { CONTENT_IMAGE_CACHE, CONTENT_PACKAGE_CACHE, ENGLISH_CHAPTER_CACHE } from '$lib/contracts/content-updates';
-const durableContentCaches = new Set([OFFLINE_ILLUSTRATION_CACHE, CONTENT_PACKAGE_CACHE, CONTENT_IMAGE_CACHE, ENGLISH_CHAPTER_CACHE]);
+const SHELL_CACHE_PREFIX = 'quangtu-sveltekit-';
 
 const DEV_CLEANUP_KEY = "quangtu_dev_sw_cleanup";
 const UPDATE_INTERVAL_MS = 30 * 60 * 1_000;
@@ -29,7 +27,7 @@ async function clearDevelopmentWorker(): Promise<void> {
 
   if ("caches" in globalThis) {
     const cacheNames = await caches.keys();
-    await Promise.all(cacheNames.filter((name) => !durableContentCaches.has(name)).map((cacheName) => caches.delete(cacheName)));
+    await Promise.all(cacheNames.filter((name) => name.startsWith(SHELL_CACHE_PREFIX)).map((cacheName) => caches.delete(cacheName)));
   }
 
   if (
@@ -52,20 +50,20 @@ async function purgeServiceWorkers(): Promise<void> {
   }
   if ("caches" in globalThis) {
     const cacheNames = await caches.keys();
-    await Promise.all(cacheNames.filter((name) => !durableContentCaches.has(name)).map((cacheName) => caches.delete(cacheName)));
+    await Promise.all(cacheNames.filter((name) => name.startsWith(SHELL_CACHE_PREFIX)).map((cacheName) => caches.delete(cacheName)));
   }
 }
 
 export async function registerPwa(
   options: PwaRegistrationOptions = {},
 ): Promise<PwaRegistrationHandle | null> {
-  if (dev) {
-    await clearDevelopmentWorker();
+  if (isNativeApp()) {
+    await purgeServiceWorkers();
     return null;
   }
 
-  if (isNativeApp()) {
-    await purgeServiceWorkers();
+  if (dev) {
+    await clearDevelopmentWorker();
     return null;
   }
 

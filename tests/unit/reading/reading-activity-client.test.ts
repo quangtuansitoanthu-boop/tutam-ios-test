@@ -3,6 +3,7 @@ import {
   createReadingActivityClient,
   createThrottledReadingProgressWriter,
   isReadingActivityCapacityError,
+  READING_PROGRESS_CACHE_KEY,
 } from '../../../src/lib/browser/reading-activity-client';
 import { createPrincipalStorage } from '../../../src/lib/browser/principal-storage';
 import {
@@ -43,6 +44,56 @@ const progress = (percent = 20) => ({
 });
 
 describe('reading activity client', () => {
+  it.each([400, 404, 422])('quarantines HTTP %s without blocking later progress or deleting cached intent', async status => {
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status })).mockResolvedValue(Response.json({}));
+    const client = createReadingActivityClient(fetcher, storage);
+    client.setSession(session('a'));
+    client.enqueueProgress(progress());
+    client.enqueueProgress({ ...progress(), contentId: 'valid-book' });
+    await expect(client.flush()).resolves.toBe(1);
+    expect(client.pending()).toEqual([]);
+    const reloaded = createReadingActivityClient(fetcher, storage);
+    reloaded.setSession(session('a'));
+    expect(reloaded.rejected()).toEqual([expect.objectContaining({ status,
+      operation: expect.objectContaining({ kind: 'progress', payload: expect.objectContaining({ contentId: 'book-a' }) }) })]);
+    expect(JSON.parse(createPrincipalStorage(storage, 'a').getItem(READING_PROGRESS_CACHE_KEY)!))
+      .toContainEqual(expect.objectContaining({ contentId: 'book-a', percent: 20 }));
+    await reloaded.flush();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(reloaded.retryRejected('progress:pdf:book-a')).toBe(true);
+    expect(reloaded.rejected()).toEqual([]);
+    await expect(reloaded.flush()).resolves.toBe(1);
+  });
+
+  it.each([401, 403, 408, 429, 503])('keeps HTTP %s reading writes pending without treating them as permanent rejections', async status => {
+    const fetcher = vi.fn(async () => new Response(null, { status }));
+    const client = createReadingActivityClient(fetcher, new MemoryStorage());
+    client.setSession(session('a'));
+    client.enqueueProgress(progress());
+    client.enqueueProgress({ ...progress(), contentId: 'later' });
+    await expect(client.flush()).rejects.toThrow(`reading_activity_${status}`);
+    expect(client.pending()).toHaveLength(2);
+    expect(client.rejected()).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a newer reading intent when its dispatched predecessor is permanently rejected', async () => {
+    let release!: (response: Response) => void;
+    const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { release = resolve; }))
+      .mockResolvedValue(Response.json({}));
+    const client = createReadingActivityClient(fetcher, new MemoryStorage());
+    client.setSession(session('a'));
+    client.enqueueProgress(progress(20));
+    const flushing = client.flush();
+    client.enqueueProgress(progress(80));
+    release(new Response(null, { status: 422 }));
+    await expect(flushing).resolves.toBe(1);
+    expect(client.pending()).toEqual([]);
+    expect(client.rejected()).toEqual([expect.objectContaining({ operation:
+      expect.objectContaining({ payload: expect.objectContaining({ percent: 20 }) }) })]);
+    expect(JSON.parse(String(fetcher.mock.calls[1][1].body))).toMatchObject({ percent: 80 });
+  });
   it('keeps synced history outside a full recent page without returning more than the requested limit', async () => {
     const storage = new MemoryStorage();
     const recent = Array.from({ length: 50 }, (_, index) => ({

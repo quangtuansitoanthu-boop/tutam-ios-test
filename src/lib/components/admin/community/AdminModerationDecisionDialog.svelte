@@ -36,6 +36,6 @@
 </dialog>
 
 <style>
-  .mindful p{text-align:center;overflow-wrap:anywhere;white-space:pre-wrap}
+  .mindful p{text-align:justify;overflow-wrap:anywhere;white-space:pre-wrap}
   small{display:block;color:var(--text2);margin-bottom:var(--radius-sm);text-align:left}
 </style>

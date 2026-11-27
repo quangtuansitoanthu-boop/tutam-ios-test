@@ -7,14 +7,19 @@ import { createBrowserId } from './random-id';
 import { createPrincipalStorage, principalStorageKey } from './principal-storage';
 import { DELETED_PRACTICE_LOGS_KEY, LEGACY_LOCAL_STORAGE_KEYS, type StorageLike } from './storage-contract';
 import { SESSION_CHANGE_EVENT } from '$lib/stores/session.svelte';
+import { isPermanentOutboxRejection, quarantineOutboxOperation, readOutboxRejections, removeOutboxRejection } from './outbox-rejections';
 
 export const COMPLETED_LOG_OUTBOX_KEY = 'quangtu_completed_practice_logs_v1';
+const REJECTED_OPERATIONS_KEY = 'quangtu_completed_practice_log_rejections_v1';
+const MAX_REQUESTS_PER_FLUSH = 50;
 interface QueueState {
   version: 1;
   namespace: string;
   startedAt: string;
   pending: CompletedPracticeLog[];
   acknowledged: string[];
+  retryFailures?: number;
+  retryAt?: number;
 }
 interface SyncSession {
   authenticated: boolean;
@@ -82,7 +87,8 @@ export function createCompletedLogSync(
     const pending = state.pending.filter(log => !deletedIds.has(String(log.localLogId)));
     let changed = pending.length !== state.pending.length;
     state.pending = pending;
-    const known = new Set([...state.acknowledged, ...state.pending.map(log => log.logId)]);
+    const rejected = readOutboxRejections<CompletedPracticeLog>(scoped, REJECTED_OPERATIONS_KEY);
+    const known = new Set([...state.acknowledged, ...state.pending.map(log => log.logId), ...rejected.map(entry => entry.operation.logId)]);
     const rawLogs: unknown = JSON.parse(scoped.getItem(LEGACY_LOCAL_STORAGE_KEYS.practiceLogs) || '[]');
     const logs = normalizePracticeLogs(Array.isArray(rawLogs) ? rawLogs.filter(value => value && typeof value === 'object'
       && typeof value.created === 'string' && Number.isFinite(Date.parse(value.created))) : []);
@@ -105,23 +111,61 @@ export function createCompletedLogSync(
     let applied = 0;
     try {
       let state = collect(scoped);
-      while (state.pending.length && epoch === generation) {
-        const logs = state.pending.slice(0, COMPLETED_LOG_BATCH_LIMIT);
+      if (state.pending.length && (state.retryAt ?? 0) > now().getTime()) throw new Error('completed_log_sync_cooldown');
+      const splitBatches: CompletedPracticeLog[][] = [];
+      let requests = 0;
+      while (state.pending.length && epoch === generation && requests < MAX_REQUESTS_PER_FLUSH) {
+        const pendingIds = new Set(state.pending.map(log => log.logId));
+        const logs = (splitBatches.shift() ?? state.pending.slice(0, COMPLETED_LOG_BATCH_LIMIT))
+          .filter(log => pendingIds.has(log.logId));
+        if (!logs.length) continue;
+        requests++;
         const response = await fetcher('/api/practice/completed-logs', {
           method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf },
           body: JSON.stringify({ logs }), signal: activeController.signal,
         });
-        if (!response.ok) throw new Error(`completed_log_sync_${response.status}`);
         if (epoch !== generation || principal() !== owner) return 0;
+        if (!response.ok) {
+          if (isPermanentOutboxRejection(response.status)) {
+            // Batch không chỉ rõ log lỗi: chia đôi thay vì cách ly cả những log hợp lệ.
+            if (logs.length > 1) {
+              const middle = Math.ceil(logs.length / 2);
+              splitBatches.unshift(logs.slice(0, middle), logs.slice(middle));
+            } else {
+              quarantineOutboxOperation(scoped, REJECTED_OPERATIONS_KEY, logs[0], response.status, now().toISOString());
+              state = initializeCompletedLogState(scoped, now());
+              state.pending = state.pending.filter(log => log.logId !== logs[0].logId);
+              write(scoped, state);
+            }
+            state = collect(scoped);
+            continue;
+          }
+          throw new Error(`completed_log_sync_${response.status}`);
+        }
         state = initializeCompletedLogState(scoped, now());
         const ids = new Set(logs.map(log => log.logId));
         state.pending = state.pending.filter(log => !ids.has(log.logId));
         state.acknowledged = [...new Set([...state.acknowledged, ...ids])];
+        state.retryFailures = 0; state.retryAt = 0;
         write(scoped, state); applied += logs.length;
         state = collect(scoped);
       }
+      if (state.pending.length && epoch === generation && requests === MAX_REQUESTS_PER_FLUSH) {
+        state.retryAt = now().getTime() + 1_000;
+        write(scoped, state);
+      }
       if (applied && epoch === generation) dependencies.onApplied?.(applied);
       return applied;
+    } catch (cause) {
+      if (epoch !== generation || principal() !== owner) return 0;
+      if (!(cause instanceof Error && cause.message === 'completed_log_sync_cooldown')) {
+        const state = initializeCompletedLogState(scoped, now());
+        state.retryFailures = Math.min((state.retryFailures ?? 0) + 1, 9);
+        state.retryAt = now().getTime() + Math.min(300_000, 1_000 * 2 ** (state.retryFailures - 1));
+        write(scoped, state);
+      }
+      if (applied) dependencies.onApplied?.(applied);
+      throw cause;
     } finally { if (controller === activeController) controller = null; }
   }
 
@@ -141,6 +185,22 @@ export function createCompletedLogSync(
         if (running?.promise === promise) running = null;
       });
       running = { generation: epoch, promise }; return promise;
+    },
+    rejected() {
+      return readOutboxRejections<CompletedPracticeLog>(createPrincipalStorage(storage, principal()), REJECTED_OPERATIONS_KEY);
+    },
+    retryRejected(logId: string): boolean {
+      const scoped = createPrincipalStorage(storage, principal());
+      const entry = readOutboxRejections<CompletedPracticeLog>(scoped, REJECTED_OPERATIONS_KEY)
+        .find(item => item.operation.logId === logId);
+      const state = initializeCompletedLogState(scoped, now());
+      if (!entry || state.pending.some(log => log.logId === logId) || state.acknowledged.includes(logId)) return false;
+      if (state.pending.length >= 1_000) throw new Error('completed_log_outbox_capacity_exceeded');
+      state.pending.push(entry.operation);
+      state.retryAt = 0; state.retryFailures = 0;
+      write(scoped, state);
+      removeOutboxRejection(scoped, REJECTED_OPERATIONS_KEY, entry.operation);
+      return true;
     },
     dispose() { generation++; controller?.abort(); },
   };

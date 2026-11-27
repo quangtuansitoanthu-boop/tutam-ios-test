@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { createInterfaceTranslator } from '$lib/i18n/interface';
-  const localizeUi = createInterfaceTranslator();
   import { confirmInApp } from '$lib/browser/app-dialog';
   import { onMount, untrack } from 'svelte';
   import { modalDialog } from '$lib/browser/modal-dialog';
@@ -15,6 +13,7 @@
   import { fetchHomepageWithOfflinePdfs } from '$lib/browser/offline-pdf-library';
   import { quoteCardCopy } from '$lib/i18n/quote-card';
   import { getLocaleContext } from '$lib/stores/locale.svelte';
+  import { getLocalizedArticle } from '$lib/domain/library/localized-article';
   import type { LibraryArticle } from '$lib/components/library/article';
   import type { HighlightColor, ReadingContentKind } from '$lib/domain/reading/activity';
   import { getSessionContext, SESSION_CHANGE_EVENT } from '$lib/stores/session.svelte';
@@ -24,6 +23,7 @@
 
   const sessionStore = getSessionContext();
   const localeStore = getLocaleContext();
+  const isEn = $derived(localeStore.current === 'en');
   const copy = $derived(quoteCardCopy[localeStore.current]);
   let annotations = $state<ReadingAnnotationRecord[]>([]);
   let articles = $state<LibraryArticle[]>([]);
@@ -51,7 +51,8 @@
   }));
 
   function sourceFor(annotation: ReadingAnnotationRecord): LibraryArticle | null {
-    return articles.find((article) => article.id === annotation.contentId) ?? null;
+    const raw = articles.find((article) => article.id === annotation.contentId) ?? null;
+    return raw ? (getLocalizedArticle(raw, localeStore.current) ?? raw) : null;
   }
 
   function sourceTitle(annotation: ReadingAnnotationRecord): string {
@@ -60,9 +61,9 @@
 
   function kindLabel(value: ReadingContentKind): string {
     if (value === 'pdf') return 'PDF';
-    if (value === 'book' || value === 'chapter') return 'Sách';
-    if (value === 'practice') return 'Tu tập';
-    return 'Bài viết';
+    if (value === 'book' || value === 'chapter') return isEn ? 'Book' : 'Sách';
+    if (value === 'practice') return isEn ? 'Practice' : 'Tu tập';
+    return isEn ? 'Article' : 'Bài viết';
   }
 
   function beginEdit(annotation: ReadingAnnotationRecord): void {
@@ -125,13 +126,17 @@
       articles = sources.status === 'fulfilled' ? sources.value.articles : [];
       completeSourceCatalog = sources.status === 'fulfilled' && !sources.value.offline;
       if (quotes.status === 'rejected' || sources.status === 'rejected' || sources.value.offline) {
-        error = 'Không thể đồng bộ trích dẫn lúc này. Đang hiển thị dữ liệu đã lưu trên thiết bị.';
+        error = isEn
+          ? 'Could not sync quotes right now. Showing data saved on this device.'
+          : 'Không thể đồng bộ trích dẫn lúc này. Đang hiển thị dữ liệu đã lưu trên thiết bị.';
       }
     } catch {
       if (request !== generation || !principalGuard.isCurrent(principalToken)) return;
       annotations = client.cachedAnnotations();
       completeSourceCatalog = false;
-      error = 'Không thể đồng bộ trích dẫn lúc này. Đang hiển thị dữ liệu đã lưu trên thiết bị.';
+      error = isEn
+        ? 'Could not sync quotes right now. Showing data saved on this device.'
+        : 'Không thể đồng bộ trích dẫn lúc này. Đang hiển thị dữ liệu đã lưu trên thiết bị.';
     } finally {
       if (request === generation && principalGuard.isCurrent(principalToken)) loading = false;
     }
@@ -158,8 +163,12 @@
     } catch (cause) {
       if (!principalGuard.isCurrent(principalToken)) return;
       error = isReadingActivityCapacityError(cause)
-        ? 'Hàng đợi đọc ngoại tuyến đã đầy. Ghi chú chưa thay đổi; hãy kết nối để đồng bộ rồi thử lại.'
-        : 'Chưa thể gửi thay đổi. Ghi chú đã được giữ an toàn trên thiết bị để thử lại.';
+        ? (isEn
+            ? 'The offline reading queue is full. Notes were not changed; connect to sync and try again.'
+            : 'Hàng đợi đọc ngoại tuyến đã đầy. Ghi chú chưa thay đổi; hãy kết nối để đồng bộ rồi thử lại.')
+        : (isEn
+            ? 'Could not send changes yet. Your notes are saved safely on this device to retry.'
+            : 'Chưa thể gửi thay đổi. Ghi chú đã được giữ an toàn trên thiết bị để thử lại.');
       annotations = client.cachedAnnotations();
       editing = null;
     } finally {
@@ -170,7 +179,7 @@
   async function remove(annotation: ReadingAnnotationRecord): Promise<void> {
     if (!client) return;
     const principalToken = principalGuard.capture();
-    if (!await confirmInApp('Xóa trích dẫn này?') || !principalGuard.isCurrent(principalToken) || !client) return;
+    if (!await confirmInApp(isEn ? 'Delete this quote?' : 'Xóa trích dẫn này?') || !principalGuard.isCurrent(principalToken) || !client) return;
     try {
       client.enqueueAnnotationDelete(annotation.id);
       annotations = client.cachedAnnotations();
@@ -179,8 +188,12 @@
     } catch (cause) {
       if (!principalGuard.isCurrent(principalToken)) return;
       error = isReadingActivityCapacityError(cause)
-        ? 'Hàng đợi đọc ngoại tuyến đã đầy; trích dẫn chưa bị xóa.'
-        : 'Yêu cầu xóa sẽ được thử lại khi kết nối ổn định.';
+        ? (isEn
+            ? 'The offline reading queue is full; the quote was not deleted.'
+            : 'Hàng đợi đọc ngoại tuyến đã đầy; trích dẫn chưa bị xóa.')
+        : (isEn
+            ? 'The delete request will be retried when the connection stabilizes.'
+            : 'Yêu cầu xóa sẽ được thử lại khi kết nối ổn định.');
     }
   }
 
@@ -211,81 +224,68 @@
 </script>
 
 <svelte:head>
-  <title>Trích dẫn của tôi — Tu Tập Phật Pháp</title>
-  <meta name="description" content="Các đoạn đã tô sáng và ghi chú riêng của bạn." />
+  <title>{isEn ? 'My quotes — Tu Tập Phật Pháp' : 'Trích dẫn của tôi — Tu Tập Phật Pháp'}</title>
+  <meta name="description" content={isEn ? 'Your highlighted passages and personal notes.' : 'Các đoạn đã tô sáng và ghi chú riêng của bạn.'} />
   <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <main class="quotes-page" aria-labelledby="quotes-title">
   <header class="quotes-hero">
-    <a
-      class="quotes-back-btn tt-back-btn"
-      href="/kinh-sach#reading-library"
-      onclick={(event) => {
-        if (typeof window !== 'undefined' && window.history.length > 1) {
-          event.preventDefault();
-          window.history.back();
-        }
-      }}
-    >
-      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-      <span>{localizeUi('Quay lại')}</span>
-    </a>
-    <span>KHÔNG GIAN RIÊNG TƯ</span>
-    <h1 id="quotes-title">Trích dẫn của tôi</h1>
-    <p>Các đoạn bạn tô sáng và suy ngẫm cá nhân chỉ hiển thị cho tài khoản của bạn.</p>
+    <span>{isEn ? 'PRIVATE SPACE' : 'KHÔNG GIAN RIÊNG TƯ'}</span>
+    <h1 id="quotes-title">{isEn ? 'My quotes' : 'Trích dẫn của tôi'}</h1>
+    <p>{isEn ? 'Passages you highlighted and personal reflections are visible only to your account.' : 'Các đoạn bạn tô sáng và suy ngẫm cá nhân chỉ hiển thị cho tài khoản của bạn.'}</p>
   </header>
 
   {#if !sessionStore.value.authenticated}
-    <section class="quotes-login" aria-label="Yêu cầu đăng nhập">
+    <section class="quotes-login" aria-label={isEn ? 'Sign in required' : 'Yêu cầu đăng nhập'}>
       <span aria-hidden="true">🔒</span>
-      <h2>Đăng nhập để xem trích dẫn</h2>
-      <p>Trích dẫn từ tài khoản khác hoặc vùng đọc ẩn danh không được tự động nhập vào đây.</p>
-      <button type="button" onclick={requestLogin}>Đăng nhập</button>
+      <h2>{isEn ? 'Sign in to view your quotes' : 'Đăng nhập để xem trích dẫn'}</h2>
+      <p>{isEn ? 'Quotes from other accounts or anonymous sessions are not imported here automatically.' : 'Trích dẫn từ tài khoản khác hoặc vùng đọc ẩn danh không được tự động nhập vào đây.'}</p>
+      <button type="button" onclick={requestLogin}>{isEn ? 'Sign in' : 'Đăng nhập'}</button>
     </section>
   {:else}
-    <section class="quotes-filters" aria-label="Lọc trích dẫn">
-      <label class="quotes-search">Tìm kiếm
-        <input type="search" bind:value={query} placeholder="Tìm trong trích dẫn, ghi chú…" />
+    <section class="quotes-filters" aria-label={isEn ? 'Filter quotes' : 'Lọc trích dẫn'}>
+      <label class="quotes-search">{isEn ? 'Search' : 'Tìm kiếm'}
+        <input type="search" bind:value={query} placeholder={isEn ? 'Search in quotes and notes…' : 'Tìm trong trích dẫn, ghi chú…'} />
       </label>
-      <label>Nguồn
+      <label>{isEn ? 'Source' : 'Nguồn'}
         <select bind:value={kind}>
-          <option value="all">Tất cả</option><option value="article">Bài viết</option><option value="book">Sách</option><option value="chapter">Chương</option><option value="pdf">PDF</option><option value="practice">Tu tập</option>
+          <option value="all">{isEn ? 'All' : 'Tất cả'}</option><option value="article">{isEn ? 'Article' : 'Bài viết'}</option><option value="book">{isEn ? 'Book' : 'Sách'}</option><option value="chapter">{isEn ? 'Chapter' : 'Chương'}</option><option value="pdf">PDF</option><option value="practice">{isEn ? 'Practice' : 'Tu tập'}</option>
         </select>
       </label>
-      <label>Màu
-        <select bind:value={color}><option value="all">Tất cả</option><option value="yellow">Vàng</option><option value="green">Xanh</option></select>
+      <label>{isEn ? 'Color' : 'Màu'}
+        <select bind:value={color}><option value="all">{isEn ? 'All' : 'Tất cả'}</option><option value="yellow">{isEn ? 'Yellow' : 'Vàng'}</option><option value="green">{isEn ? 'Green' : 'Xanh'}</option></select>
       </label>
-      <label>Liên kết
-        <select bind:value={anchor}><option value="all">Tất cả</option><option value="active">Còn khớp</option><option value="orphaned">Cần xem lại</option></select>
+      <label>{isEn ? 'Anchor' : 'Liên kết'}
+        <select bind:value={anchor}><option value="all">{isEn ? 'All' : 'Tất cả'}</option><option value="active">{isEn ? 'Matched' : 'Còn khớp'}</option><option value="orphaned">{isEn ? 'Needs review' : 'Cần xem lại'}</option></select>
       </label>
     </section>
 
     {#if error}<p class="quotes-error" role="status">{error}</p>{/if}
     {#if loading}
-      <div class="quotes-loading" role="status">Đang tải trích dẫn…</div>
+      <div class="quotes-loading" role="status">{isEn ? 'Loading quotes…' : 'Đang tải trích dẫn…'}</div>
     {:else if !filtered.length}
       <section class="quotes-empty">
         <span aria-hidden="true">✦</span>
-        <h2>{annotations.length ? 'Không có trích dẫn phù hợp' : 'Chưa có trích dẫn nào'}</h2>
-        <p>{annotations.length ? 'Hãy thay đổi bộ lọc.' : 'Trong trình đọc, chọn một đoạn văn rồi chọn màu và thêm ghi chú.'}</p>
+        <h2>{annotations.length ? (isEn ? 'No matching quotes' : 'Không có trích dẫn phù hợp') : (isEn ? 'No quotes yet' : 'Chưa có trích dẫn nào')}</h2>
+        <p>{annotations.length ? (isEn ? 'Try adjusting the filters.' : 'Hãy thay đổi bộ lọc.') : (isEn ? 'In the reader, select a passage then choose a highlight color and add a note.' : 'Trong trình đọc, chọn một đoạn văn rồi chọn màu và thêm ghi chú.')}</p>
       </section>
     {:else}
-      <p class="quotes-count" aria-live="polite">{filtered.length} trích dẫn</p>
+      <p class="quotes-count" aria-live="polite">{isEn ? `${filtered.length} quote(s)` : `${filtered.length} trích dẫn`}</p>
       <div class="quotes-list">
         {#each filtered as annotation (annotation.id)}
           {@const source = sourceFor(annotation)}
           <article class:orphaned={annotation.anchorStatus === 'orphaned'} style={`--quote-color:${annotation.color === 'green' ? '#9ed89a' : '#f4d76d'}`}>
-            <div class="quote-meta"><span>{kindLabel(annotation.contentKind)}</span><time datetime={annotation.updatedAt}>{formatVietnamDate(annotation.updatedAt)}</time></div>
+            <div class="quote-meta"><span>{kindLabel(annotation.contentKind)}</span><time datetime={annotation.updatedAt}>{formatVietnamDate(annotation.updatedAt, localeStore.current)}</time></div>
             <blockquote class:verse={isVerseLikeQuote(annotation.quoteText)}>{annotation.quoteText}</blockquote>
-            {#if annotation.note}<p class="quote-note"><strong>Ghi chú:</strong> {annotation.note}</p>{/if}
-            {#if annotation.anchorStatus === 'orphaned'}<p class="quote-orphan" role="status">⚠ Đoạn này không còn khớp với phiên bản nội dung hiện tại.</p>{/if}
+            {#if annotation.note}<p class="quote-note"><strong>{isEn ? 'Note:' : 'Ghi chú:'}</strong> {annotation.note}</p>{/if}
+            {#if annotation.anchorStatus === 'orphaned'}<p class="quote-orphan" role="status">{isEn ? '⚠ This passage no longer matches the current content version.' : '⚠ Đoạn này không còn khớp với phiên bản nội dung hiện tại.'}</p>{/if}
             <footer>
               {#if source}<a href={`/?article=${encodeURIComponent(annotation.contentId)}&annotation=${encodeURIComponent(annotation.id)}`}>{source.title} <span aria-hidden="true">↗</span></a>{:else}<span>{sourceTitle(annotation)}</span>{/if}
               <div>
-                <button class="quote-card-btn" type="button" onclick={() => (cardAnnotation = annotation)} title="Tạo ảnh chia sẻ mạng xã hội">🖼️ Tạo ảnh</button>
-                <button type="button" onclick={() => beginEdit(annotation)}>Sửa</button>
-                <button class="danger" type="button" onclick={() => void remove(annotation)}>Xóa</button>
+                <button class="quote-card-btn" type="button" onclick={() => (cardAnnotation = annotation)} title={isEn ? 'Create image for social sharing' : 'Tạo ảnh chia sẻ mạng xã hội'}>{isEn ? '🖼️ Create image' : '🖼️ Tạo ảnh'}</button>
+                <button type="button" onclick={() => beginEdit(annotation)}>{isEn ? 'Edit' : 'Sửa'}</button>
+                <button class="danger" type="button" onclick={() => void remove(annotation)}>{isEn ? 'Delete' : 'Xóa'}</button>
               </div>
             </footer>
           </article>
@@ -298,13 +298,13 @@
 {#if editing}
   <dialog use:modalDialog class="quote-dialog" data-dialog-glass aria-labelledby="quote-dialog-title"
     oncancel={(event) => { event.preventDefault(); dismissEdit(); }} onclick={dismissBackdrop}>
-    <header><h2 id="quote-dialog-title" tabindex="-1" data-modal-focus>Sửa trích dẫn</h2><button type="button" aria-label="Đóng" disabled={saving} onclick={dismissEdit}>✕</button></header>
+    <header><h2 id="quote-dialog-title" tabindex="-1" data-modal-focus>{isEn ? 'Edit quote' : 'Sửa trích dẫn'}</h2><button type="button" aria-label={isEn ? 'Close' : 'Đóng'} disabled={saving} onclick={dismissEdit}>✕</button></header>
     <div class="quote-dialog-body">
       <blockquote>{editing.quoteText}</blockquote>
-      <fieldset disabled={saving}><legend>Màu tô sáng</legend><label><input type="radio" bind:group={editingColor} value="yellow" /> Vàng</label><label><input type="radio" bind:group={editingColor} value="green" /> Xanh</label></fieldset>
-      <label>Ghi chú<textarea bind:value={editingNote} maxlength="12000" rows="5" disabled={saving}></textarea></label>
+      <fieldset disabled={saving}><legend>{isEn ? 'Highlight color' : 'Màu tô sáng'}</legend><label><input type="radio" bind:group={editingColor} value="yellow" /> {isEn ? 'Yellow' : 'Vàng'}</label><label><input type="radio" bind:group={editingColor} value="green" /> {isEn ? 'Green' : 'Xanh'}</label></fieldset>
+      <label>{isEn ? 'Note' : 'Ghi chú'}<textarea bind:value={editingNote} maxlength="12000" rows="5" disabled={saving}></textarea></label>
     </div>
-    <div class="dialog-actions dialog-actions-balanced"><button type="button" disabled={saving} onclick={dismissEdit}>Hủy</button><button class="primary" type="button" disabled={saving} onclick={() => void saveEdit()}>{saving ? 'Đang lưu…' : 'Lưu'}</button></div>
+    <div class="dialog-actions dialog-actions-balanced"><button type="button" disabled={saving} onclick={dismissEdit}>{isEn ? 'Cancel' : 'Hủy'}</button><button class="primary" type="button" disabled={saving} onclick={() => void saveEdit()}>{saving ? (isEn ? 'Saving…' : 'Đang lưu…') : (isEn ? 'Save' : 'Lưu')}</button></div>
   </dialog>
 {/if}
 
@@ -320,13 +320,10 @@
 <style>
   .quotes-page{box-sizing:border-box;min-height:70vh;max-width:1000px;margin:0 auto;padding:34px 24px var(--space-page);color:var(--text);font-family:var(--font-app)}
   .quote-card-btn{color:var(--brown) !important;font-weight:700 !important}
-  .quotes-hero{margin-bottom:24px}
-  .quotes-hero>a{display:inline-flex;min-height:44px;align-items:center;gap:6px;padding:0 14px;border:1px solid var(--border);border-radius:999px;background:var(--card);color:var(--text2);font-size:var(--font-size-label);font-weight:700;text-decoration:none;box-shadow:var(--shadow-sm);transition:background .15s,border-color .15s,color .15s}
-  .quotes-hero>a:hover{background:var(--gold-light);border-color:var(--gold);color:var(--brown)}
-  :global([data-theme='dark']) .quotes-hero>a{background:rgba(200,150,62,.12);border-color:rgba(200,150,62,.28);color:var(--gold2)}
-  .quotes-hero>span{display:block;margin-top:15px;color:var(--brown);font-size:var(--font-size-meta);font-weight:700;letter-spacing:2px}
-  .quotes-hero h1{margin:5px 0 6px;font-size:clamp(1.35rem,3vw,1.85rem);line-height:1.25}
-  .quotes-hero p{max-width:620px;margin:0;color:var(--muted);line-height:1.6}
+  .quotes-hero{margin-bottom:24px;text-align:center}
+  .quotes-hero>span{display:block;color:var(--brown);font-size:var(--font-size-meta);font-weight:700;letter-spacing:2px}
+  .quotes-hero h1{margin:5px 0 6px;font-size:var(--font-size-section-title);line-height:1.25}
+  .quotes-hero p{max-width:620px;margin:0 auto;color:var(--text2);line-height:1.6}
   .quotes-login,.quotes-empty{padding:46px 24px;border:1px dashed var(--border);border-radius:16px;background:var(--bg2);text-align:center}
   .quotes-login>span,.quotes-empty>span{font-size:38px}
   .quotes-login h2,.quotes-empty h2{margin:10px 0 5px}

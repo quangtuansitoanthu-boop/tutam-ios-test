@@ -95,7 +95,8 @@ for (const dark of [false, true]) {
     await toggle.click();
     const tools = reader.getByRole('region', { name: 'Công cụ đọc', exact: true });
     await expect(tools).toBeVisible();
-    await expect(tools.locator('.toolbar-group').first()).toContainText('Cuộn tự động');
+    await expect(tools.locator('.toolbar-group').first()).toContainText('Cỡ chữ');
+    await expect(tools.getByRole('combobox', { name: 'Cuộn tự động', exact: true })).toBeVisible();
     for (const name of ['Đánh dấu', 'Nghe', 'Chia sẻ', 'Cuộn']) await expect(tools.locator('.action-label').filter({ hasText: new RegExp(`^${name}$`) })).toBeVisible();
     const before = parseInt(await tools.locator('.font-size').innerText(), 10);
     await tools.getByRole('button', { name: 'Chữ lớn hơn', exact: true }).click();

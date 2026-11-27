@@ -1,8 +1,8 @@
 export const veganUi = {
   vi: {
     title: 'Lịch ăn chay đủ dinh dưỡng', back: 'Tu tập', tabs: ['Hôm nay', 'Lịch tuần & Đi chợ', 'Menu món'],
-    groups: ['Luộc & hấp', 'Bún, phở & mì', 'Cơm, xôi & món kho/xào', 'Bánh mì & bữa sáng', 'Cháo & súp', 'Canh & món kèm'],
-    meals: ['Bữa sáng', 'Bữa trưa', 'Bữa tối'], people: 'người', minutes: 'phút', less: 'Giảm số người', more: 'Tăng số người',
+    groups: ['Luộc & hấp', 'Bún, phở & mì', 'Cơm, xôi & món kho/xào', 'Bánh mì & bữa sáng', 'Cháo & súp', 'Tráng miệng & món kèm'],
+    meals: ['Bữa sáng', 'Bữa trưa', 'Bữa tối'], dessertLabel: 'Tráng miệng', people: 'người', minutes: 'phút', less: 'Giảm số người', more: 'Tăng số người',
     smallerText: 'Giảm cỡ chữ công thức', largerText: 'Tăng cỡ chữ công thức',
     mealRegion: 'Ưu tiên món theo vùng', mealRegions: ['Tất cả', 'Bắc', 'Trung', 'Nam'],
     ingredients: 'Nguyên liệu', todayIngredients: 'Nguyên liệu hôm nay', menu: 'Thực đơn gợi ý', viewRecipe: 'Xem',
@@ -15,8 +15,8 @@ export const veganUi = {
   },
   en: {
     title: 'Balanced vegan meal calendar', back: 'Practice', tabs: ['Today', 'Week & shopping', 'Dish menu'],
-    groups: ['Boiled & steamed', 'Noodles', 'Rice & stir-fries', 'Bread & breakfast', 'Porridge & soup', 'Sides & broths'],
-    meals: ['Breakfast', 'Lunch', 'Dinner'], people: 'people', minutes: 'min', less: 'Decrease servings', more: 'Increase servings',
+    groups: ['Boiled & steamed', 'Noodles', 'Rice & stir-fries', 'Bread & breakfast', 'Porridge & soup', 'Desserts & sides'],
+    meals: ['Breakfast', 'Lunch', 'Dinner'], dessertLabel: 'Dessert', people: 'people', minutes: 'min', less: 'Decrease servings', more: 'Increase servings',
     smallerText: 'Decrease recipe text size', largerText: 'Increase recipe text size',
     mealRegion: 'Prioritize dishes by region', mealRegions: ['All', 'North', 'Central', 'South'],
     ingredients: 'Ingredients', todayIngredients: 'Today’s ingredients', menu: 'Suggested meals', viewRecipe: 'View',

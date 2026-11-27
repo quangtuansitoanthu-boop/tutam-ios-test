@@ -21,7 +21,7 @@
   import { copyingBlockCompleted, copyingChapterCompletion, copyingTextCompletion } from '$lib/domain/practice/copying-completion-progress';
   import { copySourceText, copySourceLayoutLines } from '$lib/domain/practice/copying-formatting';
   import sourceLayouts from '$lib/data/scripture-copying/layouts.json';
-  import { ArrowLeft, Check, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, PenLine, Settings, Maximize, Minimize, ArrowDownUp, BookOpen, SlidersHorizontal, Volume2, Square, X } from '@lucide/svelte';
+  import { Check, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, PenLine, Settings, Save, Maximize, Minimize, ArrowDownUp, BookOpen, SlidersHorizontal, Volume2, Square, X } from '@lucide/svelte';
   import { copyingSentences, copyingCursorPosition, copyingSourceWordLines } from '$lib/domain/practice/copying-follow';
   import { createInterfaceTranslator } from '$lib/i18n/copying-interface';
   const localizeUi = createInterfaceTranslator();
@@ -190,8 +190,11 @@
   import { onMount, onDestroy, tick, untrack } from 'svelte';
   onDestroy(() => {
     cancelAutoAdvance();
+    clearGhostMismatch();
     sampleSpeech.destroy();
     clearGuestBannerTimer();
+    finishCloudChoice(false);
+    finishLeaveChoice('stay');
   });
   import { routineCopyChoice } from '$lib/browser/routine-copy-navigation';
   import { beforeNavigate, goto } from '$app/navigation';
@@ -202,7 +205,7 @@
   import { fetchWithSessionRefresh, requireBrowserCsrf } from '$lib/browser/session-csrf';
   import { serverStateKeys } from '$lib/browser/server-state';
   import { createCopyStore, createCopyBookRunStore } from '$lib/browser/scripture-copying-storage';
-  import { sendCopyingSnapshot } from '$lib/browser/scripture-copying-api';
+  import { readLatestCopyingSnapshot, sendCopyingSnapshot, type CopyCloudSnapshot } from '$lib/browser/scripture-copying-api';
   import { copyDraftKey, createCopyId, createCopyWorkspace, type CopyDraft, type CopyStore } from '$lib/browser/scripture-copying-workspace';
   import { COPYING_BOOKS, COPY_NOTICE, compareCopy, normalizeCopyText, isBlockedCopyInput, hasOpenCopyNote, type CopyBook, type CopyBookId, type CopyIssue } from '$lib/domain/practice/scripture-copying';
 
@@ -316,6 +319,7 @@
     }, 1500);
   }
   function toggleGhostMode() {
+    const wasAtEnd = caretPosition === null || caretPosition >= text.length;
     ghostEnabled = !ghostEnabled;
     clearGhostMismatch();
     if (ghostEnabled && text) {
@@ -328,6 +332,9 @@
         syncView();
       }
     }
+    if (wasAtEnd) caretPosition = text.length;
+    lastFollowTop = -1;
+    sourceLayoutVersion++;
     try {
       localStorage.setItem('tt_copy_ghost_v1', ghostEnabled ? '1' : '0');
     } catch { /* Device preference only. */ }
@@ -385,7 +392,9 @@
     }
   }
   function followEditorCaret() {
-    if (composing || !editor || !editor.hasFocus()) return;
+    if (!editor || !editor.hasFocus()) return;
+    caretPosition = Math.min(text.length, editorPages[editorPage] + editor.getSelectionEnd());
+    if (composing) return;
     if (caretFollowFrame !== undefined) cancelAnimationFrame(caretFollowFrame);
     const target = editor, current = ticket, currentBlock = block, currentPage = editorPage, pageStart = editorPages[editorPage];
     caretFollowFrame = requestAnimationFrame(async () => {
@@ -393,8 +402,9 @@
       // Intercepted ghost input restores its selection during the Svelte render.
       await tick();
       if (current !== ticket || block !== currentBlock || editorPage !== currentPage || editorPages[editorPage] !== pageStart
-        || composing || editor !== target || step !== 'write' || !target.hasFocus()) return;
+        || editor !== target || step !== 'write' || !target.hasFocus()) return;
       caretPosition = Math.min(text.length, pageStart + target.getSelectionEnd());
+      if (composing) return;
       const turn = pageTurnPending; pageTurnPending = false;
       const carry = !continuousScroll && turn && target.needsPage() ? copyingCarryStart(target.getValue()) : 0;
       if (carry > 0) {
@@ -414,6 +424,16 @@
   let rejectedInput = false;
   let acceptedText = '';
   let previousOwner = '';
+  let latestScope = '';
+  let viewScope = '';
+  let latestCopy = $state<CopyCloudSnapshot | null>(null);
+  let latestNotice = $state('');
+  let unsentEdition = $state<string | null>(null);
+  let cloudChoiceOpen = $state(false);
+  let resolveCloudChoice: ((openCloud: boolean) => void) | undefined;
+  let leaveChoiceOpen = $state(false);
+  let resolveLeaveChoice: ((choice: 'stay' | 'local' | 'save') => void) | undefined;
+  let approvedLocalDeparture = '';
   const canPaste = $derived(canPasteCopy(session.value.authenticated, session.value.user?.role));
   const owner = $derived(session.value.authenticated ? session.value.user?.id ?? '' : '');
   const scope = $derived(owner ? `account:${owner}` : 'guest');
@@ -493,7 +513,12 @@
     },
   }));
 
-  function syncView() { draft = workspace.snapshot(); }
+  function syncView() {
+    draft = workspace.snapshot();
+    if (draft.dirty && (message === localizeUi('Đã lưu thành công trên máy chủ.')
+      || message === localizeUi('Bản hiện tại đã lưu lên hệ thống. Không có thay đổi mới.')
+      || message === localizeUi('Bản hiện tại đã lưu lên hệ thống.'))) message = '';
+  }
   function refreshEditor() {
     if (!draft) return;
     composing = false; reflowPending = false;
@@ -503,6 +528,12 @@
   }
   async function loadLocal(nextScope: string, id: CopyBookId, number: number) {
     cancelAutoAdvance();
+    finishLeaveChoice('stay');
+    if (viewScope && viewScope !== nextScope) {
+      draft = null; book = null; archivePreview = null; unsentEdition = null; latestCopy = null; latestNotice = ''; optionsOpen = false;
+      finishCloudChoice(false);
+    }
+    viewScope = nextScope;
     composing = false; reflowPending = false;
     const shouldFocus = focusAfterChapter?.scope === nextScope && focusAfterChapter.book === id && focusAfterChapter.chapter === number;
     focusAfterChapter = null;
@@ -512,6 +543,33 @@
      editTicket++;
     try {
       const { loadCopyBook, copyBookEditionKeys } = await import('$lib/browser/scripture-copying-sources');
+      if (latestScope !== nextScope) {
+        latestScope = nextScope; latestCopy = null; latestNotice = '';
+        finishCloudChoice(false);
+        if (nextScope !== 'guest' && navigator.onLine) {
+          try {
+            const copy = await queryClient.fetchQuery({
+              queryKey: serverStateKeys.scriptureCopying.latest(nextScope.slice('account:'.length)),
+              queryFn: ({ signal }) => readLatestCopyingSnapshot(signal), staleTime: Infinity, retry: false,
+            });
+            if (current !== ticket) return;
+            if (copy) {
+              const source = await loadCopyBook(copy.sutraId, copy.sourceVersion);
+              if (current !== ticket) return;
+              const savedChapter = source?.chapters[copy.chapter - 1];
+              if (!source || !savedChapter || copy.texts.length !== savedChapter.blocks.length) throw new Error('invalid_copy_source');
+              latestCopy = copy;
+              if (id !== copy.sutraId || number !== copy.chapter) {
+                selected = copy.sutraId; chapterNumber = copy.chapter;
+                return;
+              }
+            }
+          } catch {
+            if (current !== ticket) return;
+            latestNotice = localizeUi('Chưa đọc được bản lưu gần nhất trên máy chủ. Bản chép trên máy được giữ nguyên.');
+          }
+        }
+      }
       const currentBook = (await loadCopyBook(id))!;
       const editions = copyBookEditionKeys(currentBook);
       if (current !== ticket) return;
@@ -519,6 +577,7 @@
       if (current !== ticket) return;
       const edition = await bookRuns.selectEdition(nextScope, editions);
       if (current !== ticket) return;
+      const candidate = latestCopy?.sutraId === id && latestCopy.chapter === number ? latestCopy : null;
       const loaded = (await loadCopyBook(id, edition.version))!;
       if (current !== ticket) return;
       const snapshot = await bookRuns.ensure(nextScope, loaded);
@@ -526,6 +585,17 @@
       await workspace.open(nextScope, id, number, loaded.version, loaded.chapters[number - 1].blocks.length);
       if (current !== ticket) return;
       book = loaded; bookSnapshot = snapshot; syncView(); refreshEditor();
+      unsentEdition = await bookRuns.readUnsentEdition(nextScope, currentBook);
+      if (current !== ticket) return;
+      if (candidate) {
+        if (snapshot.previousRuns.some(run => run.chapterRunIds.includes(candidate.runId))) {
+          latestCopy = null;
+          latestNotice = localizeUi('Bản lưu gần nhất thuộc lượt chép trước. Lượt đang chép trên máy được giữ nguyên.');
+        } else if (!draft?.pending && (!draft?.dirty || JSON.stringify(draft.texts) === JSON.stringify(candidate.texts))) {
+          await openLatestCopy(candidate, current);
+          if (current !== ticket) return;
+        }
+      }
       localError = false; localStatus = draft!.texts.some(Boolean) ? localizeUi("Đã lưu trên máy") : localizeUi("Sẵn sàng tự lưu trên máy");
       if (nextScope !== 'guest') {
         const candidate = await store.read(copyDraftKey('guest', id, number, loaded.version));
@@ -562,9 +632,91 @@
       void queryClient.cancelQueries({ queryKey: serverStateKeys.scriptureCopying.all });
       if (previousOwner !== currentScope) queryClient.removeQueries({ queryKey: serverStateKeys.scriptureCopying.all });
       previousOwner = currentScope;
-      void loadLocal(currentScope, currentBook, currentChapter);
+      untrack(() => void loadLocal(currentScope, currentBook, currentChapter));
     }
   });
+
+  async function openLatestCopy(copy: CopyCloudSnapshot, current = ticket) {
+    if (current !== ticket || !draft || !book || scope !== latestScope || draft.sutraId !== copy.sutraId || draft.chapter !== copy.chapter) return;
+    const { loadCopyBook } = await import('$lib/browser/scripture-copying-sources');
+    const source = await loadCopyBook(copy.sutraId, copy.sourceVersion);
+    if (current !== ticket) return;
+    if (!source || !source.chapters[copy.chapter - 1] || copy.texts.length !== source.chapters[copy.chapter - 1].blocks.length) throw new Error('invalid_copy_source');
+    const currentBook = (await loadCopyBook(copy.sutraId))!;
+    if (current !== ticket) return;
+    if (source.version !== draft.sourceVersion) {
+      const restoredSnapshot = await bookRuns.read(scope, source);
+      if (current !== ticket) return;
+      if (restoredSnapshot?.previousRuns.some(run => run.chapterRunIds.includes(copy.runId))) {
+        latestCopy = null; latestNotice = localizeUi('Bản lưu gần nhất thuộc lượt chép trước. Lượt đang chép trên máy được giữ nguyên.'); return;
+      }
+      if (draft.dirty || draft.unsentBackupRunId) {
+        await bookRuns.rememberUnsentEdition(scope, currentBook, draft.sourceVersion);
+        if (current !== ticket) return;
+        unsentEdition = draft.sourceVersion;
+      }
+      await workspace.flushLocal();
+      if (current !== ticket) return;
+      const snapshot = await bookRuns.ensure(scope, source);
+      if (current !== ticket) return;
+      await workspace.open(scope, copy.sutraId, copy.chapter, source.version, source.chapters[copy.chapter - 1].blocks.length);
+      if (current !== ticket) return;
+      book = source; bookSnapshot = snapshot; syncView();
+    }
+    if (!draft.pending && draft.runId === copy.runId && draft.revision === copy.revision && draft.savedAt === copy.savedAt
+      && JSON.stringify(draft.texts) === JSON.stringify(copy.texts) && !draft.dirty) {
+      latestCopy = null; latestNotice = localizeUi('Đã mở bản lưu gần nhất trên máy chủ.'); return;
+    }
+    const firstIncomplete = book.chapters[copy.chapter - 1].blocks.findIndex((source, index) => !copyingBlockCompleted(source, copy.texts[index]));
+    await workspace.replaceFromCloud({ ...$state.snapshot(draft), runId: copy.runId, practiceRunId: copy.runId,
+      texts: [...copy.texts], savedTexts: [...copy.texts], revision: copy.revision, savedAt: copy.savedAt, pending: null,
+      block: draft.runId === copy.runId ? draft.block : Math.max(0, firstIncomplete) });
+    if (current !== ticket) return;
+    await bookRuns.activateEdition(scope, currentBook, copy.sourceVersion);
+    if (current !== ticket) return;
+    syncView(); refreshEditor(); latestCopy = null;
+    latestNotice = localizeUi('Đã mở bản lưu gần nhất trên máy chủ.');
+  }
+  function finishCloudChoice(openCloud: boolean) {
+    cloudChoiceOpen = false;
+    const resolve = resolveCloudChoice; resolveCloudChoice = undefined; resolve?.(openCloud);
+  }
+  async function recoverUnsentCopy() {
+    if (!draft || (!draft.unsentBackupRunId && (!unsentEdition || unsentEdition === book?.version)) || loading || networkBusy || restarting) return;
+    const current = ticket;
+    restarting = true;
+    try {
+      if (!draft.unsentBackupRunId && unsentEdition) {
+        const principal = scope, id = selected, version = unsentEdition;
+        const { loadCopyBook } = await import('$lib/browser/scripture-copying-sources');
+        const currentBook = (await loadCopyBook(id))!, previousBook = await loadCopyBook(id, version);
+        if (current !== ticket) return;
+        if (!previousBook) throw new Error('invalid_copy_source');
+        await workspace.flushLocal();
+        if (current !== ticket) return;
+        if (draft.dirty) await bookRuns.rememberUnsentEdition(principal, currentBook, draft.sourceVersion);
+        if (current !== ticket) return;
+        await bookRuns.activateEdition(principal, currentBook, version);
+        if (current !== ticket) return;
+        latestCopy = null; latestNotice = '';
+        await loadLocal(principal, id, chapterNumber);
+        if (scope === principal && book?.version === version) message = localizeUi('Đã mở nháp chưa gửi trên thiết bị. Bấm Lưu khi bạn muốn gửi lên máy chủ.');
+        return;
+      }
+      const backup = await workspace.readUnsentBackup();
+      if (current !== ticket) return;
+      if (backup?.bookRunId && backup.bookRunId !== draft.bookRunId) {
+        archivePreview = backup;
+        message = localizeUi('Đây là bản của lượt trước. Chỉ mở để xem, không thay bản đang chép hoặc cộng lại công phu.');
+        return;
+      }
+      await workspace.restoreUnsentBackup();
+      if (current !== ticket) return;
+      syncView(); refreshEditor(); localError = false;
+      message = localizeUi('Đã mở nháp chưa gửi trên thiết bị. Bấm Lưu khi bạn muốn gửi lên máy chủ.');
+    } catch { if (current === ticket) message = localizeUi('Chưa mở được nháp. Các bản chép trên máy được giữ nguyên.'); }
+    finally { if (current === ticket) restarting = false; }
+  }
 
   function review(event: MouseEvent) {
     if (!chapter || composing) return;
@@ -663,30 +815,41 @@
     message = localizeUi("Bản chép đang tự lưu trên thiết bị. Vui lòng đăng nhập để lưu lên hệ thống. Đăng nhập xong, hãy bấm lưu lại.");
     window.dispatchEvent(new CustomEvent('quangtu:login-required'));
   }
-  async function save() {
-    if (!draft || loading || networkBusy || restarting) return;
-    if (!owner) { login(); return; }
-    if (!navigator.onLine) { message = localizeUi("Chưa có mạng. Bản chép vẫn ở trên máy. Hãy kết nối mạng và bấm Lưu lên hệ thống."); return; }
-    if (!draft.dirty) { message = draft.savedAt ? localizeUi("Bản hiện tại đã lưu lên hệ thống. Không có thay đổi mới.") : localizeUi("Chưa có nội dung mới để lưu lên hệ thống."); return; }
+  async function save(): Promise<boolean> {
+    if (!draft || loading || networkBusy || restarting || composing) return false;
+    if (!owner) { login(); return false; }
+    if (!navigator.onLine) { message = localizeUi("Chưa có mạng. Bản chép vẫn ở trên máy. Hãy kết nối mạng và bấm Lưu lên hệ thống."); return false; }
+    if (!draft.dirty) { message = draft.savedAt ? localizeUi("Bản hiện tại đã lưu lên hệ thống. Không có thay đổi mới.") : localizeUi("Chưa có nội dung mới để lưu lên hệ thống."); return !!draft.savedAt; }
     const current = ticket, userId = owner;
     networkBusy = true; message = localizeUi("Đang lưu lên hệ thống…");
     try {
       const csrfToken = await requireBrowserCsrf();
-      if (current !== ticket || owner !== userId) return;
+      if (current !== ticket || owner !== userId) return false;
       const ack = await workspace.save({ userId, csrfToken });
-      if (current !== ticket) return;
+      if (current !== ticket || owner !== userId) return false;
       syncView(); localError = false; localStatus = localizeUi("Đã lưu trên máy");
       message = draft?.dirty
         ? localizeUi("Đã lưu bản đã gửi lên hệ thống. Có thay đổi mới chỉ lưu trên máy; bấm lưu lần nữa để lưu phần mới.")
-        : ack ? localizeUi("Đã lưu lên hệ thống thành công.") : localizeUi("Bản hiện tại đã lưu lên hệ thống.");
+        : ack ? localizeUi('Đã lưu thành công trên máy chủ.') : localizeUi("Bản hiện tại đã lưu lên hệ thống.");
+      if (ack && draft) {
+        queryClient.setQueryData<CopyCloudSnapshot>(serverStateKeys.scriptureCopying.latest(userId), {
+          sutraId: selected, chapter: chapterNumber, runId: draft.runId, sourceVersion: draft.sourceVersion,
+          texts: [...draft.savedTexts], revision: ack.revision, savedAt: ack.savedAt,
+          completedBlocks: chapter?.blocks.filter((source, index) => copyingTextCompletion(source, draft!.savedTexts[index]).accepted).length ?? 0,
+          complete: !!chapter && copyingChapterCompletion(chapter.blocks, draft.savedTexts).accepted,
+        });
+        latestCopy = null;
+      }
       await queryClient.invalidateQueries({ queryKey: serverStateKeys.scriptureCopying.chapter(userId, selected, chapterNumber), refetchType: 'none' });
       if (ack && !draft?.dirty && chapterComplete) void practiceSync?.push(session.value).catch(() => {
         if (owner === userId) message = localizeUi('Bản chép đã lưu thành công; ghi nhận công phu vẫn ở trên máy.');
       });
+      return !!draft?.savedAt && !draft?.dirty;
     } catch (error) {
-      if (current !== ticket) return;
+      if (current !== ticket) return false;
       syncView();
       message = localizeUi("Chưa xác nhận lưu lên hệ thống. Bản chép vẫn được giữ trên máy. {0} Bấm lưu để thử lại.", error instanceof Error ? error.message : '');
+      return false;
     } finally { if (current === ticket) { networkBusy = false; restarting = false; } }
   }
   async function adoptGuest() {
@@ -758,7 +921,7 @@
         if (current !== ticket) return;
         book = restoredBook; bookSnapshot = snapshot; syncView();
       }
-      await workspace.replaceLocal({ ...draft!, runId: copy.runId, practiceRunId: copy.runId, texts: copy.texts, savedTexts: copy.texts, revision: copy.revision, savedAt: copy.savedAt, pending: null, block: 0 });
+      await workspace.replaceFromCloud({ ...draft!, runId: copy.runId, practiceRunId: copy.runId, texts: copy.texts, savedTexts: copy.texts, revision: copy.revision, savedAt: copy.savedAt, pending: null, block: 0 });
       if (current !== ticket) return;
       const currentBook = (await loadCopyBook(selected))!;
       if (current !== ticket) return;
@@ -777,12 +940,42 @@
     try { return await confirmInApp(prompt); }
     finally { copyConfirmationPending = false; }
   }
+  function localDepartureKey() {
+    return draft ? JSON.stringify([scope, draft.runId, draft.texts, draft.pending]) : '';
+  }
+  function needsLeavePrompt() {
+    return !!draft && (localError || localSavePending || (draft.dirty && localDepartureKey() !== approvedLocalDeparture));
+  }
+  function finishLeaveChoice(choice: 'stay' | 'local' | 'save') {
+    leaveChoiceOpen = false;
+    const resolve = resolveLeaveChoice; resolveLeaveChoice = undefined; resolve?.(choice);
+  }
+  async function allowDeparture(): Promise<boolean> {
+    if (networkBusy || restarting || leaveChoiceOpen || cloudChoiceOpen || copyConfirmationPending) return false;
+    if (!needsLeavePrompt()) return true;
+    cancelAutoAdvance();
+    const current = ticket;
+    leaveChoiceOpen = true;
+    const choice = await new Promise<'stay' | 'local' | 'save'>(resolve => { resolveLeaveChoice = resolve; });
+    if (current !== ticket || choice === 'stay') return false;
+    if (choice === 'save') return save();
+    try {
+      await workspace.flushLocal();
+      if (current !== ticket) return false;
+      approvedLocalDeparture = localDepartureKey();
+      localError = false; localSavePending = false;
+      return true;
+    } catch {
+      if (current === ticket) { localError = true; message = localizeUi('Chưa lưu xong trên máy. Hãy giữ màn hình này và thử lại.'); }
+      return false;
+    }
+  }
   beforeNavigate(navigation => {
     if (approvedNavigationUrl && navigation.to?.url.href === approvedNavigationUrl) {
       approvedNavigationUrl = null;
       return;
     }
-    if (!(localError || localSavePending) || !draft?.texts.some(Boolean)) return;
+    if (!needsLeavePrompt() && !networkBusy) return;
     navigation.cancel();
     // Trình duyệt sở hữu cảnh báo khi đóng/tải lại trang; không thể chờ hộp thoại bất đồng bộ.
     if (navigation.willUnload || !navigation.to) return;
@@ -790,7 +983,7 @@
     const target = navigation.to.url.href;
     const delta = navigation.type === 'popstate' ? navigation.delta : undefined;
     void (async () => {
-      if (!await confirmCopyAction(localizeUi("Bản chép chưa lưu xong trên thiết bị. Bạn vẫn muốn rời màn chép?")) || current !== ticket) return;
+      if (!await allowDeparture() || current !== ticket) return;
       approvedNavigationUrl = target;
       if (delta) window.history.go(delta);
       else {
@@ -814,7 +1007,7 @@
     if (bookChoice) selected = bookChoice.id;
     mounted = true;
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if ((localError || localSavePending) && draft?.texts.some(Boolean)) { event.preventDefault(); event.returnValue = ''; }
+      if (needsLeavePrompt() || networkBusy) { event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', beforeUnload);
     return () => {
@@ -921,12 +1114,12 @@
     void sourceLayoutVersion;
     const word = currentWord;
     const index = currentSentence, panel = sourceElement, fontSize = sourceFontSize, sentences = sourceSentences;
-    if (step !== 'write' || !sourceVisible || composing || !panel || !sentences.length) return;
+    if (step !== 'write' || !sourceVisible || !panel || !sentences.length) return;
     let cancelled = false, frame: number | undefined;
     void tick().then(() => {
       if (cancelled) return;
       frame = requestAnimationFrame(() => {
-      if (sourceElement !== panel || sourceSentences !== sentences || currentSentence !== index || currentWord !== word || composing || step !== 'write') return;
+      if (sourceElement !== panel || sourceSentences !== sentences || currentSentence !== index || currentWord !== word || step !== 'write') return;
       const sentence = panel.querySelector<HTMLElement>('[data-copy-sentence="' + index + '"]');
       if (!sentence) return;
       const anchor = sentence.querySelector<HTMLElement>('[data-copy-word="' + word + '"]') ?? sentence;
@@ -983,7 +1176,7 @@
   let writingTitle = $state<HTMLHeadingElement>();
   async function prepareCopying(id?: CopyBookId) {
     if (!mounted || networkBusy || restarting) return;
-    if (id) { selected = id; chapterNumber = 1; }
+    if (id) { latestCopy = null; latestNotice = ''; selected = id; chapterNumber = 1; }
     step = 'guide'; optionsOpen = false;
     await tick(); preparationTitle?.focus();
   }
@@ -996,29 +1189,47 @@
   });
   async function beginWriting() {
     if (loading || !chapter || !draft || networkBusy) return;
+    if (latestCopy) {
+      const current = ticket, copy = latestCopy;
+      cloudChoiceOpen = true;
+      const openCloud = await new Promise<boolean>(resolve => { resolveCloudChoice = resolve; });
+      if (current !== ticket) return;
+      latestCopy = null;
+      if (openCloud) {
+        restarting = true;
+        try { await openLatestCopy(copy, current); }
+        catch { if (current === ticket) { latestCopy = copy; latestNotice = localizeUi('Chưa mở được bản lưu. Nháp trên máy được giữ nguyên.'); } return; }
+        finally { if (current === ticket) restarting = false; }
+        if (current !== ticket) return;
+      } else latestNotice = localizeUi('Tiếp tục nháp trên thiết bị. Chưa gửi phần mới lên máy chủ.');
+    }
     // Request within the button gesture, before tick consumes user activation.
     if (canRequestFullscreen() && !document.fullscreenElement) {
       void document.documentElement.requestFullscreen().catch(() => {});
     }
     continuousScroll = nativePlatform() === 'web' && !window.matchMedia('(max-width:700px)').matches;
     step = 'write'; optionsOpen = false; sourceToolsOpen = false; editorToolsOpen = false;
+    approvedLocalDeparture = '';
+    if (latestNotice) message = latestNotice;
     await tick();
     (writingTitle?.getClientRects().length ? writingTitle : document.querySelector<HTMLElement>('.copy-page'))?.focus({ preventScroll: true });
     scheduleEditorReflow();
   }
   function onSelectChapter(nextChapter: number) {
     if (chapterNumber === nextChapter) return;
+    latestCopy = null; latestNotice = '';
     block = 0;
     chapterNumber = nextChapter;
   }
   async function chooseAgain() {
     if (networkBusy || restarting) return;
+    if (!await allowDeparture()) return;
     cancelAutoAdvance();
     step = 'choose'; optionsOpen = false;
     await tick(); selectionTitle?.focus({ preventScroll: true });
   }
   function writingKeys(event: KeyboardEvent) {
-    if (step !== 'write' || event.isComposing || authOpen || checked) return;
+    if (step !== 'write' || event.isComposing || authOpen || checked || cloudChoiceOpen || leaveChoiceOpen) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       if (optionsOpen) void toggleOptions(); else void chooseAgain();
@@ -1112,13 +1323,14 @@
       <h2 id="choose-sutra-title">{localizeUi('Bạn muốn chép bộ kinh nào?')}</h2>
       <nav class="books" aria-label={localizeUi("Chọn bộ kinh")}>
         {#each COPYING_BOOKS as item, index}
-          <button type="button" class:active={selected === item.id} aria-pressed={selected === item.id} disabled={!mounted || networkBusy} onclick={() => void prepareCopying(item.id)}>
+          <button type="button" class:active={selected === item.id} aria-pressed={selected === item.id} disabled={!mounted || loading || networkBusy} onclick={() => void prepareCopying(item.id)}>
             <span class="book-number">0{index + 1}</span><strong>{item.title}</strong><small>{item.count} {localizeUi(item.unit)}</small>
             {#if selected === item.id}<Check size={18} class="selected-mark" aria-hidden="true" />{/if}
           </button>
         {/each}
       </nav>
-      <div class="chapter-choice"><label for="copy-chapter">{localizeUi("Phẩm / quyển")}</label><select id="copy-chapter" disabled={networkBusy} value={chapterNumber} onchange={e => onSelectChapter(Number(e.currentTarget.value))}>{#if book}{#each book.chapters as item}<option value={item.number}>{item.title}</option>{/each}{/if}</select></div>
+      <div class="chapter-choice"><label for="copy-chapter">{localizeUi("Phẩm / quyển")}</label><select id="copy-chapter" disabled={loading || networkBusy} value={chapterNumber} onchange={e => onSelectChapter(Number(e.currentTarget.value))}>{#if book}{#each book.chapters as item}<option value={item.number}>{item.title}</option>{/each}{/if}</select></div>
+      {#if latestNotice}<p class="resume-note" role="status">{latestNotice}</p>{/if}
       {#if loading}<p role="status" class="muted">{localizeUi("Đang mở bản chép trên máy…")}</p>{:else if localError}<p role="alert" class="error">{localStatus}</p>{:else if draft?.texts.some(Boolean)}<p class="resume-note">{localizeUi('Có bản chép trên máy · Tiếp tục từ đoạn {0}', block + 1)}</p>{/if}
       <button class="primary start-copying" data-testid="start-copying" type="button" disabled={loading || !chapter || !draft || networkBusy} onclick={() => void prepareCopying()}><BookOpen size={20} aria-hidden="true" />{localizeUi('Xem hướng dẫn và tiếp tục')}<ChevronRight size={19} aria-hidden="true" /></button>
       <p class="selection-hint">{localizeUi('Tự lưu trên thiết bị. Đăng nhập khi bạn muốn lưu vào tài khoản.')}</p>
@@ -1133,7 +1345,7 @@
     </section>
     {#if showIntro}<aside class="notice" aria-labelledby="copy-notice-title"><h2 id="copy-notice-title">{localizeUi("Bản chép được lưu ở đâu?")}</h2><p>{localizeUi(COPY_NOTICE)}</p><button type="button" onclick={dismissIntro}>{localizeUi("Đã hiểu")}</button></aside>{/if}
   {:else if step === 'guide'}
-    <header class="choose-header"><span class="eyebrow">{localizeUi('BƯỚC 2 · CHUẨN BỊ')}</span><h1 bind:this={preparationTitle} tabindex="-1">{localizeUi('Hướng dẫn trước khi chép kinh')}</h1><p>{selectedBookInfo?.title}</p></header>
+    <header class="choose-header"><span class="eyebrow">{localizeUi('BƯỚC 2 · CHUẨN BỊ')}</span><h1 bind:this={preparationTitle} tabindex="-1">{localizeUi('Hướng dẫn trước khi chép kinh')}</h1><p class="copy-book-title">{selectedBookInfo?.title}</p></header>
     <ol class="stepper" aria-label={localizeUi('Các bước chép kinh')}><li><span>1</span>{localizeUi('Chọn kinh')}</li><li aria-current="step"><span>2</span>{localizeUi('Hướng dẫn')}</li><li><span>3</span>{localizeUi('Chép kinh')}</li></ol>
     <CopyingPreparation />
     <section class="selection-section" aria-labelledby="copy-preparation-book">
@@ -1141,20 +1353,21 @@
       <div class="chapter-choice"><label for="copy-chapter">{localizeUi('Phẩm / quyển')}</label><select id="copy-chapter" disabled={networkBusy} value={chapterNumber} onchange={e => onSelectChapter(Number(e.currentTarget.value))}>{#if book}{#each book.chapters as item}<option value={item.number}>{item.title}</option>{/each}{/if}</select></div>
       {#if loading}<p role="status" class="muted">{localizeUi('Đang mở bản chép trên máy…')}</p>{:else if localError}<p role="alert" class="error">{localStatus}</p>{:else if draft?.texts.some(Boolean)}<p class="resume-note">{localizeUi('Có bản chép trên máy · Tiếp tục từ đoạn {0}', block + 1)}</p>{/if}
       <button class="primary start-copying" data-testid="confirm-copying-guide" type="button" disabled={loading || !chapter || !draft || networkBusy} onclick={beginWriting}><PenLine size={20} aria-hidden="true" />{localizeUi('Tôi đã đọc, tiếp tục chép')}<ChevronRight size={19} aria-hidden="true" /></button>
+      {#if latestNotice}<p class="resume-note" role="status">{latestNotice}</p>{/if}
       <p class="selection-hint">{localizeUi('Tự lưu trên thiết bị. Đăng nhập khi bạn muốn lưu vào tài khoản.')}</p>
     </section>
   {:else}
     <header class="writing-bar" inert={optionsOpen}>
       <button class="icon-button" type="button" aria-label={localizeUi('Đổi kinh hoặc phẩm')} title={localizeUi('Đổi kinh hoặc phẩm')} disabled={networkBusy} onclick={chooseAgain}><ChevronLeft size={23} aria-hidden="true" /></button>
-      <div class="writing-title"><span class="eyebrow">{localizeUi('BƯỚC 3 · CHÉP KINH')}</span><h1 bind:this={writingTitle} tabindex="-1">{book?.title}</h1><p title={chapter?.title}>{chapter?.title}</p></div>
+      <div class="writing-title"><span class="sr-only">{localizeUi('BƯỚC 3 · CHÉP KINH')}</span><h1 bind:this={writingTitle} tabindex="-1">{localizeUi('Chép kinh')}</h1><p title={book?.title}>{book?.title}</p></div>
       <div class="writing-actions">
-        {#if fullscreenAvailable}<button class="icon-button" type="button" title={fullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'} aria-label={fullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'} onclick={toggleFullscreen}>{#if fullscreen}<Minimize size={19} aria-hidden="true" />{:else}<Maximize size={19} aria-hidden="true" />{/if}</button>{/if}
+        {#if fullscreenAvailable}<button class="icon-button fullscreen-button" type="button" title={fullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'} aria-label={fullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'} onclick={toggleFullscreen}>{#if fullscreen}<Minimize size={19} aria-hidden="true" />{:else}<Maximize size={19} aria-hidden="true" />{/if}</button>{/if}
         <button class="icon-button" type="button" aria-label={localizeUi('Tùy chọn và bản đã lưu')} title={localizeUi('Tùy chọn và bản đã lưu')} data-copy-options-trigger aria-expanded={optionsOpen} aria-controls="copy-options" onclick={toggleOptions}><Settings size={22} strokeWidth={1.8} aria-hidden="true" /></button>
-        <button class="primary save-button" type="button" disabled={loading || !draft || networkBusy} onclick={save}>{networkBusy ? localizeUi("Đang xử lý…") : draft?.pending ? localizeUi("Thử lưu lại lên hệ thống") : localizeUi("Lưu lên hệ thống")}</button>
+        <button class="primary save-button top-save-button" type="button" aria-label={networkBusy ? localizeUi('Đang lưu lên máy chủ') : localizeUi('Lưu lên máy chủ')} aria-busy={networkBusy} disabled={loading || !draft || networkBusy || restarting || composing} onclick={save}><Save size={18} aria-hidden="true" />{localizeUi(networkBusy ? 'Lưu…' : 'Lưu')}</button>
       </div>
     </header>
     <div class="save-status" class:error={localError}><span role="status">{localStatus || localizeUi("Đang mở bộ nhớ ứng dụng…")}</span><span class="account-note">{draft?.dirty ? localizeUi('Chưa lưu thay đổi vào tài khoản') : draft?.savedAt ? localizeUi('Đã lưu vào tài khoản') : localizeUi('Bản chép chỉ ở trên thiết bị')}</span></div>
-    {#if message}<div class="message" role="status"><p>{message}</p><button class="icon-button" type="button" aria-label={localizeUi('Đóng thông báo')} onclick={() => message = ''}><X size={18} aria-hidden="true" /></button></div>{/if}
+    {#if message && !optionsOpen}<div class="message" role="status"><p>{message}</p><button class="icon-button" type="button" aria-label={localizeUi('Đóng thông báo')} onclick={() => message = ''}><X size={18} aria-hidden="true" /></button></div>{/if}
     {#if showGuestBanner && guestDraft?.texts.some(Boolean)}
       <aside class="guest-draft" role="status">
         <p>{localizeUi("Có bản chép khách trên thiết bị này. Bản đó chưa được lưu vào tài khoản.")}</p>
@@ -1164,17 +1377,16 @@
     {/if}
     {#if loading || (draft && (draft.sutraId !== selected || draft.chapter !== chapterNumber))}<p role="status">{localizeUi("Đang mở bản chép trên máy…")}</p>
     {:else if chapter && draft}
+      <p class="copy-chapter-location" title={chapter.title}>{chapter.title}</p>
       <p class="book-run-progress" role="status">{localizeUi('Lượt {0} · Đã hoàn thành {1}/{2} phẩm/quyển', (bookSnapshot?.previousRuns.length ?? 0) + 1, completedChapters, book?.chapters.length ?? 0)}</p>
       <progress class="chapter-progress" max={100} value={chapterCompletion.percent} aria-label={localizeUi('Tiến độ chép kinh')} title={localizeUi('Đạt từ 90% được ghi nhận hoàn thành. Rà soát chỉ để tham khảo.')}></progress>
       {#if bookComplete || chapterComplete}<div class="completion-banner" class:book-complete={bookComplete}><div><strong>{localizeUi(bookComplete ? 'Đã chép trọn bộ kinh' : 'Đã chép xong phẩm/quyển này')}</strong><p role="status">{localizeUi(completionError ? 'Chưa ghi được công phu. Hãy thử lại trước khi mở lượt mới.' : bookComplete ? bookSnapshot?.legacyCompleted ? 'Bản chép cũ và lịch sử công phu được giữ nguyên.' : 'Đã ghi nhận 1 lượt vào Công phu của tôi. Bản chép được giữ nguyên.' : 'Chỉ ghi nhận 1 lượt công phu khi hoàn thành trọn bộ kinh.')}</p></div>{#if completionError}<button type="button" onclick={() => void recordCompletion()}>{localizeUi('Thử lại')}</button>{:else if bookComplete}<div class="book-run-actions"><button class="primary" type="button" disabled={restarting || networkBusy || composing || completionRun !== bookSnapshot?.runId} onclick={restartCopy}>{localizeUi('Bắt đầu lượt {0}', (bookSnapshot?.previousRuns.length ?? 0) + 2)}</button><button type="button" onclick={() => { archivePreview = draft; optionsOpen = true; }}>{localizeUi('Xem bản đã chép')}</button><a href="/tien-do-tu-tap">{localizeUi('Công phu của tôi')}</a></div>{:else if book && chapterNumber < book.chapters.length}<button type="button" onclick={() => { focusAfterChapter = { scope, book: selected, chapter: chapterNumber + 1 }; chapterNumber++; }}>{localizeUi('Sang phẩm/quyển tiếp theo')}</button>{:else if nextIncompleteChapter > 0}<button type="button" onclick={() => { focusAfterChapter = { scope, book: selected, chapter: nextIncompleteChapter }; chapterNumber = nextIncompleteChapter; }}>{localizeUi('Tiếp tục phẩm/quyển chưa hoàn thành: {0}', nextIncompleteChapter)}</button>{/if}</div>{/if}
       <div class="writing-grid" inert={optionsOpen} class:source-hidden={!sourceVisible}>
         <section class="source-panel" aria-labelledby="copy-source-title">
           <div class="panel-heading source-heading">
-            <span class="mobile-source-control"><button class="icon-button writing-back" type="button" aria-label={localizeUi('Đổi kinh hoặc phẩm')} title={localizeUi('Đổi kinh hoặc phẩm')} disabled={networkBusy} onclick={chooseAgain}><ArrowLeft size={22} aria-hidden="true" /></button></span>
             <h2 id="copy-source-title">{localizeUi('Kinh mẫu')}</h2>
             <div class="block-nav"><button class="icon-button" type="button" aria-label={localizeUi('Đoạn trước')} disabled={block === 0} onclick={() => goBlock(block - 1)}><ChevronLeft size={20} aria-hidden="true" /></button><label for="copy-block">{localizeUi('Đoạn')}</label><select id="copy-block" value={block} onchange={e => goBlock(Number(e.currentTarget.value))}>{#each chapter.blocks as _, i}<option value={i}>{i + 1} / {chapter.blocks.length}{copyingTextCompletion(chapter.blocks[i], draft.texts[i] ?? '').accepted ? ' ✓' : ''}</option>{/each}</select><button class="icon-button" type="button" aria-label={localizeUi('Đoạn sau')} disabled={block === chapter.blocks.length - 1} onclick={() => goBlock(block + 1)}><ChevronRight size={20} aria-hidden="true" /></button></div>
             <button class="icon-button source-tools-trigger" type="button" aria-label={localizeUi('Tùy chọn kinh mẫu')} aria-expanded={sourceToolsOpen} aria-controls="copy-source-tools" title={localizeUi('Tùy chọn kinh mẫu')} onclick={() => sourceToolsOpen = !sourceToolsOpen}><SlidersHorizontal size={18} aria-hidden="true" /></button>
-            <span class="mobile-source-control"><button class="icon-button" type="button" aria-label={localizeUi('Tùy chọn và bản đã lưu')} title={localizeUi('Tùy chọn và bản đã lưu')} data-copy-options-trigger aria-expanded={optionsOpen} aria-controls="copy-options" onclick={toggleOptions}><Settings size={22} strokeWidth={1.8} aria-hidden="true" /></button></span>
           </div>
           <div class="source-tools" class:tools-open={sourceToolsOpen} id="copy-source-tools">
             {#if sourceVisible}<div class="source-font-controls" role="group" aria-label={localizeUi('Cỡ chữ')}><button type="button" aria-label={localizeUi('Giảm cỡ chữ')} disabled={sourceFontSize <= 14} onclick={() => sourceFontSize = Math.max(14, sourceFontSize - 2)}>A−</button><output aria-live="polite">{sourceFontSize}px</output><button type="button" aria-label={localizeUi('Tăng cỡ chữ')} disabled={sourceFontSize >= 40} onclick={() => sourceFontSize = Math.min(40, sourceFontSize + 2)}>A+</button></div>{/if}
@@ -1274,8 +1486,8 @@
         <div class="mobile-account-actions">
           <button class="primary save-button" type="button" disabled={loading || !draft || networkBusy} onclick={save}>{networkBusy ? localizeUi("Đang xử lý…") : draft?.pending ? localizeUi("Thử lưu lại lên hệ thống") : localizeUi("Lưu lên hệ thống")}</button>
           {#if fullscreenAvailable}<button class="icon-button" type="button" title={fullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'} aria-label={fullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình'} onclick={toggleFullscreen}>{#if fullscreen}<Minimize size={19} aria-hidden="true" />{:else}<Maximize size={19} aria-hidden="true" />{/if}</button>{/if}
-          {#if message}<p class="mobile-save-feedback" role="status">{message}</p>{/if}
         </div>
+        {#if message}<p role="status">{message}</p>{/if}
         <section class="storage-details">
           <h3>{localizeUi('Đọc để chép')}</h3>
           <p>{localizeUi('Dùng trình đọc Kinh sách. Ưu tiên giọng ngoại tuyến đã cài trên thiết bị.')}</p>
@@ -1314,13 +1526,35 @@
           </section>
         {/if}
         <section class="storage-details">{#if canPaste}<div class="admin-copy-actions"><button type="button" onclick={() => copyReference()}>{localizeUi('Sao chép đoạn kinh mẫu')}</button><button type="button" onclick={() => copyReference(true)}>{localizeUi('Sao chép toàn bộ kinh mẫu')}</button></div>{/if}<p>{localizeUi('Đạt từ 90% được ghi nhận hoàn thành. Rà soát chỉ để tham khảo.')}</p><h3>{localizeUi('Bản chép được lưu ở đâu?')}</h3><p>{localizeUi(COPY_NOTICE)}</p><p>{draft?.savedAt ? localizeUi('Bản hệ thống: {0}', formatTime(draft.savedAt)) : localizeUi('Chưa lưu lên hệ thống')}</p><p>{!owner ? localizeUi('Đăng nhập để lưu vào tài khoản.') : localizeUi('Bạn có thể lưu cả khi chép dở.')}</p>{#if draft?.pending || draft?.savedAt}<button type="button" disabled={networkBusy} onclick={keepSeparateCopy}>{localizeUi('Giữ bản trên máy thành lượt chép riêng')}</button>{/if}{#if guestDraft?.texts.some(Boolean)}<button type="button" class="adopt-guest-option-btn" disabled={networkBusy} onclick={() => { toggleOptions(); void adoptGuest(); }}>{localizeUi('Tiếp tục bản chép khách trong tài khoản')}</button>{/if}</section>
+        {#if draft?.unsentBackupRunId || (unsentEdition && unsentEdition !== book?.version)}<section class="storage-details"><h3>{localizeUi('Nháp chưa gửi trên thiết bị')}</h3><p>{localizeUi('Nháp được giữ riêng trước khi mở bản máy chủ.')}</p><button type="button" disabled={loading || networkBusy || restarting} onclick={recoverUnsentCopy}>{localizeUi('Mở nháp chưa gửi')}</button></section>{/if}
         {#if draft?.previousRuns?.length || archivePreview}<section class="storage-details"><h3>{localizeUi('Lượt chép trước trên máy')}</h3>{#if draft?.previousRuns?.length}<div class="previous-runs">{#each [...draft.previousRuns].reverse() as runId, index (runId)}<button type="button" onclick={() => previewPrevious(runId)}>{localizeUi('Xem lượt chép {0}', draft.previousRuns!.length - index)}</button>{/each}</div>{/if}{#if archivePreview}<p>{localizeUi('Bản chép cũ được giữ nguyên; lượt hiện tại không thay đổi.')}</p><div class="archive-preview">{#each archivePreview.texts as copied, index (index)}<p>{copied}</p>{/each}</div>{/if}</section>{/if}
-        <section class="cloud-panel"><h3>{localizeUi('Bản đã lưu trong tài khoản')}</h3><p>{localizeUi('Chỉ tải khi bạn bấm xem. Bản dở trên thiết bị khác chưa bấm lưu sẽ không có ở đây.')}</p><button type="button" onclick={() => listCloud()} disabled={cloud.isFetching || networkBusy}>{localizeUi('Xem bản đã lưu trên hệ thống')}</button>{#if cloud.isFetching}<p role="status">{localizeUi('Đang tải danh sách…')}</p>{/if}{#if cloud.error}<p class="error" role="alert">{cloud.error.message}</p>{/if}{#if owner && cloud.data}<ul>{#each cloud.data.copies as copy}<li><span>{formatTime(copy.savedAt)} · {copy.complete ? localizeUi('Đã hoàn thành') : localizeUi('Đang chép')}</span><button type="button" disabled={networkBusy} onclick={() => restore(copy.runId)}>{localizeUi('Mở bản này')}</button></li>{:else}<li>{localizeUi('Không có bản lưu khác của phẩm/quyển này.')}</li>{/each}</ul>{#if cloud.data.nextCursor}<button type="button" disabled={cloud.isFetching || networkBusy} onclick={() => listCloud(cloud.data!.nextCursor!)}>{localizeUi('Xem bản cũ hơn')}</button>{/if}{/if}</section>
+        <section class="cloud-panel"><h3>{localizeUi('Bản đã lưu trong tài khoản')}</h3><p>{localizeUi('Bản lưu gần nhất tự mở khi vào mục này. Chưa bấm Lưu thì nội dung chỉ ở trên máy.')}</p><button type="button" onclick={() => listCloud()} disabled={cloud.isFetching || networkBusy}>{localizeUi('Xem bản đã lưu trên hệ thống')}</button>{#if cloud.isFetching}<p role="status">{localizeUi('Đang tải danh sách…')}</p>{/if}{#if cloud.error}<p class="error" role="alert">{cloud.error.message}</p>{/if}{#if owner && cloud.data}<ul>{#each cloud.data.copies as copy}<li><span>{formatTime(copy.savedAt)} · {copy.complete ? localizeUi('Đã hoàn thành') : localizeUi('Đang chép')}</span><button type="button" disabled={networkBusy} onclick={() => restore(copy.runId)}>{localizeUi('Mở bản này')}</button></li>{:else}<li>{localizeUi('Không có bản lưu khác của phẩm/quyển này.')}</li>{/each}</ul>{#if cloud.data.nextCursor}<button type="button" disabled={cloud.isFetching || networkBusy} onclick={() => listCloud(cloud.data!.nextCursor!)}>{localizeUi('Xem bản cũ hơn')}</button>{/if}{/if}</section>
         <p class="edition-note">{localizeUi('Bản chép theo văn bản đang có trong Tu tập, gồm cả nghi thức mở đầu/kết thúc của từng phẩm/quyển. Đối chiếu theo đúng bản này; không tự sửa cách viết cổ.')}</p>
       </div>
     {/if}
   {/if}
 
+  {#if leaveChoiceOpen}
+    <dialog class="copy-save-dialog" use:modalDialog oncancel={() => finishLeaveChoice('stay')} aria-labelledby="copy-leave-title">
+      <h2 id="copy-leave-title">{localizeUi('Lưu bản chép trước khi rời?')}</h2>
+      <p>{localizeUi(localError || localSavePending ? 'Bản chép chưa lưu xong trên thiết bị. Bạn có muốn lưu lên máy chủ trước khi rời?' : 'Bản chép đã tự lưu trên máy. Bạn có muốn lưu lên máy chủ để mở tiếp trên thiết bị khác?')}</p>
+      <div class="copy-save-dialog-actions">
+        <button type="button" onclick={() => finishLeaveChoice('stay')}>{localizeUi('Ở lại')}</button>
+        <button type="button" onclick={() => finishLeaveChoice('local')}>{localizeUi('Rời không lưu')}</button>
+        <button class="primary" type="button" onclick={() => finishLeaveChoice('save')}>{localizeUi('Lưu và rời')}</button>
+      </div>
+    </dialog>
+  {/if}
+  {#if cloudChoiceOpen}
+    <dialog class="copy-save-dialog" use:modalDialog oncancel={() => finishCloudChoice(false)} aria-labelledby="copy-cloud-choice-title">
+      <h2 id="copy-cloud-choice-title">{localizeUi('Có phần chép mới chưa lưu lên máy chủ')}</h2>
+      <p>{localizeUi('Bạn muốn mở bản đã lưu hay tiếp tục phần mới trên thiết bị? Nháp mới vẫn được giữ khi mở bản máy chủ.')}</p>
+      <div class="copy-save-dialog-actions">
+        <button type="button" onclick={() => finishCloudChoice(false)}>{localizeUi('Giữ nháp trên thiết bị')}</button>
+        <button class="primary" type="button" onclick={() => finishCloudChoice(true)}>{localizeUi('Mở bản đã lưu')}</button>
+      </div>
+    </dialog>
+  {/if}
   {#if fontSheetOpen}
     <dialog class="bottom-sheet-dialog" use:modalDialog oncancel={() => fontSheetOpen = false}>
       <div class="sheet-handle" aria-hidden="true"></div>
@@ -1417,6 +1651,7 @@
   .book-run-actions a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:calc(var(--space-page) * .4);border:1px solid var(--border);border-radius:var(--radius-control);color:var(--text);text-decoration:none}
   .choose-header h1,.selection-section h2,.notice h2,.options-panel h2,.options-panel h3{font-weight:700;text-align:center}
   .choose-header p,.notice p,.storage-details>p,.cloud-panel>p,.edition-note{text-align:justify}
+  .choose-header .copy-book-title,#copy-preparation-book{font-weight:700;text-align:center;text-transform:uppercase;margin-inline:auto}
   /* Giấy vẫn sáng trong chế độ tối; chữ trên giấy dùng màu mực riêng. */
   .copy-writing .copy-note,.copy-writing .review-actions .muted,.copy-writing .review-actions strong{color:var(--copy-paper-ink)}
   .copy-writing .editor-tools>.icon-button{color:var(--text)}
@@ -1448,16 +1683,16 @@
   .writing-bar{display:flex;align-items:center;gap:12px;padding:12px 0 8px;flex-shrink:0}.icon-button{display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:8px;flex-shrink:0}.writing-title{flex:1;min-width:0}.writing-title h1{font-size:16px;line-height:1.4;margin:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.writing-title p{font-size:11px;color:var(--text2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.save-button{font-size:12px;max-width:190px}.save-status{display:flex;justify-content:space-between;gap:12px;color:var(--text2);font-size:11px;padding:0 0 10px;flex-shrink:0}.save-status.error{color:var(--danger-text)}.message{display:flex;align-items:flex-start;gap:8px;background:var(--bg3);border-left:3px solid var(--gold);padding:6px 10px;margin:0 0 8px;max-height:20vh;overflow:auto;flex-shrink:0}.message p{font-size:12px;flex:1}.guest-draft{display:flex;align-items:center;gap:10px;font-size:12px;padding:8px 12px;background:var(--bg3);border-left:3px solid var(--gold);border-radius:10px;max-height:20vh;overflow:auto;flex-shrink:0;animation:guestBannerFadeIn .25s ease-out}.guest-draft p{font-size:12px;flex:1;margin:0;line-height:1.4}.guest-draft .guest-adopt-btn{font-size:12px;padding:6px 12px;white-space:nowrap;flex-shrink:0}.guest-draft .guest-close-btn{min-width:32px;min-height:32px;padding:4px;flex-shrink:0;color:var(--text2);border:none;background:transparent;cursor:pointer}@keyframes guestBannerFadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}.block-nav{display:flex;align-items:center;gap:8px}.block-nav label{font-size:13px}.block-nav select{max-width:90px;min-width:62px;padding:6px 10px}.chapter-progress{display:block;width:100%;height:3px;min-height:3px;margin:10px 0 14px;accent-color:var(--gold);flex-shrink:0}
   .writing-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);gap:18px;flex:1;min-height:0}.source-panel,.editor-panel{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden}.panel-heading{display:flex;align-items:center;gap:10px;padding:10px 14px;flex-shrink:0;flex-wrap:wrap}.panel-heading h2,.panel-heading label{font-size:13px;font-weight:700;margin-right:auto}.source-font-controls{display:flex;align-items:center;gap:7px}.source-font-controls button{padding:6px;min-width:40px;min-height:40px;font-size:14px;font-weight:700}.source-font-controls output{font-size:11px;min-width:30px;font-variant-numeric:tabular-nums;text-align:center}.source-toggle{display:flex;align-items:center;gap:5px;border:0;background:none;padding:5px;font-size:11px;min-height:40px}.source{font-family:var(--font-reader,serif);font-size:20px;line-height:1.8;user-select:none;-webkit-user-select:none;overflow-wrap:anywhere;overflow:auto;overscroll-behavior:contain;flex:1;padding:10px 20px 24px;scrollbar-width:thin}.source-line{margin:0 0 .5em;line-height:inherit;white-space:pre-wrap}.source-line:last-child{margin-bottom:0}.review-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-top:1px solid var(--border);flex-shrink:0}.review-actions button{font-size:12px;padding:8px 12px}.review-actions strong{font-size:11px;color:var(--brown)}.review-actions .muted{font-size:10px}.source-hidden{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.source-hidden .source-panel{align-self:start}
   .options-panel{position:absolute;right:max(16px,calc((100vw - 1440px)/2));top:68px;bottom:max(16px,env(safe-area-inset-bottom));width:min(440px,calc(100% - 32px));z-index:3;overflow:auto;box-sizing:border-box;background:var(--bg2);border:1px solid var(--border);border-radius:18px;box-shadow:0 12px 48px #0003;padding:6px 18px 20px}.options-panel>.panel-heading{position:sticky;top:-6px;z-index:1;background:var(--bg2);padding:8px 0;border-bottom:1px solid var(--border)}.storage-details,.cloud-panel{padding:18px 0;border-bottom:1px solid var(--border)}.options-panel h3{margin-bottom:8px}.options-panel p{font-size:13px;color:var(--text2);margin:8px 0}.options-panel button{font-size:12px}.cloud-panel ul{list-style:none;padding:0}.cloud-panel li{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;margin:12px 0}.edition-note{margin-top:16px!important}
-  @media(max-width:700px){.copy-page{padding:20px 14px 90px}.choose-header h1{font-size:var(--font-size-section-title)}.choose-header p{font-size:var(--font-size-body)}.stepper{margin:20px 0;gap:8px}.stepper li{flex-direction:column;text-align:center;font-size:12px}.selection-section{padding:18px 14px;border-radius:18px}.selection-section h2{font-size:var(--font-size-card-title)}.books{grid-template-columns:1fr;gap:9px;margin:16px 0}.books button{min-height:78px;padding:12px 34px 12px 13px;display:grid;grid-template-columns:24px 1fr;gap:4px 10px}.books strong{font-size:15px}.books small{grid-column:2}.book-number{align-self:center}.chapter-choice select{font-size:12px}.selection-hint{font-size:11px}.copy-writing{padding:0 10px max(6px,env(safe-area-inset-bottom))}.writing-bar{padding:7px 0 5px;gap:6px}.writing-title h1{font-size:12px}.writing-title p{display:none}.writing-title .eyebrow{font-size:8px}.writing-bar .icon-button{min-width:40px;min-height:40px;padding:7px}.save-button{max-width:105px;font-size:10px;padding:7px 9px;min-height:40px;line-height:1.4}.save-status{font-size:10px;padding-bottom:6px}.account-note{max-width:52%;text-align:right}.block-nav{gap:5px}.block-nav label{font-size:12px}.block-nav .icon-button{min-width:36px;min-height:36px;padding:4px}.block-nav select{min-height:36px;min-width:58px;font-size:12px;padding:5px}.chapter-progress{margin:5px 0 8px}.writing-grid,.source-hidden{display:flex;flex-direction:column;gap:8px}.source-panel{flex:0 1 auto;max-height:36%;border-radius:12px}.source-hidden .source-panel{align-self:stretch;max-height:none;flex-shrink:0}.panel-heading{padding:5px 9px;gap:5px;flex-wrap:nowrap}.panel-heading h2,.panel-heading label{font-size:12px}.source-font-controls{gap:3px}.source-font-controls button{min-width:36px;min-height:36px;font-size:12px;padding:5px}.source-font-controls output{font-size:10px;min-width:28px}.source-toggle{font-size:10px;min-height:36px;padding:4px;gap:2px}.source-toggle :global(svg){width:12px}.source{max-height:20vh;max-height:20dvh;padding:4px 12px 12px;flex:0 1 auto;line-height:1.7}.editor-panel{flex:1;border-radius:12px}.review-actions{padding:5px 8px;gap:6px}.review-actions button{font-size:11px;min-height:36px;padding:7px 10px}.review-actions .muted{font-size:9px}.options-panel{top:55px;right:10px;bottom:8px;width:calc(100% - 20px)}.message p,.guest-draft{font-size:11px}.guest-draft{padding:6px 8px;gap:6px}.guest-draft .guest-adopt-btn{font-size:10px;padding:6px 8px}.guest-draft .guest-close-btn{min-width:28px;min-height:28px;padding:2px}}
+  @media(max-width:700px){.copy-page{padding:20px 14px 90px}.choose-header h1{font-size:var(--font-size-section-title)}.choose-header p{font-size:var(--font-size-body)}.stepper{margin:20px 0;gap:8px}.stepper li{flex-direction:column;text-align:center;font-size:12px}.selection-section{padding:18px 14px;border-radius:18px}.selection-section h2{font-size:var(--font-size-card-title)}.books{grid-template-columns:1fr;gap:9px;margin:16px 0}.books button{min-height:78px;padding:12px 34px 12px 13px;display:grid;grid-template-columns:24px 1fr;gap:4px 10px}.books strong{font-size:15px}.books small{grid-column:2}.book-number{align-self:center}.chapter-choice select{font-size:12px}.selection-hint{font-size:11px}.copy-writing{padding:0 10px max(6px,env(safe-area-inset-bottom))}.writing-bar{padding:7px 0 5px;gap:6px}.writing-title h1{font-size:12px}.writing-title p{display:none}.writing-bar .icon-button{min-width:40px;min-height:40px;padding:7px}.save-button{max-width:105px;font-size:10px;padding:7px 9px;min-height:40px;line-height:1.4}.save-status{font-size:10px;padding-bottom:6px}.account-note{max-width:52%;text-align:right}.block-nav{gap:5px}.block-nav label{font-size:12px}.block-nav .icon-button{min-width:36px;min-height:36px;padding:4px}.block-nav select{min-height:36px;min-width:58px;font-size:12px;padding:5px}.chapter-progress{margin:5px 0 8px}.writing-grid,.source-hidden{display:flex;flex-direction:column;gap:8px}.source-panel{flex:0 1 auto;max-height:36%;border-radius:12px}.source-hidden .source-panel{align-self:stretch;max-height:none;flex-shrink:0}.panel-heading{padding:5px 9px;gap:5px;flex-wrap:nowrap}.panel-heading h2,.panel-heading label{font-size:12px}.source-font-controls{gap:3px}.source-font-controls button{min-width:36px;min-height:36px;font-size:12px;padding:5px}.source-font-controls output{font-size:10px;min-width:28px}.source-toggle{font-size:10px;min-height:36px;padding:4px;gap:2px}.source-toggle :global(svg){width:12px}.source{max-height:20vh;max-height:20dvh;padding:4px 12px 12px;flex:0 1 auto;line-height:1.7}.editor-panel{flex:1;border-radius:12px}.review-actions{padding:5px 8px;gap:6px}.review-actions button{font-size:11px;min-height:36px;padding:7px 10px}.review-actions .muted{font-size:9px}.options-panel{top:55px;right:10px;bottom:8px;width:calc(100% - 20px)}.message p,.guest-draft{font-size:11px}.guest-draft{padding:6px 8px;gap:6px}.guest-draft .guest-adopt-btn{font-size:10px;padding:6px 8px}.guest-draft .guest-close-btn{min-width:28px;min-height:28px;padding:2px}}
   .source.admin-copy{user-select:text;-webkit-user-select:text}.source-line--current{background:var(--gold-light,var(--bg3));box-shadow:-3px 0 0 var(--gold);border-radius:3px}
   .editor-pages{display:flex;align-items:center;gap:5px}.editor-pages button{display:flex;align-items:center;justify-content:center;padding:4px;min-width:34px;min-height:34px}.editor-pages output{font-size:11px;min-width:34px;text-align:center;font-variant-numeric:tabular-nums}
-  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.keyboard-open .source{max-height:64px}.keyboard-open .source-panel{max-height:32%}.keyboard-open .review-actions .muted,.keyboard-open .account-note,.keyboard-open .writing-title .eyebrow{display:none}
-  @media(max-height:520px){.writing-title .eyebrow,.save-status .account-note{display:none}.writing-bar{padding:3px 0}.source-panel{max-height:32%}.source{max-height:14dvh}.chapter-progress{margin:3px 0}.panel-heading{padding-block:3px}.review-actions{padding-block:3px}}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.keyboard-open .source{max-height:64px}.keyboard-open .source-panel{max-height:32%}.keyboard-open .review-actions .muted,.keyboard-open .account-note{display:none}
+  @media(max-height:520px){.save-status .account-note{display:none}.writing-bar{padding:3px 0}.source-panel{max-height:32%}.source{max-height:14dvh}.chapter-progress{margin:3px 0}.panel-heading{padding-block:3px}.review-actions{padding-block:3px}}
   @media(max-width:700px){
     .mobile-writing-options{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);align-items:center;gap:12px 8px}
     .mobile-writing-options label{font-size:12px}
     .mobile-writing-options select{min-width:0;width:100%;min-height:40px;font-size:13px}
-    .copy-writing .source-font-controls,.copy-writing .writing-title .eyebrow,.copy-writing .account-note{display:none}
+    .copy-writing .source-font-controls,.copy-writing .account-note{display:none}
     .copy-writing{padding-inline:6px}
     .copy-writing .writing-bar{gap:5px;padding:4px 0}
     .copy-writing .writing-bar .icon-button{min-width:36px;min-height:36px;padding:6px}
@@ -1507,6 +1742,7 @@
   select{min-height:44px}
   /* CSS web cũ dùng nút nhỏ; mobile giữ vùng chạm kể cả khi bàn phím đang mở. */
   .copy-writing button,.copy-writing select{min-height:44px;min-width:44px}
+  .copy-writing .guest-draft .guest-close-btn{min-width:var(--touch-target-size);min-height:var(--touch-target-size)}
   .copy-writing .writing-bar .icon-button,.copy-writing .save-button,.copy-writing .source-toggle,.copy-writing .editor-tools>.icon-button,.copy-writing .review-actions button,.copy-writing .block-nav .icon-button{min-height:44px;min-width:44px}
   :global(body:has(.copy-page) .tt-topbar button){min-width:44px;min-height:44px}
 
@@ -1544,7 +1780,7 @@
   .options-panel>.panel-heading{background:var(--dialog-surface-background,var(--card));border-radius:var(--radius-control);padding-inline:var(--radius-sm)}
 
   .writing-actions{display:flex;align-items:center;justify-content:flex-end;gap:inherit;min-width:0}
-  .mobile-source-control,.editor-tools-trigger,.source-tools-trigger,.mobile-account-actions,.mobile-review-label{display:none}
+  .editor-tools-trigger,.source-tools-trigger,.mobile-account-actions,.mobile-review-label{display:none}
   .source-tools,.editor-tools{display:flex;align-items:center;flex-wrap:wrap;gap:var(--radius-sm);padding:0 var(--space-page) var(--radius-sm);flex-shrink:0}
   .source-heading .block-nav select{max-width:none}
   .source-heading button,.editor-pages button,.editor-tools-trigger{color:var(--text)}
@@ -1577,22 +1813,26 @@
     .compact-editor-display .compact-select-btn{max-width:10rem}
     .editor-tools{justify-content:flex-start}
     .writing-title h1{text-align:center;text-transform:uppercase}
-    .writing-title p,.writing-title .eyebrow{text-align:center;display:block}
+    .writing-title p{text-align:center;display:block}
   }
   @media(max-width:700px){
-    .copy-writing:has(.writing-grid) .writing-bar,.copy-writing:has(.writing-grid) .save-status:not(.error),.desktop-review-label{display:none}
-    .mobile-source-control,.mobile-review-label{display:inline-flex}
+    .copy-writing:has(.writing-grid) .save-status:not(.error),.desktop-review-label{display:none}
+    .mobile-review-label{display:inline-flex}
+    .copy-writing .writing-bar{display:flex;gap:var(--radius-sm)}
+    .copy-writing .writing-bar .icon-button{min-width:var(--touch-target-size);min-height:var(--touch-target-size)}
+    .copy-writing .writing-title{text-align:center}
+    .copy-writing .writing-title h1{font-size:var(--font-size-card-title);text-transform:uppercase}
+    .copy-writing .writing-title p{display:block;font-size:var(--font-size-meta)}
+    .copy-writing .writing-actions{gap:var(--radius-sm)}
+    .copy-writing .writing-actions .fullscreen-button{display:none}
     .copy-review-footer button{flex:1 1 auto}
     .mobile-account-actions{display:flex;flex-wrap:wrap;gap:var(--radius-sm);padding-block:var(--radius-sm)}
     .copy-writing .mobile-account-actions .save-button{max-width:none}
-    .mobile-save-feedback{flex-basis:100%}
     .copy-writing .source-heading{padding-inline:calc(var(--radius-sm) * .75);gap:calc(var(--radius-sm) / 3);justify-content:space-between}
     .copy-writing .source-heading h2{margin-inline-end:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:var(--font-size-meta)}
     .copy-writing .source-heading .block-nav{margin-inline-start:auto;border:1px solid var(--copy-paper-rule);border-radius:var(--radius-control)}
     .copy-writing .source-heading button,.copy-writing .source-heading select{background:transparent;color:var(--copy-paper-ink);border-color:transparent}
     .copy-writing .source-heading .block-nav select{min-width:74px;width:auto;max-width:110px;padding-inline:4px;font-variant-numeric:tabular-nums}
-    .copy-writing .source-heading .mobile-source-control{flex:none}
-    .copy-writing .source-heading .writing-back{border-color:var(--border2);border-radius:var(--radius-control)}
     .copy-writing .source-tools.tools-open{align-items:center;border-top:1px solid var(--copy-paper-rule);padding-top:var(--radius-sm)}
     .copy-writing .source-tools .source-toggle{margin-inline-start:auto}
     .copy-writing .source-heading .block-nav{display:flex;gap:0}
@@ -1621,4 +1861,14 @@
     .copy-writing .source-heading .block-nav{margin-inline:auto}
     .copy-writing .editor-pages output{min-width:26px}
   }
+  .copy-writing .top-save-button{display:inline-flex;align-items:center;justify-content:center;gap:calc(var(--radius-sm) / 2);min-height:var(--touch-target-size);min-width:calc(var(--touch-target-size) + var(--space-page));font-size:var(--font-size-label);padding-inline:var(--radius-sm);white-space:nowrap}
+  .writing-title p{text-transform:uppercase}
+  .copy-chapter-location{flex-shrink:0;margin:0;text-align:center;font-size:var(--font-size-meta);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .copy-save-dialog{width:min(var(--dialog-compact-width),calc(100% - var(--space-page) * 2));max-height:calc(100dvh - var(--space-page) * 2 - env(safe-area-inset-top) - env(safe-area-inset-bottom));margin:auto;padding:var(--space-page);overflow:auto;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--card);color:var(--text);box-shadow:var(--shadow-xl);font-family:var(--font-app)}
+  .copy-save-dialog::backdrop{background:var(--practice-dialog-backdrop)}
+  .copy-save-dialog h2{margin:0;font-size:var(--font-size-dialog-title)}
+  .copy-save-dialog p{margin:var(--dialog-action-space) 0;font-size:var(--font-size-body);color:var(--text2)}
+  .copy-save-dialog-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--dialog-action-gap)}
+  .copy-save-dialog-actions button{min-width:var(--touch-target-size);min-height:var(--touch-target-size);padding:calc(var(--dialog-action-space) / 2) var(--dialog-action-space);border:1px solid var(--border);border-radius:var(--radius-control);background:var(--bg2);color:var(--text);font-family:var(--font-app);font-size:var(--font-size-label)}
+  .copy-save-dialog-actions button.primary{background:var(--gold);border-color:var(--gold);color:var(--on-gold)}
 </style>

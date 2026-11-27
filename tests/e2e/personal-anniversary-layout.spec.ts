@@ -1,5 +1,7 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { settleClient } from './runtime-helpers';
+import { deferStartupNotification, settleClient } from './runtime-helpers';
+
+test.beforeEach(async ({ page }) => deferStartupNotification(page));
 
 const events = [
   { id: 'layout-birthday', title: 'Sinh nhật mẹ', type: 'gia-dinh', calendarMode: 'solar', solarDay: 20, solarMonth: 11, lunarDay: 1, lunarMonth: 1, frequency: 'yearly', createdAt: '2026-01-01T00:00:00Z' },
@@ -18,7 +20,7 @@ for (const [year, lunarDay] of [[2026, 2], [2027, 13]]) {
     await modal.getByRole('button', { name: 'Dương lịch', exact: true }).click();
     await modal.locator('#pem-solar-day').selectOption('10');
     await modal.locator('#pem-solar-month').selectOption('11');
-    await expect(modal.locator('.conversion-pill')).toContainText(`Âm lịch tự quy đổi theo năm ${year}:`);
+    await expect(modal.locator('.conversion-pill')).toContainText(`Âm lịch năm ${year}:`);
     await expect(modal.locator('.conversion-pill')).toContainText(`${lunarDay <= 10 ? 'Mồng' : 'Ngày'} ${lunarDay} Tháng 10`);
     await page.goto('/ca-nhan?tab=settings');
     await settleClient(page);
@@ -28,7 +30,7 @@ for (const [year, lunarDay] of [[2026, 2], [2027, 13]]) {
     await editor.getByRole('button', { name: 'Dương lịch', exact: true }).click();
     await editor.locator('.personal-select-sm').nth(0).selectOption('10');
     await editor.locator('.personal-select-sm').nth(1).selectOption('11');
-    await expect(editor.locator('.personal-conversion-badge')).toContainText(`Âm lịch tự quy đổi theo năm ${year}:`);
+    await expect(editor.locator('.personal-conversion-badge')).toContainText(`Âm lịch năm ${year}:`);
     await expect(editor.locator('.personal-conversion-badge')).toContainText(`Ngày ${lunarDay} Tháng 10`);
   });
 }
@@ -94,6 +96,12 @@ for (const theme of ['light', 'dark'] as const) {
       await form.getByRole('button', { name: 'Lưu ngày lễ', exact: true }).click();
       await expect(modal.locator('.pem-saved-message[role="status"]')).toHaveText('Đã lưu thành công');
       await expect(modal.locator('.pem-list')).toContainText(`Ngày lễ kiểm tra ${width}`);
+      const success = page.getByRole('dialog', { name: 'Đã thêm ngày lễ cá nhân', exact: true });
+      await expect(success).toContainText('Ngày lễ đã được lưu trên thiết bị.');
+      await success.screenshot({ path: testInfo.outputPath(`personal-event-success-${theme}-${width}.png`) });
+      await page.keyboard.press('Escape');
+      await expect(success).toHaveCount(0);
+      await expect(modal).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(modal).toHaveCount(0);
       await page.goto('/ca-nhan?tab=settings');
@@ -134,17 +142,25 @@ for (const theme of ['light', 'dark'] as const) {
         const titleRow = await item.locator('.personal-item-title-row').boundingBox();
         const date = await item.locator('.personal-item-date').boundingBox();
         const bounds = await item.boundingBox();
-        const remove = await item.getByRole('button').boundingBox();
         expect(Math.abs(date!.x - title!.x), 'Date must align with its own title, not become a separate full-width row').toBeLessThan(2);
         const gapBelowTitleRow = date!.y - (titleRow!.y + titleRow!.height);
         expect(gapBelowTitleRow).toBeGreaterThanOrEqual(0);
         expect(gapBelowTitleRow, 'The date belongs directly below the title and any wrapped badges').toBeLessThanOrEqual(12);
         expect(date!.x + date!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
-        expect(remove!.width).toBeGreaterThanOrEqual(44);
-        expect(remove!.height).toBeGreaterThanOrEqual(44);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await card.screenshot({ path: testInfo.outputPath(`anniversaries-${theme}-${width}.png`) });
+      await card.getByRole('button', { name: 'Thêm ngày lễ cá nhân' }).click();
+      const modal = page.locator('.pem-dialog');
+      for (const event of events) {
+        const remove = modal.getByRole('button', { name: `Xóa ${event.title}`, exact: true });
+        await expect(remove).toBeVisible();
+        const bounds = (await remove.boundingBox())!;
+        expect(bounds.width).toBeGreaterThanOrEqual(44);
+        expect(bounds.height).toBeGreaterThanOrEqual(44);
+      }
+      await page.keyboard.press('Escape');
+      await expect(modal).toHaveCount(0);
     }
   });
 }

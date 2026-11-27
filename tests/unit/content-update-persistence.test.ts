@@ -9,8 +9,8 @@ it('keeps downloaded books, packages and offline images when native startup remo
   const remove = vi.fn(async () => true);
   const unregister = vi.fn(async () => true);
   vi.stubGlobal('navigator', { serviceWorker: { getRegistrations: async () => [{ unregister }] } });
-  vi.stubGlobal('caches', { keys: async () => ['tutam-english-chapters-v2', 'tutam-content-packages-v1', 'tutam-public-covers-v1', OFFLINE_ILLUSTRATION_CACHE, 'stale-shell'], delete: remove });
+  vi.stubGlobal('caches', { keys: async () => ['tutam-english-chapters-v2', 'tutam-content-packages-v1', 'tutam-public-covers-v1', OFFLINE_ILLUSTRATION_CACHE, 'stale-shell', 'quangtu-sveltekit-old'], delete: remove });
   expect(await registerPwa()).toBeNull();
   expect(unregister).toHaveBeenCalledOnce();
-  expect(remove.mock.calls.map(([name]) => name)).toEqual(['stale-shell']);
+  expect(remove.mock.calls.map(([name]) => name)).toEqual(['quangtu-sveltekit-old']);
 });

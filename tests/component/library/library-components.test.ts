@@ -180,8 +180,8 @@ describe('library foundation', () => {
     const page = readFileSync('src/routes/kinh-sach/+page.svelte', 'utf8');
     const catalogs = readFileSync('src/lib/browser/content-catalogs.ts', 'utf8');
     expect(page).toContain("tag.toLocaleLowerCase('vi').includes(normalizedTag)");
-    expect(page).toContain('selectedArticle.title');
-    expect(page).toContain('selectedArticle?.summary');
+    expect(page).toMatch(/selectedArticle\.title|getLocalizedArticle\(selectedArticle,\s*localeStore\.current\).*title/);
+    expect(page).toMatch(/selectedArticle\?\.summary|getLocalizedArticle\(selectedArticle,\s*localeStore\.current\).*summary/);
     expect(page).toContain('selectedArticle?.imageUrl');
     expect(catalogs).toContain('link_ngoai');
     expect(catalogs).toContain('externalUrl: String(row.link_ngoai');
@@ -192,5 +192,21 @@ describe('library foundation', () => {
     expect(isHomepageArticleVisible({ danh_muc: 'CÁC NGHI THỨC' }, 'ctv')).toBe(false);
     expect(isHomepageArticleVisible({ danh_muc: 'PHÁP THOẠI' }, 'admin')).toBe(false);
     expect(isHomepageArticleVisible({ danh_muc: 'KINH PHẬT' }, 'admin')).toBe(true);
+  });
+
+  it('uses compact 3D crystal 4-corner cover and card geometry in Kinh Sach library styles', () => {
+    const libraryCss = readFileSync('src/lib/styles/library.css', 'utf8');
+    const uiRefresh = readFileSync('src/lib/styles/ui-refresh.css', 'utf8');
+
+    expect(libraryCss).toContain('.art-card:not(.featured) .art-cover { width:86px;');
+    expect(libraryCss).toContain('.art-card:not(.featured) .art-thumb { width:86px; height:128px;');
+    expect(libraryCss).toContain('width:92px; height:138px;');
+    expect(libraryCss).not.toContain('object-fit:fill');
+    expect(libraryCss).toContain('border-radius:var(--radius-control)');
+    expect(libraryCss).toContain('border-radius:var(--radius-card)');
+    expect(libraryCss).toContain('text-overflow:ellipsis');
+    expect(uiRefresh).toContain('.kinh-sach-container .art-thumb::after');
+    expect(uiRefresh).toContain('.kinh-sach-container .art-thumb::before');
+    expect(uiRefresh).toContain('.kinh-sach-container .art-card.featured');
   });
 });

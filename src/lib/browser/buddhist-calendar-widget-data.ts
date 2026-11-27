@@ -1,5 +1,6 @@
 import { CAN, CHI, solarToLunar } from '$lib/components/lunar/lunar-calendar';
 import { getLunarEvent } from '$lib/components/lunar/lunar-events';
+import { formatCanChiEn } from '$lib/components/lunar/lunar-week';
 import { buddhistCalendarWidgetCopy } from '$lib/i18n/buddhist-calendar-widget';
 import { getPersonalEventsForDate, PERSONAL_EVENT_TYPES, type PersonalLunarEvent } from './personal-lunar-events';
 
@@ -76,7 +77,7 @@ export function buildBuddhistCalendarTimeline(start: Date, count = 400, personal
       solarDate: `${copy.weekdays[current.getDay()]}, ${solarDateShort}`,
       solarDateShort,
       lunarDay: String(lunar.day),
-      lunarMonthYear: `${locale === 'en' ? 'Month' : 'Tháng'} ${pad(lunar.month)}${lunar.leap ? locale === 'en' ? ' leap' : ' nhuận' : ''} • ${CAN[(lunar.year + 6) % 10]} ${CHI[(lunar.year + 8) % 12]}`,
+      lunarMonthYear: `${locale === 'en' ? 'Month' : 'Tháng'} ${pad(lunar.month)}${lunar.leap ? locale === 'en' ? ' leap' : ' nhuận' : ''} • ${locale === 'en' ? formatCanChiEn(CAN[(lunar.year + 6) % 10], CHI[(lunar.year + 8) % 12]) : `${CAN[(lunar.year + 6) % 10]} ${CHI[(lunar.year + 8) % 12]}`}`,
       ...(event.isThapTrai ? { fastingNote: copy.fastingNote } : {}),
       ...(event.viaName ? { buddhistHoliday: event.viaName } : {}),
       ...(event.kiengDam ? { thoKhangNote: `${copy.abstinenceNote} ${event.kiengDam.reason}` } : {}),

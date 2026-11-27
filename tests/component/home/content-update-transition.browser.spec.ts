@@ -11,7 +11,14 @@ const button = (label: string) => [...document.querySelectorAll('button')].find(
 const settle = async () => { await new Promise(resolve => setTimeout(resolve, 0)); flushSync(); };
 beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); io.check.mockResolvedValue(plan); io.download.mockResolvedValue({ completed: 0, failed: [], pdfRemoved: ['An Sỹ Toàn Thư'], pdfRetained: [] }); });
 afterEach(async () => { if (component) await unmount(component); component = undefined; document.body.replaceChildren(); localStorage.clear(); });
-async function ready() { component = mount(Harness, { target: document.body }); flushSync(); button('↻Cập nhật nội dung').click(); await settle(); }
+async function ready() {
+  component = mount(Harness, { target: document.body });
+  flushSync();
+  const trigger = document.querySelector<HTMLButtonElement>('#content-updates button[aria-haspopup="dialog"]');
+  expect(trigger?.getAttribute('aria-label')).toBe('Cập nhật nội dung');
+  trigger!.click();
+  await settle();
+}
 it('checks again after fourteen days and only opens the dialog when books are available', async () => {
   vi.stubGlobal('Capacitor', { isNativePlatform: () => true });
   const now = 1_800_000_000_000;

@@ -11,6 +11,7 @@ import type { HandleClientError } from '@sveltejs/kit';
 import { isHtmlResponse, resolveApiUrl } from '$lib/browser/native-api';
 import { readOfflineApiResponse, storeApiResponse } from '$lib/browser/native-api-cache';
 import { availableContentResponse, blockedContentRequest } from '$lib/browser/ios-content-policy';
+import { NATIVE_BACKEND_ORIGINS } from '$lib/browser/native-backend-origin';
 
 function installNativeApiFetch(): void {
   if (typeof window === 'undefined') return;
@@ -26,7 +27,6 @@ function installNativeApiFetch(): void {
 
   const originalFetch = window.fetch.bind(window);
   const sameOrigin = window.location.origin;
-  const remoteOrigin = new URL(resolveApiUrl('/api/health')).origin;
 
   const rewrite = (url: string): string => {
     if (url.startsWith('/api/') || url === '/api') return resolveApiUrl(url);
@@ -39,7 +39,7 @@ function installNativeApiFetch(): void {
     try {
       const url = new URL(target, sameOrigin);
       if (!url.pathname.startsWith('/api/')) return null;
-      if (url.origin !== remoteOrigin && !/(^|\.)quangtu\.vn$/iu.test(url.hostname)) return null;
+      if (!NATIVE_BACKEND_ORIGINS.some(origin => origin === url.origin) && !/(^|\.)quangtu\.vn$/iu.test(url.hostname)) return null;
       return url;
     } catch {
       return null;
@@ -90,7 +90,8 @@ function installNativeApiFetch(): void {
         return originalFetch(target, init);
       };
       const apiUrl = apiUrlOf(target);
-      if (apiUrl && method === 'GET') {
+      // Session and health require a live server result, never a bundled 200.
+      if (apiUrl && method === 'GET' && !['/api/session', '/api/health'].includes(apiUrl.pathname)) {
         const response = withOfflineFallback(apiUrl, run);
         return /^\/api\/(?:articles|talks|content-updates|data\/(?:baiviet|tap_noi_dung|phap_thoai))(?:\/|$)/u.test(apiUrl.pathname)
           ? response.then(availableContentResponse) : response;

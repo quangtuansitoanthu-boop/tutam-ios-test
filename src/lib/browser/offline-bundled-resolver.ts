@@ -2,6 +2,7 @@ import { fetchEnglishChapters } from '$lib/browser/english-pack';
 import { requestDeadline } from './network-deadline';
 import { availableContent, blockedContentRequest } from './ios-content-policy';
 import { isOnlineOnlyBook } from '$lib/domain/online-only-policy';
+import { hasEnglishChapters } from '$lib/domain/library/localized-article';
 import { isHtmlResponse } from './native-api';
 import { mergeUpdatedArticleRows, readUpdatedContentResponse } from './offline-content-packages';
 import type { CachedTalkAlbumRow } from './talk-catalog-cache';
@@ -94,18 +95,6 @@ async function getArticlesMap(): Promise<Map<string, OfflineArticle>> {
   return articlesMapCache || new Map();
 }
 
-let offlineBooksEnCache: Record<string, { title: string; summary?: string; author?: string }> | null = null;
-async function getOfflineBooksEn(): Promise<Record<string, { title: string; summary?: string; author?: string }>> {
-  if (offlineBooksEnCache) return offlineBooksEnCache;
-  try {
-    const mod = await import('$lib/data/offline-books-en.json');
-    offlineBooksEnCache = ((mod as any).default || mod || {}) as Record<string, { title: string; summary?: string; author?: string }>;
-  } catch {
-    offlineBooksEnCache = {};
-  }
-  return offlineBooksEnCache;
-}
-
 let offlineTalksCache: CachedTalkAlbumRow[] | null = null;
 let offlineTalksPromise: Promise<CachedTalkAlbumRow[]> | null = null;
 export async function getOfflineTalks(): Promise<CachedTalkAlbumRow[]> {
@@ -146,19 +135,6 @@ function getActiveLocale(): string {
   return 'vi';
 }
 
-async function localizeArticle(article: OfflineArticle, locale: string): Promise<OfflineArticle> {
-  if (locale !== 'en') return article;
-  const offlineBooksEn = await getOfflineBooksEn();
-  const enMeta = offlineBooksEn[article.id] || offlineBooksEn[article.id.replace(/^book_/u, '')] || offlineBooksEn[`book_${article.id}`];
-  if (!enMeta) return article;
-  return {
-    ...article,
-    tieu_de: enMeta.title || article.tieu_de,
-    tom_tat: enMeta.summary || article.tom_tat,
-    tac_gia: enMeta.author || article.tac_gia
-  };
-}
-
 let articlesEnCache: Promise<Record<string, { tieu_de?: string; tom_tat?: string | null; noi_dung?: string | null }>> | null = null;
 
 function getArticlesEn(): Promise<Record<string, { tieu_de?: string; tom_tat?: string | null; noi_dung?: string | null }>> {
@@ -177,29 +153,6 @@ function getArticlesEn(): Promise<Record<string, { tieu_de?: string; tom_tat?: s
   return articlesEnCache;
 }
 
-async function localizeArticleAsync(article: OfflineArticle, locale: string): Promise<OfflineArticle> {
-  const base = await localizeArticle(article, locale);
-  if (locale !== 'en') return base;
-  try {
-    const enMap = await getArticlesEn();
-    const full = enMap[article.id];
-    if (!full) return base;
-    return {
-      ...base,
-      tieu_de: full.tieu_de || base.tieu_de,
-      tom_tat: full.tom_tat || base.tom_tat,
-      noi_dung: full.noi_dung || base.noi_dung
-    };
-  } catch {
-    return base;
-  }
-}
-
-async function localizeRowsAsync(rows: OfflineArticle[], locale: string): Promise<OfflineArticle[]> {
-  if (locale !== 'en') return rows;
-  return Promise.all(rows.map((a) => localizeArticleAsync(a, locale)));
-}
-
 function eqParam(url: URL | null, name: string): string | null {
   const value = url?.searchParams.get(name);
   if (!value?.startsWith('eq.')) return null;
@@ -209,7 +162,7 @@ function eqParam(url: URL | null, name: string): string | null {
 const chapterCacheVi = new Map<string, any[]>();
 const chapterCacheEn = new Map<string, any[]>();
 
-async function bundledChapters(articleOrId: OfflineArticle | string, url: URL | null): Promise<any[]> {
+async function bundledChapters(articleOrId: OfflineArticle | string, url: URL | null, englishOnly = false): Promise<any[]> {
   const map = await getArticlesMap();
   const id = typeof articleOrId === 'string' ? articleOrId : articleOrId.id;
   const article = typeof articleOrId === 'string' ? map.get(id) : articleOrId;
@@ -238,7 +191,27 @@ async function bundledChapters(articleOrId: OfflineArticle | string, url: URL | 
     } finally {
       deadline.dispose();
     }
+
+    if (chapters.length === 0 && !article?.has_muc_luc && !(Number(article?.so_tap || 0) > 0)) {
+      try {
+        const enMap = await getArticlesEn();
+        const single = enMap[id] || enMap[id.replace(/^book_/u, '')] || enMap[`book_${id}`];
+        if (single?.noi_dung && String(single.noi_dung).trim()) {
+          chapters = [{
+            id: `${id}_full`,
+            bai_viet_id: id,
+            so_thu_tu: 0,
+            tieu_de: single.tieu_de || article?.tieu_de || '',
+            tom_tat: single.tom_tat || article?.tom_tat || '',
+            noi_dung: single.noi_dung,
+          }];
+          cache.set(id, chapters);
+        }
+      } catch {}
+    }
   }
+
+  if (englishOnly && chapters.length === 0) return [];
 
   if (chapters.length === 0) {
     for (const testId of idVariants) {
@@ -310,7 +283,19 @@ async function bundledChapters(articleOrId: OfflineArticle | string, url: URL | 
 export async function readUpdatedBundledContentResponse(url: URL): Promise<Response | null> {
   const articleRequest = /^\/api\/articles\/[^/]+(?:\/chapters)?$/u.test(url.pathname)
     || ['/api/data/baiviet', '/api/data/tap_noi_dung'].includes(url.pathname);
-  return readUpdatedContentResponse(url, articleRequest ? await getOfflineArticles() : undefined);
+  const saved = await readUpdatedContentResponse(url, articleRequest ? await getOfflineArticles() : undefined);
+  if (!saved || getActiveLocale() !== 'en') return saved;
+  const chapterMatch = /^\/api\/articles\/([^/]+)\/chapters$/u.exec(url.pathname);
+  const chapterId = chapterMatch ? decodeURIComponent(chapterMatch[1])
+    : url.pathname === '/api/data/tap_noi_dung' ? eqParam(url, 'bai_viet_id') : null;
+  if (!chapterId || !hasEnglishChapters(chapterId)) return saved;
+  try {
+    const english = await bundledChapters(chapterId, url, true);
+    if (english.length) return Response.json(english);
+  } catch {
+    // Keep the updated Vietnamese snapshot when the English pack is unavailable.
+  }
+  return saved;
 }
 
 export async function resolveOfflineBundledResponse(input: RequestInfo | URL): Promise<Response | null> {
@@ -325,6 +310,11 @@ export async function resolveOfflineBundledResponse(input: RequestInfo | URL): P
   } catch {
     pathname = urlString.split('?')[0];
   }
+
+  // Remembered profile data is not server verification or live health status.
+  if (pathname === '/api/session' || pathname === '/api/health') return null;
+  // Comments have their own saved response. An empty bundled 200 would erase it.
+  if (/^\/api\/articles\/[^/]+\/comments$/u.test(pathname)) return null;
 
   if (urlObj) {
     if (blockedContentRequest(urlObj)) return new Response('null', { status: 404, headers: { 'content-type': 'application/json' } });
@@ -422,14 +412,6 @@ export async function resolveOfflineBundledResponse(input: RequestInfo | URL): P
     });
   }
 
-  // 8. Comments: /api/articles/:id/comments
-  if (/^\/api\/articles\/[^/]+\/comments$/.test(pathname)) {
-    return new Response(JSON.stringify([]), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-
   // 9. Pháp bảo offline: /api/phap-bao
   if (pathname === '/api/phap-bao') {
     const cachedLink = (typeof localStorage !== 'undefined' && localStorage.getItem('tutam_cached_shopee_link'))
@@ -442,33 +424,6 @@ export async function resolveOfflineBundledResponse(input: RequestInfo | URL): P
         { id: 'pb_c7ed888a-d594-481f-aa6a-9f547f6b039e', tieu_de: 'Kinh Địa Tạng Bồ Tát Bổn Nguyện', link_shopee: cachedLink }
       ]
     }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-
-  // 10. Session: /api/session
-  if (pathname === '/api/session') {
-    try {
-      if (typeof localStorage !== 'undefined') {
-        const saved = localStorage.getItem('tutam_native_session');
-        if (saved) {
-          return new Response(saved, {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-      }
-    } catch {}
-    return new Response(JSON.stringify({ authenticated: false, user: null, csrfToken: null, expiresAt: null }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-
-  // 11. Health: /api/health
-  if (pathname === '/api/health') {
-    return new Response(JSON.stringify({ ok: true, offline: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });

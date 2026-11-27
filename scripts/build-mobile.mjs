@@ -5,25 +5,28 @@ import { copyMobileFile, copyMobileTree, createAssetManifest, verifyAssetManifes
 import bundledEnglishRituals from '../src/lib/data/bundled-english-rituals.json' with { type: 'json' };
 import { removeIosExcludedAssets } from './lib/ios-content-assets.mjs';
 import { configureIosGoogle, resolveIosGoogleClientId } from './lib/ios-google-config.mjs';
+import nativeGoogleConfig from '../src/lib/contracts/native-google-auth.json' with { type: 'json' };
 
 const root = process.cwd();
 const staticDir = path.join(root, 'static');
 const buildDir = path.join(root, 'build');
 const platforms = resolveMobilePlatforms(process.argv.slice(2));
 // CI phải dừng trước khi tải nội dung/build; client và URL scheme dùng cùng một ID.
+const requireIosGoogleClientId = Boolean(process.env.CI) && !['false', '0'].includes(process.env.CI);
 const iosGoogleClientId = platforms.includes('ios')
-  ? resolveIosGoogleClientId(process.env.VITE_GOOGLE_IOS_CLIENT_ID,
-    Boolean(process.env.CI) && !['false', '0'].includes(process.env.CI)) : '';
+  ? resolveIosGoogleClientId(process.env.VITE_GOOGLE_IOS_CLIENT_ID?.trim()
+    || (requireIosGoogleClientId ? '' : nativeGoogleConfig.iosClientId), requireIosGoogleClientId) : '';
 if (iosGoogleClientId) process.env.VITE_GOOGLE_IOS_CLIENT_ID = iosGoogleClientId;
-else if (platforms.includes('ios')) console.warn('[build-mobile] VITE_GOOGLE_IOS_CLIENT_ID is missing: Google Sign-In on iOS is unavailable. Set it before a release build on Mac.');
 
 // Mỗi nền tảng cần bundle riêng để bộ lọc iOS không lọt sang Android.
 const sharedBuildVersion = process.env.BUILD_VERSION || Date.now().toString();
 if (platforms.length > 1) {
   execFileSync(process.execPath, ['--use-system-ca', 'scripts/sync-offline-content.mjs'], { cwd: root, stdio: 'inherit' });
-  for (const platform of platforms) {
+  // Giữ build/ cuối cùng là Android để lệnh cap sync android thủ công không lấy bundle iOS.
+  for (const platform of [...platforms].sort(platform => platform === 'ios' ? -1 : 1)) {
     execFileSync(process.execPath, ['scripts/build-mobile.mjs', '--platform', platform], { cwd: root, stdio: 'inherit', env: { ...process.env, TUTAM_BUNDLE_SYNCED: '1', BUILD_VERSION: sharedBuildVersion } });
   }
+  console.warn('[build-mobile] Hai nền tảng đã sync từ bundle riêng. build/ hiện là Android; không dùng cap sync cho cả hai, dùng npm run build:mobile.');
   process.exit(0);
 }
 
@@ -128,9 +131,15 @@ removeIosExcludedAssets(buildDir, { iosAudioAlias: platforms[0] === 'ios' });
 
 const assetManifest = createAssetManifest(buildDir, [
   'index.html', 'offline-bundled-articles.json', 'offline-data/talks.json',
+  'vendor/pdfjs/pdf.worker.min.mjs',
+  ...fs.readdirSync(path.join(staticDir, 'vendor', 'pdfjs', 'wasm')).map(file => `vendor/pdfjs/wasm/${file}`),
+  ...fs.readdirSync(path.join(staticDir, 'vendor', 'pdfjs', 'standard_fonts')).map(file => `vendor/pdfjs/standard_fonts/${file}`),
   ...bundledEnglishRituals.map(file => `offline-data/chapters-en/${file}`),
   'images/le-phat/quan-the-am-approved.webp', 'assets/fonts/be-vietnam-pro-regular.ttf',
+  'images/calendar/cu-si-title.webp', 'images/calendar/cu-si-title-en.webp',
+  ...Array.from({ length: 10 }, (_, index) => `images/calendar/cu-si/${String(index + 1).padStart(2, '0')}.webp`),
   ...['nhac-thien-01.m4a', 'nhac-thien-02.m4a', 'nhac-thien-03.m4a', 'tieng-mo.m4a', 'rosary-tap.m4a',
+    platforms[0] === 'ios' ? 'chu-lang-nghiem.mp3' : 'chu-lang-nghiem-dieu-am-tinh-tuan-20261023.mp3',
     ...fs.readdirSync(path.join(rootAssets, 'audio', 'ambient')).filter(file => file.endsWith('.mp3')).map(file => `ambient/${file}`),
   ].map(file => `assets/audio/${file}`),
 ]);
@@ -189,24 +198,19 @@ for (const oldMp3 of ['nhac-thien-01.mp3', 'nhac-thien-02.mp3', 'nhac-thien-03.m
   }
 }
 
+}
+
 if (skipVideos) {
-  const androidVideos = path.join(root, 'android', 'app', 'src', 'main', 'assets', 'public', 'videos');
-  if (fs.existsSync(androidVideos)) {
+  for (const platform of platforms) {
+    const publicDirectory = platform === 'android' ? androidPublic : path.join(root, 'ios', 'App', 'App', 'public');
+    const videos = path.join(publicDirectory, 'videos');
+    if (!fs.existsSync(videos)) continue;
     try {
-      fs.rmSync(androidVideos, { recursive: true, force: true });
-      console.log('✓ Đã dọn dẹp videos khỏi android/assets/public.');
+      fs.rmSync(videos, { recursive: true, force: true });
+      console.log(`✓ Đã dọn dẹp videos khỏi ${platform} public.`);
     } catch (e) {
-      console.warn('[build-mobile] Không thể xóa android videos:', e.message);
-    }
-  }
-  const iosVideos = path.join(root, 'ios', 'App', 'App', 'public', 'videos');
-  if (fs.existsSync(iosVideos)) {
-    try {
-      fs.rmSync(iosVideos, { recursive: true, force: true });
-      console.log('✓ Đã dọn dẹp videos khỏi ios/App/public.');
-    } catch (e) {
-      console.warn('[build-mobile] Không thể xóa ios videos:', e.message);
+      console.warn(`[build-mobile] Không thể xóa ${platform} videos:`, e.message);
     }
   }
 }
-}
+console.warn(`[build-mobile] build/ hiện là ${platforms[0]}: chỉ dùng cap sync ${platforms[0]}. Dùng npm run build:mobile để đồng bộ cả hai nền tảng.`);

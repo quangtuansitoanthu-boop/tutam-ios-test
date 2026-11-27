@@ -20,7 +20,7 @@ test('moderation keeps rejection reason on failure and never submits duplicate d
     await new Promise<void>(resolve => { release = resolve; });
     await route.fulfill({ status: 503, json: { error: { code: 'unavailable', message: 'Chưa cập nhật được' } } });
   });
-  await page.goto('/admin/community');
+  await page.goto('/admin/community?moderation=comments');
   await settleClient(page);
   const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
   await moderation.getByRole('button', { name: /^(?:▼\s*)?Xem nội dung & ngữ cảnh$/u, exact: true }).click();
@@ -51,29 +51,47 @@ test('admin community shows two main queues and keeps reflection filters inside 
   });
   await page.goto('/admin/community');
   await settleClient(page);
-  const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
-  await expect(moderation).toBeVisible();
   const tabs = page.getByRole('navigation', { name: 'Hàng chờ kiểm duyệt', exact: true });
-  await expect(tabs.getByRole('button')).toHaveText(['Bình luận', 'Quán chiếu thiện ác']);
-  await expect(tabs.getByRole('button', { name: 'Bình luận', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('group', { name: 'Loại bài', exact: true })).toHaveCount(0);
-  await expect(moderation.getByText('Không có nội dung chờ xử lý', { exact: true })).toBeVisible();
-  await touchModeration(tabs.getByRole('button', { name: 'Quán chiếu thiện ác', exact: true }));
-  await expect.poll(() => reads).toEqual(['comments', 'mindful']);
+  await expect(tabs.getByRole('button')).toHaveText(['Quán chiếu thiện ác', 'Bình luận']);
+  await expect(tabs.getByRole('button', { name: 'Quán chiếu thiện ác', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => reads).toEqual(['mindful']);
   const mindful = page.getByRole('region', { name: 'Quán chiếu thiện ác', exact: true });
   await expect(mindful.getByText('Không còn bài chờ duyệt')).toBeVisible();
   await expect(mindful.getByRole('group', { name: 'Trạng thái', exact: true }).getByRole('button')).toHaveCount(2);
   await expect(mindful.getByRole('group', { name: 'Loại bài', exact: true }).getByRole('button')).toHaveCount(3);
-  await expect(mindful.getByRole('button', { name: 'Trang sau', exact: true })).toBeDisabled();
+  await expect(mindful.getByRole('button', { name: 'Trang sau', exact: true })).toHaveCount(0);
   await expectNoHorizontalOverflow(page, mindful);
   await touchModeration(tabs.getByRole('button', { name: 'Bình luận', exact: true }));
   await expect(page.getByRole('group', { name: 'Loại bài', exact: true })).toHaveCount(0);
-  expect(reads).toEqual(['comments', 'mindful']);
+  const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
+  await expect(moderation.getByText('Không có nội dung chờ xử lý', { exact: true })).toBeVisible();
+  await expect.poll(() => reads).toEqual(['mindful', 'comments']);
+  await touchModeration(tabs.getByRole('button', { name: 'Quán chiếu thiện ác', exact: true }));
+  await expect(mindful).toBeVisible();
+  expect(reads).toEqual(['mindful', 'comments']);
   await page.goto('/admin/community?moderation=profiles');
   await expect(page.getByRole('region', { name: 'Tên/ảnh công khai chờ duyệt' })).toBeVisible();
-  await expect.poll(() => reads).toEqual(['comments', 'mindful', 'profiles']);
+  await expect.poll(() => reads).toEqual(['mindful', 'comments', 'profiles']);
 });
 
+
+test('reloading the selected comment queue preserves its URL and filters', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.route('**/api/admin/community/moderation?*', route => route.fulfill({
+    json: { items: [], nextCursor: null },
+  }));
+  await page.goto('/admin/community?moderation=mindful&period=today#review');
+  const queues = page.getByRole('navigation', { name: 'Hàng chờ kiểm duyệt', exact: true });
+  const comments = queues.getByRole('button', { name: 'Bình luận', exact: true });
+  await comments.click();
+  await expect(comments).toHaveAttribute('aria-pressed', 'true');
+  const selected = new URL(page.url());
+  expect(selected.searchParams.get('period')).toBe('today');
+  expect(selected.hash).toBe('#review');
+  await page.reload();
+  await expect(comments).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('region', { name: 'Kiểm duyệt nội dung' })).toBeVisible();
+});
 test('reported content hides through its target revision and resolves the report separately', async ({ page }) => {
   await loginAsAdmin(page);
   const writes: Array<{ path: string; body: unknown }> = [];
@@ -115,7 +133,7 @@ test('moderation pagination reuses its principal cache and keeps stale decisions
     writes++;
     await route.fulfill({ status: 409, json: { error: { code: 'conflict' } } });
   });
-  await page.goto('/admin/community');
+  await page.goto('/admin/community?moderation=comments');
   await settleClient(page);
   const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
   await moderation.getByRole('button', { name: 'Trang sau', exact: true }).click();
@@ -135,7 +153,7 @@ test('moderation pagination reuses its principal cache and keeps stale decisions
 test('session loss clears moderation context and closes a private rejection draft', async ({ page }) => {
   await loginAsAdmin(page);
   await page.route('**/api/admin/community/moderation?*', route => route.fulfill({ json: { items: [comment], nextCursor: null } }));
-  await page.goto('/admin/community');
+  await page.goto('/admin/community?moderation=comments');
   await settleClient(page);
   const moderation = page.getByRole('region', { name: 'Kiểm duyệt nội dung' });
   await moderation.getByRole('button', { name: /^(?:▼\s*)?Xem nội dung & ngữ cảnh$/u, exact: true }).click();
@@ -208,18 +226,19 @@ test('[moderation48h] cold and repeated warm notification links reopen the mindf
     const comments = page.getByRole('region', { name: 'Kiểm duyệt nội dung', exact: true });
     await expect(comments.getByRole('button', { name: 'Bình luận', exact: true })).toHaveAttribute('aria-pressed', 'true');
     const manualUrl = new URL(page.url());
-    expect(manualUrl.searchParams.has('moderation')).toBe(false);
+    expect(manualUrl.searchParams.get('moderation')).toBe('comments');
     if (attempt === 0) {
       expect(manualUrl.searchParams.get('period')).toBe('today');
       expect(manualUrl.hash).toBe('#review');
     }
     await touchModeration(page.locator('.notification-bell-btn'));
+    await page.getByRole('tab', { name: 'Phê duyệt', exact: true }).click();
     await touchModeration(page.locator('.notification-item').filter({ hasText: notification.title }));
     await expect(page).toHaveURL(new URL(notification.link, page.url()).href);
     await expect(mindful.getByRole('button', { name: 'Quán chiếu thiện ác', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(mindful.getByText('Không còn bài chờ duyệt', { exact: true })).toBeVisible();
   }
-  expect(queues).toEqual(['mindful', 'comments']);
+  expect(queues).toEqual(['mindful', 'comments', 'mindful', 'mindful']);
   expect(documents).toEqual([]);
   expect(writes).toEqual([]);
   await expect(page.locator('dialog[open]')).toHaveCount(0);
@@ -239,7 +258,7 @@ for (const width of [375, 1440]) for (const theme of ['light', 'dark'] as const)
     page.on('pageerror', error => errors.push(error.message));
     await loginAsAdmin(page);
     const postKind = width === 375 && theme === 'dark' ? 'repentance' : width === 1440 && theme === 'light' ? 'good_deed' : undefined;
-    const label = postKind === 'repentance' ? 'Sám hối' : postKind === 'good_deed' ? 'Tùy hỷ công đức' : 'Tất cả';
+    const label = postKind === 'repentance' ? 'Sám hối' : postKind === 'good_deed' ? 'Làm việc thiện' : 'Tất cả';
     const submittedAt = new Date().toISOString();
     const reads: URL[] = [];
     let complete = false;
@@ -302,7 +321,7 @@ for (const width of [375, 1440]) for (const theme of ['light', 'dark'] as const)
     expect(reads.at(-1)!.searchParams.get('postKind')).toBe(postKind ?? null);
     const approveAll = moderation.getByRole('button', { name: /^Duyệt tất cả\s*\(99\+\)$/u });
     await touchModeration(approveAll);
-    const dialog = page.getByRole('dialog', { name: 'Duyệt tất cả bài đang chờ?', exact: true });
+    const dialog = page.getByRole('dialog', { name: 'Duyệt tất cả quán chiếu đang chờ?', exact: true });
     await expect(dialog).toBeVisible();
     expect(preparations).toHaveLength(1);
     await expect(dialog).toContainText('gồm cả các trang kết quả khác');

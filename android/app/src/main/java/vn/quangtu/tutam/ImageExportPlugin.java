@@ -37,6 +37,8 @@ public class ImageExportPlugin extends Plugin {
         }
         final byte[] bytes;
         try { bytes = imageBytes(call); } catch (Exception error) { call.reject("Invalid PNG image", "INVALID_IMAGE"); return; }
+        final Activity activity = getBridge() == null ? null : getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable", "SAVE_FAILED"); return; }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             getBridge().execute(() -> saveToPictures(call, name, bytes));
         } else {
@@ -50,7 +52,10 @@ public class ImageExportPlugin extends Plugin {
                     call.getData().put("pendingImage", pending.getName());
                     call.getData().remove("base64");
                     final File staged = pending;
-                    getActivity().runOnUiThread(() -> {
+                    activity.runOnUiThread(() -> {
+                        if (activity.isFinishing() || activity.isDestroyed()) {
+                            staged.delete(); call.reject("Activity unavailable", "SAVE_FAILED"); return;
+                        }
                         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                             .setType("image/png").putExtra(Intent.EXTRA_TITLE, name);
                         try { startActivityForResult(call, intent, "documentCreated"); }
@@ -100,6 +105,7 @@ public class ImageExportPlugin extends Plugin {
     @ActivityCallback
     private void documentCreated(PluginCall call, ActivityResult result) {
         if (call == null) return;
+        if (getBridge() == null) { call.reject("Image export expired", "SAVE_FAILED"); return; }
         String pendingName = call.getString("pendingImage", "");
         if (!pendingName.matches("tu-tap-export-[A-Za-z0-9_-]+\\.png")) { call.reject("Image export expired", "SAVE_FAILED"); return; }
         File pending = new File(getContext().getCacheDir(), pendingName);
@@ -142,6 +148,8 @@ public class ImageExportPlugin extends Plugin {
         try { bytes = imageBytes(call); } catch (Exception error) { call.reject("Invalid PNG image", "INVALID_IMAGE"); return; }
         final String title = call.getString("title", "");
         final String text = call.getString("text", "");
+        final Activity activity = getBridge() == null ? null : getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) { call.reject("Activity unavailable", "SHARE_FAILED"); return; }
         getBridge().execute(() -> {
             File cacheDir = getContext().getCacheDir();
             pruneStaleSharedImages(cacheDir);
@@ -162,7 +170,10 @@ public class ImageExportPlugin extends Plugin {
                 call.reject("Cannot share PNG image", "SHARE_FAILED");
                 return;
             }
-            getActivity().runOnUiThread(() -> {
+            activity.runOnUiThread(() -> {
+                if (activity.isFinishing() || activity.isDestroyed()) {
+                    shared.delete(); call.reject("Activity unavailable", "SHARE_FAILED"); return;
+                }
                 try {
                     Intent send = new Intent(Intent.ACTION_SEND);
                     send.setType("image/png");
@@ -173,7 +184,7 @@ public class ImageExportPlugin extends Plugin {
                     send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                     Intent chooser = Intent.createChooser(send, title != null && !title.isEmpty() ? title : null);
                     chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    getActivity().startActivity(chooser);
+                    activity.startActivity(chooser);
                     JSObject response = new JSObject();
                     response.put("shared", true);
                     call.resolve(response);
