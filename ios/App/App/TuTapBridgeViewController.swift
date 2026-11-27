@@ -200,44 +200,52 @@ private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
         // UIKit reads stay on the main callback; only primitive values cross to the I/O queue.
         var footerState: [String: Double]? = nil
         var footerEvent: String? = nil
+        var libraryInputScope = false
         if Thread.isMainThread, let data = body.data(using: .utf8),
            let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           event["phase"] as? String == "capture", event["footer"] as? Bool == true,
+           event["phase"] as? String == "capture",
            let eventType = event["type"] as? String,
            ["pointerdown", "pointerup", "pointercancel"].contains(eventType),
-           let anchorPath = event["anchorPath"] as? String,
-           ["/", "/kinh-sach", "/tu-tap", "/phap-thoai", "/ca-nhan"].contains(anchorPath),
            let webView = message.webView {
-            let scroll = webView.scrollView
-            let pan = scroll.panGestureRecognizer
-            let translation = pan.translation(in: webView)
-            let velocity = pan.velocity(in: webView)
-            let inset = scroll.contentInset
-            let adjustedInset = scroll.adjustedContentInset
-            footerEvent = eventType
-            footerState = [
-                "sourceTime": (event["time"] as? NSNumber)?.doubleValue ?? -1,
-                "panState": Double(pan.state.rawValue),
-                "translationX": Double(translation.x), "translationY": Double(translation.y),
-                "velocityX": Double(velocity.x), "velocityY": Double(velocity.y),
-                "offsetX": Double(scroll.contentOffset.x), "offsetY": Double(scroll.contentOffset.y),
-                "isTracking": scroll.isTracking ? 1 : 0,
-                "insetTop": Double(inset.top), "insetBottom": Double(inset.bottom),
-                "insetLeft": Double(inset.left), "insetRight": Double(inset.right),
-                "adjustedInsetTop": Double(adjustedInset.top), "adjustedInsetBottom": Double(adjustedInset.bottom),
-                "adjustedInsetLeft": Double(adjustedInset.left), "adjustedInsetRight": Double(adjustedInset.right),
-                "isDragging": scroll.isDragging ? 1 : 0,
-                "isDecelerating": scroll.isDecelerating ? 1 : 0
-            ]
+            let footerScope = event["footer"] as? Bool == true
+                && ["/", "/kinh-sach", "/tu-tap", "/phap-thoai", "/ca-nhan"].contains(event["anchorPath"] as? String ?? "")
+            let libraryScope = event["scope"] as? String == "library-search"
+                && event["path"] as? String == "/kinh-sach"
+                && event["tag"] as? String == "INPUT" && event["inputType"] as? String == "search"
+            if footerScope || libraryScope {
+                libraryInputScope = libraryScope && !footerScope
+                let scroll = webView.scrollView
+                let pan = scroll.panGestureRecognizer
+                let translation = pan.translation(in: webView)
+                let velocity = pan.velocity(in: webView)
+                let inset = scroll.contentInset
+                let adjustedInset = scroll.adjustedContentInset
+                footerEvent = eventType
+                footerState = [
+                    "sourceTime": (event["time"] as? NSNumber)?.doubleValue ?? -1,
+                    "panState": Double(pan.state.rawValue),
+                    "translationX": Double(translation.x), "translationY": Double(translation.y),
+                    "velocityX": Double(velocity.x), "velocityY": Double(velocity.y),
+                    "offsetX": Double(scroll.contentOffset.x), "offsetY": Double(scroll.contentOffset.y),
+                    "isTracking": scroll.isTracking ? 1 : 0,
+                    "insetTop": Double(inset.top), "insetBottom": Double(inset.bottom),
+                    "insetLeft": Double(inset.left), "insetRight": Double(inset.right),
+                    "adjustedInsetTop": Double(adjustedInset.top), "adjustedInsetBottom": Double(adjustedInset.bottom),
+                    "adjustedInsetLeft": Double(adjustedInset.left), "adjustedInsetRight": Double(adjustedInset.right),
+                    "isDragging": scroll.isDragging ? 1 : 0,
+                    "isDecelerating": scroll.isDecelerating ? 1 : 0
+                ]
+            }
         }
         let capturedFooterState = footerState
         let capturedFooterEvent = footerEvent
+        let capturedLibraryInputScope = libraryInputScope
         // Diagnostic disk/console I/O must not stall UIKit touch delivery.
         eventsQueue.async {
             NSLog("[TutamQA] %@", body)
             self.appendEvent(body)
             if let state = capturedFooterState, let sourceType = capturedFooterEvent {
-                let record: [String: Any] = ["type": "native-footer-state", "sourceType": sourceType, "state": state]
+                let record: [String: Any] = ["type": capturedLibraryInputScope ? "native-library-search-state" : "native-footer-state", "sourceType": sourceType, "state": state]
                 if let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
                    let serialized = String(data: data, encoding: .utf8) {
                     NSLog("[TutamQA] %@", serialized)
@@ -446,6 +454,36 @@ class TuTapBridgeViewController: CAPBridgeViewController {
           let footerContact = false;
           let footerMoveCount = 0;
           const numericRect = (rect) => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+          const libraryInputTokens = new WeakMap();
+          let nextLibraryInputToken = 0;
+          let libraryInputSamples = 0;
+          const logLibraryInput = (event) => {
+            if (libraryInputSamples >= 32 || location.pathname !== '/kinh-sach'
+              || !['pointerdown', 'pointerup', 'pointercancel', 'focusin', 'focusout'].includes(event.type)) return;
+            const input = event.target;
+            if (!(input instanceof HTMLInputElement) || input.type !== 'search') return;
+            let token = libraryInputTokens.get(input);
+            if (!token && !input.matches('.kinh-sach-container .search-input')) return;
+            if (!token) { token = ++nextLibraryInputToken; libraryInputTokens.set(input, token); }
+            const panel = input.closest('.library-top-bar');
+            const shell = input.closest('.qts-shell');
+            const root = document.scrollingElement;
+            const viewport = window.visualViewport;
+            const number = value => Number.isFinite(value) ? value : 0;
+            libraryInputSamples += 1;
+            log({ type: event.type, phase: 'capture', scope: 'library-search', path: '/kinh-sach', tag: 'INPUT', inputType: 'search',
+              time: performance.now(), targetToken: token, connected: input.isConnected, active: document.activeElement === input,
+              inputRect: numericRect(input.getBoundingClientRect()), panelRect: panel ? numericRect(panel.getBoundingClientRect()) : null,
+              chromeHidden: shell?.classList.contains('qts-shell--chrome-hidden') === true,
+              panelScrollTop: number(panel?.scrollTop), panelScrollHeight: number(panel?.scrollHeight), panelClientHeight: number(panel?.clientHeight),
+              scrollX: number(window.scrollX), scrollY: number(window.scrollY),
+              documentScrollTop: number(root?.scrollTop), documentScrollHeight: number(root?.scrollHeight), documentClientHeight: number(root?.clientHeight),
+              innerWidth: number(window.innerWidth), innerHeight: number(window.innerHeight),
+              visualViewport: viewport ? { offsetLeft: number(viewport.offsetLeft), offsetTop: number(viewport.offsetTop),
+                pageLeft: number(viewport.pageLeft), pageTop: number(viewport.pageTop), width: number(viewport.width),
+                height: number(viewport.height), scale: number(viewport.scale) } : null });
+          };
+          for (const type of ['focusin', 'focusout']) window.addEventListener(type, logLibraryInput, { capture: true, passive: true });
           for (const type of ['pointermove', 'touchmove']) {
             window.addEventListener(type, (event) => {
               const origin = event.target instanceof Element ? event.target : event.target?.parentElement;
@@ -464,6 +502,7 @@ class TuTapBridgeViewController: CAPBridgeViewController {
               window.addEventListener(type, (event) => {
                 const detail = describe(event);
                 if (!detail) return;
+                if (capture && ['pointerdown', 'pointerup', 'pointercancel'].includes(type)) logLibraryInput(event);
                 if (capture && detail.footer) {
                   if (type === 'pointerdown' || (type === 'touchstart' && !footerContact)) {
                     footerContact = true; footerMoveCount = 0;

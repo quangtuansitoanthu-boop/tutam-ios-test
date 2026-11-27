@@ -3066,7 +3066,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
                 controls[0].tap()
                 return false
             }
-            let hasGridOrEmpty = !self.photosAssets(photos).isEmpty ||
+            let hasGridOrEmpty = self.hasReadyPhotosAsset(photos) ||
                 photos.staticTexts.matching(NSPredicate(format: "label IN %@", self.emptyLabels as NSArray))
                     .allElementsBoundByIndex.contains { $0.exists && self.insideViewport($0, app: photos) }
             let librarySelected = heading.count > 0 || title.count > 0 || (tabs.count == 1 && tabs[0].isSelected)
@@ -3074,7 +3074,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         }
         evidence(phase + "-library", app: photos)
         XCTAssertEqual(welcome.count, 0, "Welcome Photos phải đóng sau tối đa một lần Continue thực")
-        let hasGridOrEmpty = !photosAssets(photos).isEmpty ||
+        let hasGridOrEmpty = hasReadyPhotosAsset(photos) ||
             photos.staticTexts.matching(NSPredicate(format: "label IN %@", emptyLabels as NSArray))
                 .allElementsBoundByIndex.contains { $0.exists && self.insideViewport($0, app: photos) }
         let ready = photos.state == .runningForeground && welcome.count == 0 && hasGridOrEmpty &&
@@ -3173,6 +3173,15 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         }
         note(phase + "-readiness-diagnostic", message)
         evidence(phase + "-readiness-diagnostic", app: photos)
+    }
+
+    @MainActor
+    private func hasReadyPhotosAsset(_ photos: XCUIApplication) -> Bool {
+        let libraries = photos.scrollViews.matching(identifier: "content_scroll_view").allElementsBoundByIndex
+        guard libraries.count == 1 else { return false }
+        let first = libraries[0].images.matching(identifier: "PXGGridLayout-Info").firstMatch
+        let viewport = photos.frame
+        return insideViewport(first, viewport: viewport)
     }
 
     @MainActor
