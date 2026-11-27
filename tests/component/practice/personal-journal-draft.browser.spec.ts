@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { webkit } from '@playwright/test';
 import { alertInApp } from '$lib/browser/app-dialog';
 vi.mock('$lib/browser/app-dialog', () => ({ alertInApp: vi.fn().mockResolvedValue(undefined) }));
 import { flushSync, mount, unmount } from 'svelte';
 import PersonalJournal from '$lib/components/practice/personal/PersonalJournal.svelte';
+import ReflectionGuide from '$lib/components/practice/personal/ReflectionGuide.svelte';
 import { createPersonalPracticeStorage } from '$lib/browser/personal-practice-storage';
 import { getVietnamIsoDate } from '$lib/domain/practice/stats';
 import { dismissTopModal, modalDialog } from '$lib/browser/modal-dialog';
@@ -31,6 +34,50 @@ async function readyJournal(owner: ReturnType<typeof storage>, onShare?: (kind: 
   component = mount(PersonalJournal, { target: document.body, props: { storage: owner, onShare } }); await settle();
   document.querySelector<HTMLButtonElement>('.guide-toggle-button')!.click(); await settle();
 }
+
+it('changes reflection text size in WebKit with native CSS, keeps controls stable and restores its saved limits', async () => {
+  let guide = mount(ReflectionGuide, { target: document.body });
+  await settle();
+  const source = readFileSync('src/lib/components/practice/personal/ReflectionGuide.svelte', 'utf8');
+  const styles = source.split('<style>')[1].split('</style>')[0];
+  const tokens = readFileSync('src/lib/styles/tokens.css', 'utf8');
+  const nativeFields = readFileSync('src/lib/styles/ui-refresh.css', 'utf8');
+  const browser = await webkit.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 375, height: 844 }, isMobile: true, hasTouch: true });
+    await page.route('**/*', route => route.abort());
+    const buttons = () => [...document.querySelectorAll<HTMLButtonElement>('.guide-font-btn')];
+    const measure = async () => {
+      await page.setContent(`<html data-native-app="true" style="--ui-font-scale:1.2"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${tokens}${nativeFields}${styles}</style></head><body>${document.querySelector('.reflection-guide')!.outerHTML}</body></html>`);
+      return page.evaluate(() => {
+        const size = (selector: string) => parseFloat(getComputedStyle(document.querySelector(selector)!).fontSize);
+        return { body: size('.guide-para'), quote: size('.quote-text'), title: size('h2'), control: size('.guide-font-btn'),
+          root: getComputedStyle(document.documentElement).getPropertyValue('--ui-font-scale').trim(),
+          touch: [...document.querySelectorAll('.guide-font-btn')].every(button => { const box = button.getBoundingClientRect(); return box.width >= 44 && box.height >= 44; }),
+        };
+      });
+    };
+    const baseline = await measure();
+    buttons()[1].click(); await settle();
+    expect(document.querySelector('.guide-font-value')!.textContent).toBe('110%');
+    const larger = await measure();
+    for (const key of ['body', 'quote', 'title'] as const) expect(larger[key]).toBeCloseTo(baseline[key] * 1.1, 2);
+    expect(larger.control).toBe(baseline.control);
+    expect(larger.root).toBe('1.2');
+    expect(larger.touch).toBe(true);
+    while (!buttons()[0].disabled) { buttons()[0].click(); await settle(); }
+    expect(document.querySelector('.guide-font-value')!.textContent).toBe('85%');
+    expect((await measure()).body).toBeCloseTo(baseline.body * .85, 2);
+    while (!buttons()[1].disabled) { buttons()[1].click(); await settle(); }
+    expect(document.querySelector('.guide-font-value')!.textContent).toBe('135%');
+    expect((await measure()).body).toBeCloseTo(baseline.body * 1.35, 2);
+    expect(localStorage.getItem('tutam_guide_font_scale_v1')).toBe('1.35');
+    await unmount(guide); guide = mount(ReflectionGuide, { target: document.body }); await settle();
+    expect(document.querySelector('.guide-font-value')!.textContent).toBe('135%');
+    expect(buttons()[1].disabled).toBe(true);
+    expect((await measure()).body).toBeCloseTo(baseline.body * 1.35, 2);
+  } finally { await browser.close(); await unmount(guide); }
+});
 
 const pendingReceipt: MindfulPostReceipt = {
   id: 'pending-receipt', kind: 'repentance', nickname: 'Đồng Tu', content: 'từ '.repeat(50).trim(),

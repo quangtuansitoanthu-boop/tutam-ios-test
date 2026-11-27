@@ -43,11 +43,14 @@ const warm = (page: Page, path: string) => page.evaluate(path => {
 const notificationPrompt = (page: Page) => page.getByRole('dialog', { name: 'Thông báo tu tập', exact: true });
 
 for (const path of ['/chinh-sach-bao-mat', '/privacy-policy']) {
-  test(`native privacy has one Back and exits a first entry with retained forward history at ${path}`, async ({ page }) => {
+  test(`native privacy has one Back after in-app navigation with retained forward history at ${path}`, async ({ page }) => {
     await nativeFixture(page, undefined, 'ios');
     await deferStartupNotification(page);
-    await page.goto(path);
+    await page.goto('/ca-nhan');
     await settleClient(page);
+    await page.waitForFunction(() => 'qaUrlOpen' in window && typeof window.qaUrlOpen === 'function');
+    await warm(page, path);
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(page.locator('#app-startup')).toHaveCount(0);
     await expect(page.locator('.qts-nav .nav-back-circle-btn')).toBeVisible();
     await expect(page.locator('.privacy-container .back-btn')).toHaveCount(0);

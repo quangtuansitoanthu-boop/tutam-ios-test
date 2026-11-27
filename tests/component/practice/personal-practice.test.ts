@@ -41,8 +41,8 @@ describe('personal practice surfaces', () => {
 
     expect(journalCss).not.toContain('placeholder={copy.nickname}');
     expect(journalCss).toContain('.quote-text {\n    margin: 0;\n    font-family: var(--font-reader);\n    font-style: italic;\n    font-size: var(--font-size-body);');
-    expect(guideCss).toContain('h2 {\n    margin: 0;\n    font-size: var(--font-size-section-title);');
-    expect(guideCss).toContain('h3 {\n    margin: 0 0 calc(var(--space-page) * 0.5);\n    font-size: var(--font-size-card-title);');
+    expect(guideCss).toContain('h2 {\n    margin: 0;\n    font-size: calc(var(--font-size-section-title) * var(--guide-font-scale, 1));');
+    expect(guideCss).toContain('h3 {\n    margin: 0 0 calc(var(--space-page) * 0.5);\n    font-size: calc(var(--font-size-card-title) * var(--guide-font-scale, 1));');
     expect(communityCss).toContain('.content {\n    margin: 0;\n    white-space: pre-wrap;\n    overflow-wrap: anywhere;\n    font-family: var(--font-reader);\n    font-size: var(--font-size-input);');
   });
 });

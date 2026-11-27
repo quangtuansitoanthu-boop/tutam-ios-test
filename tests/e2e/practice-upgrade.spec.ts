@@ -66,6 +66,51 @@ test('guidance can be reopened and focuses private writing without content reque
   expect(requests).toEqual([]);
 });
 
+test('reflection guide font controls resize actual text and persist without changing the app font', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem('tutam_ui_font_scale', '1.2');
+    localStorage.setItem('tutam_guide_font_scale_v1', '1');
+  });
+  await page.goto('/tu-tap'); await settleClient(page);
+  const requests = contentRequests(page);
+  await page.getByRole('button', { name: 'Quán chiếu việc thiện ác trong ngày', exact: true }).click();
+  const guide = page.getByTestId('reflection-guide');
+  await expect(guide).toBeVisible();
+  const increase = guide.getByRole('button', { name: 'Tăng cỡ chữ', exact: true });
+  const decrease = guide.getByRole('button', { name: 'Giảm cỡ chữ', exact: true });
+  const percent = guide.locator('.guide-font-value');
+  const sizes = () => guide.evaluate(root => {
+    const size = (selector: string) => parseFloat(getComputedStyle(root.querySelector(selector)!).fontSize);
+    return { body: size('.guide-para'), quote: size('.quote-text'), title: size('h2'), control: size('.guide-font-btn'),
+      app: getComputedStyle(document.body).fontSize, globalScale: document.documentElement.style.getPropertyValue('--ui-font-scale') };
+  });
+  await expect(percent).toHaveText('100%');
+  const baseline = await sizes();
+  await increase.click(); await expect(percent).toHaveText('110%');
+  const larger = await sizes();
+  for (const key of ['body', 'quote', 'title'] as const) expect(larger[key]).toBeCloseTo(baseline[key] * 1.1, 2);
+  expect(larger.control).toBe(baseline.control);
+  expect(larger.app).toBe(baseline.app);
+  expect(larger.globalScale).toBe(baseline.globalScale);
+  for (const value of ['100%', '90%', '85%']) { await decrease.click(); await expect(percent).toHaveText(value); }
+  await expect(decrease).toBeDisabled();
+  expect((await sizes()).body).toBeCloseTo(baseline.body * .85, 2);
+  for (const value of ['95%', '105%', '115%', '125%', '135%']) { await increase.click(); await expect(percent).toHaveText(value); }
+  await expect(increase).toBeDisabled();
+  expect((await sizes()).body).toBeCloseTo(baseline.body * 1.35, 2);
+  for (const control of [increase, decrease]) {
+    const box = await control.boundingBox(); expect(box!.width).toBeGreaterThanOrEqual(44); expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  await page.locator('.guide-toggle-button').click(); await expect(guide).toBeHidden();
+  await page.locator('.guide-toggle-button').click(); await expect(percent).toHaveText('135%');
+  await expect(increase).toBeDisabled();
+  await page.reload(); await settleClient(page); await expect(percent).toHaveText('135%');
+  await expect(increase).toBeDisabled();
+  expect((await sizes()).body).toBeCloseTo(baseline.body * 1.35, 2);
+  expect(requests).toEqual([]);
+});
+
 test('fewer than 50 words warns on manual save but keeps a private draft when leaving', async ({ page }) => {
   await page.goto('/tu-tap'); await settleClient(page); await openPersonal(page);
   const requests = contentRequests(page);

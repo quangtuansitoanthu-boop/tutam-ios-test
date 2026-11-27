@@ -37,7 +37,7 @@
   }
 </script>
 
-<div class="reflection-guide" class:embedded data-testid="reflection-guide" style={`--ui-font-scale:${guideFontScale}`}>
+<div class="reflection-guide" class:embedded data-testid="reflection-guide" style={`--guide-font-scale:${guideFontScale}`}>
   <div class="guide-font-bar" role="group" aria-label={isEn ? 'Adjust text size' : 'Chỉnh cỡ chữ hướng dẫn'}>
     <span class="guide-font-label">{isEn ? 'Text size' : 'Cỡ chữ'}</span>
     <div class="guide-font-actions">
@@ -169,13 +169,14 @@
   }
   .guide-font-btn:active:not(:disabled) { transform: translateY(1.5px) scale(0.96); }
   .guide-font-btn:disabled { opacity: 0.45; cursor: default; }
+  /* Root typography tokens are already computed; reading rules apply their local scale directly. */
   .guide-header {
     text-align: center;
     padding-block: calc(var(--space-page) * 0.5);
   }
   .eyebrow {
     display: inline-block;
-    font-size: var(--font-size-meta);
+    font-size: calc(var(--font-size-meta) * var(--guide-font-scale, 1));
     letter-spacing: 0.08em;
     font-weight: 700;
     color: var(--brown, var(--gold));
@@ -183,7 +184,7 @@
   }
   h2 {
     margin: 0;
-    font-size: var(--font-size-section-title);
+    font-size: calc(var(--font-size-section-title) * var(--guide-font-scale, 1));
     font-weight: 800;
     line-height: 1.4;
     color: var(--text);
@@ -191,7 +192,7 @@
   .guide-subtitle {
     margin: calc(var(--space-page) * 0.4) auto 0;
     color: var(--text2);
-    font-size: var(--font-size-body);
+    font-size: calc(var(--font-size-body) * var(--guide-font-scale, 1));
     line-height: 1.6;
     max-width: 600px;
   }
@@ -205,7 +206,7 @@
     padding: calc(var(--space-page) * 0.4);
     background: var(--gold-light);
     border-radius: var(--radius-control);
-    font-size: var(--font-size-label);
+    font-size: calc(var(--font-size-label) * var(--guide-font-scale, 1));
     font-weight: 700;
     overflow-x: auto;
   }
@@ -225,7 +226,7 @@
     border-radius: 50%;
     background: var(--card);
     color: var(--text);
-    font-size: var(--font-size-meta);
+    font-size: calc(var(--font-size-meta) * var(--guide-font-scale, 1));
   }
   .stepper li[aria-current='step'] {
     color: var(--brown, var(--text));
@@ -251,14 +252,14 @@
     background: var(--gold-light);
     color: var(--brown, var(--gold));
     border-radius: var(--radius-sm);
-    font-size: var(--font-size-meta);
+    font-size: calc(var(--font-size-meta) * var(--guide-font-scale, 1));
     font-weight: 700;
     letter-spacing: 0.04em;
     margin-bottom: calc(var(--space-page) * 0.4);
   }
   h3 {
     margin: 0 0 calc(var(--space-page) * 0.5);
-    font-size: var(--font-size-card-title);
+    font-size: calc(var(--font-size-card-title) * var(--guide-font-scale, 1));
     font-weight: 700;
     line-height: 1.4;
     color: var(--text);
@@ -275,14 +276,14 @@
     font-family: var(--font-reader);
     font-style: italic;
     color: var(--text);
-    font-size: var(--font-size-body);
+    font-size: calc(var(--font-size-body) * var(--guide-font-scale, 1));
     line-height: 1.8;
     text-align: justify;
   }
   .quote-source {
     display: block;
     margin-top: calc(var(--space-page) * 0.3);
-    font-size: var(--font-size-label);
+    font-size: calc(var(--font-size-label) * var(--guide-font-scale, 1));
     font-weight: 700;
     color: var(--brown, var(--text2));
     text-align: right;
@@ -291,7 +292,7 @@
     margin: calc(var(--space-page) * 0.4) 0;
     font-family: var(--font-reader);
     color: var(--text2);
-    font-size: var(--font-size-body);
+    font-size: calc(var(--font-size-body) * var(--guide-font-scale, 1));
     line-height: 1.85;
     text-align: justify;
     overflow-wrap: anywhere;
@@ -305,7 +306,7 @@
   .guide-bullets li {
     font-family: var(--font-reader);
     color: var(--text2);
-    font-size: var(--font-size-body);
+    font-size: calc(var(--font-size-body) * var(--guide-font-scale, 1));
     line-height: 1.75;
     text-align: justify;
   }
@@ -324,11 +325,11 @@
   }
   .example-title {
     font-weight: 700;
-    font-size: var(--font-size-body);
+    font-size: calc(var(--font-size-body) * var(--guide-font-scale, 1));
     color: var(--text);
   }
   .example-count {
-    font-size: var(--font-size-meta);
+    font-size: calc(var(--font-size-meta) * var(--guide-font-scale, 1));
     font-weight: 700;
     color: var(--gold);
     padding: 2px 7px;
@@ -340,13 +341,13 @@
     font-family: var(--font-reader);
     font-style: italic;
     color: var(--text);
-    font-size: var(--font-size-body);
+    font-size: calc(var(--font-size-body) * var(--guide-font-scale, 1));
     line-height: 1.75;
     text-align: justify;
   }
   .example-explanation {
     margin: calc(var(--space-page) * 0.3) 0 0;
-    font-size: var(--font-size-label);
+    font-size: calc(var(--font-size-label) * var(--guide-font-scale, 1));
     color: var(--text2);
     line-height: 1.6;
   }

@@ -713,6 +713,89 @@ final class NativeNotificationTypingTests: NativeGuestUITestCase {
 
 final class NativeExtendedGuestTests: NativeGuestUITestCase {
     @MainActor
+    private func reflectionGuidePercent(_ app: XCUIApplication) -> Int {
+        let controls = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Chỉnh cỡ chữ hướng dẫn")).firstMatch
+        let percent = controls.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "^[0-9]{2,3}%$")).firstMatch
+        XCTAssertTrue(percent.waitForExistence(timeout: 10), "The actual guide font control must expose its percentage")
+        guard let value = Int(percent.label.dropLast()) else {
+            XCTFail("Guide font percentage must be numeric")
+            return 0
+        }
+        return value
+    }
+
+    @MainActor
+    private func reflectionGuideParagraphFrame(_ app: XCUIApplication) -> CGRect {
+        let paragraph = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Sám là ăn năn lỗi trước, Hối là chừa bỏ lỗi sau")).firstMatch
+        reveal(paragraph, app: app)
+        var previous: CGRect?
+        waitUntil("The same rendered guide paragraph must have stable, visible native text geometry") {
+            guard paragraph.exists, app.frame.contains(paragraph.frame), paragraph.frame.height > 0 else { return false }
+            let frame = paragraph.frame
+            if previous == frame { return true }
+            previous = frame
+            return false
+        }
+        return paragraph.frame
+    }
+
+    @MainActor
+    func testReflectionGuideFontButtonsResizeNativeTextAndPersistWithinLimits() {
+        let app = launchGuest()
+        navigate("Tu tập", app: app)
+        tap(app.buttons["Quán chiếu việc thiện ác trong ngày"].firstMatch, app: app)
+        let heading = app.staticTexts["Hướng Dẫn Quán Chiếu Thiện Ác & Sám Hối"].firstMatch
+        if !heading.exists {
+            tap(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xem hướng dẫn quán chiếu")).firstMatch, app: app)
+        }
+        XCTAssertTrue(heading.waitForExistence(timeout: 15))
+        let smaller = app.buttons["Giảm cỡ chữ"].firstMatch
+        let larger = app.buttons["Tăng cỡ chữ"].firstMatch
+        let viewportWidth = app.frame.width
+        for _ in 0..<6 {
+            reveal(smaller, app: app)
+            if !smaller.isEnabled { break }
+            let before = reflectionGuidePercent(app)
+            smaller.tap()
+            waitUntil("A− must lower the displayed guide percentage after one tap") { self.reflectionGuidePercent(app) < before }
+        }
+        XCTAssertEqual(reflectionGuidePercent(app), 85)
+        XCTAssertFalse(smaller.isEnabled, "A− must stop at the saved 85% lower limit")
+        let small = reflectionGuideParagraphFrame(app)
+        evidence("reflection-guide-native-text-85-percent", app: app)
+        for _ in 0..<6 {
+            reveal(larger, app: app)
+            if !larger.isEnabled { break }
+            let before = reflectionGuidePercent(app)
+            larger.tap()
+            waitUntil("A+ must raise the displayed guide percentage after one tap") { self.reflectionGuidePercent(app) > before }
+        }
+        XCTAssertEqual(reflectionGuidePercent(app), 135)
+        XCTAssertFalse(larger.isEnabled, "A+ must stop at the saved 135% upper limit")
+        let large = reflectionGuideParagraphFrame(app)
+        XCTAssertEqual(app.frame.width, viewportWidth, accuracy: 1, "Font comparisons must use the same viewport")
+        XCTAssertGreaterThan(large.height, small.height + 1, "Guide text must actually grow; changing only the percentage is insufficient")
+        evidence("reflection-guide-native-text-135-percent", app: app)
+        tap(smaller, app: app)
+        waitUntil("A− must reduce the large guide text to 125%") { self.reflectionGuidePercent(app) == 125 }
+        let reduced = reflectionGuideParagraphFrame(app)
+        XCTAssertLessThan(reduced.height, large.height, "A− must reduce rendered text geometry as well as its label")
+        // Hide/show is a view-only action. Do not start writing or save a journal entry.
+        tap(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Ẩn hướng dẫn")).firstMatch, app: app)
+        waitUntil("Hiding the guide must remove its font controls") { !larger.exists }
+        tap(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xem hướng dẫn quán chiếu")).firstMatch, app: app)
+        reveal(larger, app: app)
+        XCTAssertEqual(reflectionGuidePercent(app), 125, "Reopened guide must retain its actual font preference")
+        let reopened = reflectionGuideParagraphFrame(app)
+        XCTAssertEqual(reopened.height, reduced.height, accuracy: 2, "Reopened text must retain the same rendered size")
+        let geometry = XCTAttachment(string: "85%: \(small); 135%: \(large); 125%: \(reduced); reopened125%: \(reopened); viewportWidth: \(viewportWidth)")
+        geometry.name = "reflection-guide-native-font-geometry"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        evidence("reflection-guide-native-font-persisted-after-reopen", app: app)
+    }
+
+    @MainActor
     func testNativeScriptureCopyingReferenceAndGhost() {
         let app = launchGuest()
         evidence("copy-before-native-url-open", app: app)
