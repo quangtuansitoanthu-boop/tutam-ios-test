@@ -1,13 +1,51 @@
 import { readFileSync } from 'node:fs';
 import { render } from 'svelte/server';
 import { describe, expect, it } from 'vitest';
+import { compile } from 'svelte/compiler';
+import { chromium, webkit } from '@playwright/test';
 import ReaderBoundary from '../../../src/lib/components/library/ReaderBoundary.svelte';
+import ContinueReadingShelf from '../../../src/lib/components/library/ContinueReadingShelf.svelte';
 import type { LibraryArticle } from '../../../src/lib/components/library/article';
 import { createEpub } from '../../../src/lib/components/reader/epub';
 
 const article: LibraryArticle = { id:'reader-1',title:'Bài đọc',summary:'Tóm tắt',content:'<p>Nội dung đã lọc</p>',category:'SÁCH KHUYẾN THIỆN',tags:[],author:'Quang Từ',imageUrl:'',featured:false,publishedAt:'',hasTableOfContents:false,volumeCount:0,status:'',pdfUrl:'' };
 
 describe('phase 5 reader and admin contracts',()=>{
+  it('keeps PDF reset, bookmark jump and the quote shelf link inside 44px hit targets in both CSS engines', async () => {
+    const css = ['src/lib/components/reader/PdfCanvasReader.svelte', 'src/lib/components/library/ContinueReadingShelf.svelte']
+      .map(filename => compile(readFileSync(filename, 'utf8'), { filename, generate: 'client', cssHash: () => 'reader-touch-fixture' }).css!.code).join('\n');
+    const globals = ['tokens.css', 'master-shell.css', 'ui-refresh.css'].map(name => readFileSync(`src/lib/styles/${name}`, 'utf8')).join('\n');
+    const shelf = render(ContinueReadingShelf).body;
+    // Use the shipped CSS and matching DOM ancestors; full PDF loading is covered separately.
+    const pdf = '<section class="pdf-shell" style="height:500px"><div class="pdf-floating-pager"><section class="pdf-bookmark-panel"><div class="pdf-bookmark-scroll"><div class="pdf-bookmark-row"><button class="pdf-bookmark-jump-btn">Trang 2</button><button class="pdf-bookmark-del-btn">×</button></div></div></section><button class="pdf-pager-zoom-text">100%</button></div></section>';
+    const violations: unknown[] = [];
+    for (const engine of [chromium, webkit]) {
+      const browser = await engine.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.route('**/*', route => route.abort());
+        for (const width of [375, 1440]) for (const theme of ['light', 'dark']) {
+          await page.setViewportSize({ width, height: 900 });
+          await page.setContent(`<html data-native-app="true" data-theme="${theme}"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${globals}${css}</style></head><body>${pdf}${shelf}</body></html>`);
+          await page.locator('body *').evaluateAll(elements => elements.forEach(element => element.classList.add('reader-touch-fixture')));
+          for (const selector of ['.pdf-pager-zoom-text', '.pdf-bookmark-jump-btn', '.continue-reading header a']) {
+            const control = page.locator(selector);
+            await control.scrollIntoViewIfNeeded();
+            const result = await control.evaluate(element => {
+              const box = element.getBoundingClientRect();
+              // Rounded buttons retain their shape; verify the full 44px span on both axes.
+              const points = [[0, 0], [-21.5, 0], [21.5, 0], [0, -21.5], [0, 21.5]];
+              const hit = points.every(([x, y]) =>
+                element.contains(document.elementFromPoint(box.left + box.width / 2 + x, box.top + box.height / 2 + y)));
+              return { width: box.width, height: box.height, hit };
+            });
+            if (result.width < 44 || result.height < 44 || !result.hit) violations.push({ engine: engine.name(), width, theme, selector, ...result });
+          }
+        }
+      } finally { await browser.close(); }
+    }
+    expect(violations).toEqual([]);
+  }, 30_000);
   it('renders a modal reader without changing the canonical route',()=>{const {body}=render(ReaderBoundary,{props:{article,session:{authenticated:false}}});expect(body).toContain('role="dialog"');expect(body).toContain('Nội dung đã lọc');expect(body).not.toContain('/sach/');});
   it('renders stored markdown emphasis instead of exposing markdown markers',()=>{const markdownArticle={...article,content:'Đây là nội dung **kiểm thử** an toàn.'};const {body}=render(ReaderBoundary,{props:{article:markdownArticle,session:{authenticated:false}}});expect(body).toContain('<strong>kiểm thử</strong>');expect(body).not.toContain('**kiểm thử**');});
   it('restores legacy reader tags and the safe external-source action',()=>{const enriched={...article,tags:['nhân quả','sách khuyến thiện'],externalUrl:'https://example.com/bai-day-du'};const {body}=render(ReaderBoundary,{props:{article:enriched,session:{authenticated:false}}});expect(body).toContain('aria-label="Chủ đề bài viết"');expect(body).toMatch(/reader-tag[^>]*>nhân quả<\/span>/);expect(body).toMatch(/reader-tag[^>]*>sách khuyến thiện<\/span>/);expect(body).toContain('Xem bài đầy đủ');expect(body).toContain('href="https://example.com/bai-day-du"');expect(body).toContain('target="_blank"');expect(body).toContain('rel="noopener noreferrer"');});

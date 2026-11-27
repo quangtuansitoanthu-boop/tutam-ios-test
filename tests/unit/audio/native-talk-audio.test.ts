@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NativeTalkAudio, cacheNativeTalk, evictNativeTalkCache, nativeTalkUrl, type NativeAudioState } from '../../../src/lib/browser/native-talk-audio';
+import { NATIVE_BACKEND_ORIGINS } from '$lib/browser/native-backend-origin';
 
 const album = { id: 'talks', title: 'Pháp thoại', description: 'Quang Từ', tracks: [
   { title: 'Bài một', url: 'https://media.quangtu.vn/one.mp3' },
@@ -52,6 +53,44 @@ it('does not evict cache for a stale principal or hide a native I/O failure', as
   await expect(evictNativeTalkCache([album.tracks[0].url], () => false, eviction)).rejects.toMatchObject({ name: 'AbortError' });
   expect(eviction.evictCache).not.toHaveBeenCalled();
   await expect(evictNativeTalkCache([album.tracks[0].url], () => true, eviction)).rejects.toThrow('disk failure');
+});
+
+it('evicts both known backend hashes for a relative API track after the selected backend changes', async () => {
+  let origin: string = NATIVE_BACKEND_ORIGINS[1];
+  vi.stubGlobal('window', { location: new URL('https://localhost/') });
+  vi.stubGlobal('Capacitor', { isNativePlatform: () => true });
+  vi.stubGlobal('localStorage', { getItem: () => origin });
+  const path = '/api/audio/drive/old-backend?part=1';
+  const cache = { cacheStatus: vi.fn(async () => ({ bytes: 0 })), cacheChunk: vi.fn(async () => {}) };
+  await cacheNativeTalk(path, new Blob(['saved before failover']), cache);
+  expect(cache.cacheStatus).toHaveBeenCalledWith({ key: `${NATIVE_BACKEND_ORIGINS[1]}${path}` });
+  origin = NATIVE_BACKEND_ORIGINS[0];
+  const eviction = { evictCache: vi.fn(async () => {}) };
+  await evictNativeTalkCache([path, path], () => true, eviction);
+  expect(eviction.evictCache).toHaveBeenCalledWith({ keys: NATIVE_BACKEND_ORIGINS.map(value => `${value}${path}`) });
+});
+
+it.each([`${NATIVE_BACKEND_ORIGINS[1]}/api/audio/drive/absolute-old`, 'https://external.example/api/audio/drive/other-host'])
+  ('evicts only the original key for absolute track %s', async key => {
+    const eviction = { evictCache: vi.fn(async () => {}) };
+    await evictNativeTalkCache([key], () => true, eviction);
+    expect(eviction.evictCache).toHaveBeenCalledWith({ keys: [key] });
+  });
+
+it('keeps expanded backend candidates within the native 5000-key call limit', async () => {
+  const paths = Array.from({ length: 2501 }, (_, index) => `/api/audio/drive/batched-${index}`);
+  const eviction = { evictCache: vi.fn(async (_options: { keys: string[] }) => {}) };
+  await evictNativeTalkCache(paths, () => true, eviction);
+  expect(eviction.evictCache.mock.calls.map(([options]) => options.keys.length)).toEqual([5000, 2]);
+  expect(new Set(eviction.evictCache.mock.calls.flatMap(([options]) => options.keys)).size).toBe(5002);
+});
+
+it('does not send another candidate batch after the principal changes', async () => {
+  const paths = Array.from({ length: 2501 }, (_, index) => `/api/audio/drive/principal-batched-${index}`);
+  let current = true;
+  const eviction = { evictCache: vi.fn(async () => { current = false; }) };
+  await expect(evictNativeTalkCache(paths, () => current, eviction)).rejects.toMatchObject({ name: 'AbortError' });
+  expect(eviction.evictCache).toHaveBeenCalledTimes(1);
 });
 
 it('gives Android the entire playlist and restores the selected position', async () => {

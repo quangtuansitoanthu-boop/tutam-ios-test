@@ -1,6 +1,7 @@
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { isNativeApp, nativePlatform } from './native-platform';
 import { resolveApiUrl } from './native-api';
+import { NATIVE_BACKEND_ORIGINS } from './native-backend-origin';
 import type { AudioAlbum } from './audio-player-controller';
 import { nativeAudioPlugin, nativeAudioPrincipalRevision, waitForNativeAudioPrincipal } from './native-audio-principal';
 export const MEDITATION_AUDIO_ALBUM_ID = 'practice:meditation';
@@ -47,12 +48,19 @@ export function nativeTalkUrl(url: string): string {
   return parsed.href;
 }
 
+export function nativeTalkCacheKeys(url: string): string[] {
+  // URL API tương đối có thể đã được cache trước khi đổi backend; URL tuyệt đối giữ đúng host gốc.
+  return url.startsWith('/api/')
+    ? NATIVE_BACKEND_ORIGINS.map(origin => new URL(url, origin).href)
+    : [nativeTalkUrl(url)];
+}
+
 /** Copy in bounded chunks: never pass an entire lecture as base64 through the bridge. */
 const cacheWrites = new Map<string, Promise<void>>();
 export async function evictNativeTalkCache(urls: readonly string[], isCurrent: () => boolean = () => true,
   plugin: Pick<NativeTalkPlugin, 'evictCache'> = nativeTalkPlugin): Promise<void> {
   if (plugin === nativeTalkPlugin && !hasNativeTalkAudio()) return;
-  const keys = [...new Set(urls.map(nativeTalkUrl))];
+  const keys = [...new Set(urls.flatMap(nativeTalkCacheKeys))];
   if (!keys.length) return;
   const revision = nativeAudioPrincipalRevision();
   const assertCurrent = () => {
@@ -61,7 +69,13 @@ export async function evictNativeTalkCache(urls: readonly string[], isCurrent: (
   const previous = keys.map(key => cacheWrites.get(key));
   const work = Promise.all(previous.map(pending => pending?.catch(() => undefined))).then(async () => {
     assertCurrent(); await waitForNativeAudioPrincipal(); assertCurrent();
-    try { await plugin.evictCache({ keys }); }
+    try {
+      for (let offset = 0; offset < keys.length; offset += 5000) {
+        assertCurrent();
+        await plugin.evictCache({ keys: keys.slice(offset, offset + 5000) });
+        assertCurrent();
+      }
+    }
     catch (error) {
       // Bridge cũ chưa có lệnh này; giữ tương thích thay vì làm hỏng thao tác xóa IDB đã có.
       if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'UNIMPLEMENTED')) throw error;

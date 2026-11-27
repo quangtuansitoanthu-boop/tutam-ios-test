@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/svelte-query';
+import { NATIVE_BACKEND_ORIGINS } from '$lib/browser/native-backend-origin';
 
 const mocks = vi.hoisted(() => ({
   evict: vi.fn(async (_urls: readonly string[], isCurrent?: () => boolean) => { isCurrent?.(); }),
@@ -8,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   },
   bundle: null as unknown[] | null,
 }));
-vi.mock('$lib/browser/native-talk-audio', () => ({ evictNativeTalkCache: mocks.evict }));
+vi.mock('$lib/browser/native-talk-audio', async importOriginal => ({
+  ...await importOriginal<typeof import('$lib/browser/native-talk-audio')>(), evictNativeTalkCache: mocks.evict,
+}));
 vi.mock('$lib/stores/session.svelte', () => ({
   getBrowserSessionSnapshot: () => mocks.session,
   refreshBrowserSession: async () => mocks.session,
@@ -28,9 +31,11 @@ let database: typeof import('$lib/browser/offline-audio-database');
 let downloads: typeof import('$lib/browser/audio-downloads');
 let catalogs: typeof import('$lib/browser/content-catalogs');
 let blockCatalogWrites: boolean;
+let failNextAudioWriteCommit: boolean;
 let beforeCursorEvent: (() => void) | undefined;
 const privateAlbum = { id: 'private-offline', title: 'Private offline', desc: '', visibility: 'private' as const, tracks: [{ title: 'Private track', url: '/api/audio/drive/private-file' }] };
 const guest = () => ({ authenticated: false, user: null, csrfToken: null, expiresAt: null });
+const backendKeys = (path: string) => NATIVE_BACKEND_ORIGINS.map(origin => `${origin}${path}`);
 
 // Mô phỏng request/transaction IDB, giữ bytes thật để kiểm tra đường tải → lưu → đọc.
 function memoryIndexedDb() {
@@ -39,13 +44,19 @@ function memoryIndexedDb() {
     databases.set(name, stores);
     const db = {
       objectStoreNames: { contains: () => true }, onversionchange: null, close() {},
-      transaction: () => {
+      transaction: (_names: string | string[], mode?: IDBTransactionMode) => {
         let pending = 0, revision = 0, aborted = false;
         const staged = new Map<string, MemoryStore>(), dirty = new Set<string>();
         const complete = () => {
           const expected = ++revision;
           setImmediate(() => {
             if (!aborted && pending === 0 && expected === revision) {
+              if (name === 'tutam_offline_audio' && mode === 'readwrite' && failNextAudioWriteCommit) {
+                failNextAudioWriteCommit = false;
+                tx.error = new DOMException('Audio commit failed', 'UnknownError');
+                tx.abort();
+                return;
+              }
               for (const name of dirty) stores.set(name, staged.get(name)!);
               tx.oncomplete?.();
             }
@@ -61,7 +72,7 @@ function memoryIndexedDb() {
           return result;
         };
         const tx = {
-          oncomplete: null as (() => void) | null, onabort: null as (() => void) | null, onerror: null as (() => void) | null, error: null,
+          oncomplete: null as (() => void) | null, onabort: null as (() => void) | null, onerror: null as (() => void) | null, error: null as DOMException | null,
           abort() { aborted = true; setImmediate(() => tx.onabort?.()); },
           objectStore: (storeName: string) => {
             const rows = staged.get(storeName) ?? new Map([...(stores.get(storeName) ?? [])].map(([key, row]) => [key, { ...row }]));
@@ -110,6 +121,7 @@ beforeEach(async () => {
   mocks.evict.mockClear();
   databases = new Map();
   blockCatalogWrites = false;
+  failNextAudioWriteCommit = false;
   beforeCursorEvent = undefined;
   mocks.session = { authenticated: true, user: { id: 'offline-admin-a', email: '', avatarUrl: '', displayName: 'Admin', role: 'admin' }, csrfToken: 'test', expiresAt: null };
   mocks.bundle = null;
@@ -251,12 +263,208 @@ it('deletes only unreferenced blobs when removing albums that share downloaded p
     visibility: 'public', trackUrls: [shared] });
   expect((await database.getOfflineTracksForAlbum('delete-b')).map(row => row.url)).toEqual([shared]);
   await database.deleteOfflineAlbum('delete-a');
-  expect(mocks.evict).toHaveBeenLastCalledWith([onlyA], expect.any(Function));
+  expect(mocks.evict).toHaveBeenLastCalledWith(backendKeys(onlyA), expect.any(Function));
   expect(await database.getOfflineTrack(onlyA)).toBeNull();
   expect((await database.getOfflineTracksForAlbum('delete-b')).map(row => row.url)).toEqual([shared]);
   await database.deleteOfflineAlbum('delete-b');
-  expect(mocks.evict).toHaveBeenLastCalledWith([shared], expect.any(Function));
+  expect(mocks.evict).toHaveBeenLastCalledWith(backendKeys(shared), expect.any(Function));
   expect(databases.get('tutam_offline_audio')?.get('tracks')?.has(shared)).toBe(false);
+});
+
+it('retries native eviction after the bridge fails before recording its durable marker', async () => {
+  const url = '/api/audio/drive/retry-native-eviction';
+  await database.putOfflineTrack({ url, albumId: 'retry-eviction', title: 'Retry eviction',
+    blob: new Blob(['offline bytes']), downloadedAt: 1, visibility: 'public' });
+  await database.putOfflineAlbum({ id: 'retry-eviction', title: 'Retry eviction', desc: '', trackCount: 1,
+    downloadedAt: 1, visibility: 'public', trackUrls: [url] });
+  mocks.evict.mockRejectedValueOnce(new Error('Audio bridge is closed'));
+
+  await expect(database.deleteOfflineAlbum('retry-eviction')).rejects.toThrow('Audio bridge is closed');
+  await database.deleteOfflineAlbum('retry-eviction');
+
+  expect(mocks.evict).toHaveBeenCalledTimes(2);
+  expect(mocks.evict).toHaveBeenNthCalledWith(1, backendKeys(url), expect.any(Function));
+  expect(mocks.evict).toHaveBeenNthCalledWith(2, backendKeys(url), expect.any(Function));
+  expect(databases.get('tutam_offline_audio')?.get('albums')?.has('retry-eviction')).toBe(false);
+  expect(databases.get('tutam_offline_audio')?.get('tracks')?.has(url)).toBe(false);
+});
+
+it('evicts a shared native URL once when both albums are deleted concurrently', async () => {
+  const url = '/api/audio/drive/concurrent-delete-shared';
+  await database.putOfflineTrack({ url, albumId: 'concurrent-a', title: 'Shared', blob: new Blob(['shared']),
+    downloadedAt: 1, visibility: 'public' });
+  for (const id of ['concurrent-a', 'concurrent-b']) await database.putOfflineAlbum({ id, title: id, desc: '',
+    trackCount: 1, downloadedAt: 1, visibility: 'public', trackUrls: [url] });
+
+  await Promise.all([database.deleteOfflineAlbum('concurrent-a'), database.deleteOfflineAlbum('concurrent-b')]);
+
+  expect(mocks.evict).toHaveBeenCalledTimes(1);
+  expect(mocks.evict).toHaveBeenCalledWith(backendKeys(url), expect.any(Function));
+  expect(databases.get('tutam_offline_audio')?.get('albums')?.size).toBe(0);
+  expect(databases.get('tutam_offline_audio')?.get('tracks')?.has(url)).toBe(false);
+});
+
+it('protects a retained absolute alias while evicting the unused backend key of a relative track', async () => {
+  const path = '/api/audio/drive/retained-old-origin-alias';
+  const retained = `${NATIVE_BACKEND_ORIGINS[1]}${path}`;
+  for (const [id, url] of [['relative-a', path], ['absolute-b', retained]]) {
+    await database.putOfflineTrack({ url, albumId: id, title: id, blob: new Blob([id]), downloadedAt: 1, visibility: 'public' });
+    await database.putOfflineAlbum({ id, title: id, desc: '', trackCount: 1, downloadedAt: 1, visibility: 'public', trackUrls: [url] });
+  }
+  await database.deleteOfflineAlbum('relative-a');
+  expect(mocks.evict).toHaveBeenCalledWith([`${NATIVE_BACKEND_ORIGINS[0]}${path}`], expect.any(Function));
+  expect(await (await database.getOfflineTrack(retained))?.blob.text()).toBe('absolute-b');
+});
+
+it('keeps an absolute backend key referenced by another relative track', async () => {
+  const path = '/api/audio/drive/retained-relative-alias';
+  const absolute = `${NATIVE_BACKEND_ORIGINS[1]}${path}`;
+  for (const [id, url] of [['absolute-a', absolute], ['relative-b', path]]) {
+    await database.putOfflineTrack({ url, albumId: id, title: id, blob: new Blob([id]), downloadedAt: 1, visibility: 'public' });
+    await database.putOfflineAlbum({ id, title: id, desc: '', trackCount: 1, downloadedAt: 1, visibility: 'public', trackUrls: [url] });
+  }
+  await database.deleteOfflineAlbum('absolute-a');
+  expect(mocks.evict).not.toHaveBeenCalled();
+  expect(await (await database.getOfflineTrack(path))?.blob.text()).toBe('relative-b');
+});
+
+it('protects a partial track alias even before its album completion record exists', async () => {
+  const path = '/api/audio/drive/retained-partial-alias';
+  const partial = `${NATIVE_BACKEND_ORIGINS[1]}${path}`;
+  await database.putOfflineTrack({ url: path, albumId: 'complete-a', title: 'A', blob: new Blob(['A']), downloadedAt: 1, visibility: 'public' });
+  await database.putOfflineAlbum({ id: 'complete-a', title: 'A', desc: '', trackCount: 1, downloadedAt: 1,
+    visibility: 'public', trackUrls: [path] });
+  await database.putOfflineTrack({ url: partial, albumId: 'partial-b', title: 'B', blob: new Blob(['B']), downloadedAt: 2, visibility: 'public' });
+  await database.deleteOfflineAlbum('complete-a');
+  expect(mocks.evict).toHaveBeenCalledWith([`${NATIVE_BACKEND_ORIGINS[0]}${path}`], expect.any(Function));
+  expect(databases.get('tutam_offline_audio')?.get('tracks')?.has(partial)).toBe(true);
+});
+
+it('protects an alias referenced by retained album metadata without a matching track row', async () => {
+  const path = '/api/audio/drive/retained-album-only-alias';
+  const retained = `${NATIVE_BACKEND_ORIGINS[1]}${path}`;
+  await database.putOfflineTrack({ url: path, albumId: 'removing-a', title: 'A', blob: new Blob(['A']), downloadedAt: 1, visibility: 'public' });
+  await database.putOfflineAlbum({ id: 'removing-a', title: 'A', desc: '', trackCount: 1, downloadedAt: 1,
+    visibility: 'public', trackUrls: [path] });
+  await database.putOfflineAlbum({ id: 'retained-b', title: 'B', desc: '', trackCount: 1, downloadedAt: 2,
+    visibility: 'public', trackUrls: [retained] });
+  await database.deleteOfflineAlbum('removing-a');
+  expect(mocks.evict).toHaveBeenCalledWith([`${NATIVE_BACKEND_ORIGINS[0]}${path}`], expect.any(Function));
+  expect(databases.get('tutam_offline_audio')?.get('albums')?.has('retained-b')).toBe(true);
+});
+
+it('retains the bytes of an alias added while the two-backend eviction is pending', async () => {
+  const path = '/api/audio/drive/new-alias-during-eviction';
+  const retained = `${NATIVE_BACKEND_ORIGINS[1]}${path}`;
+  await database.putOfflineTrack({ url: path, albumId: 'removing-a', title: 'A', blob: new Blob(['A']), downloadedAt: 1, visibility: 'public' });
+  await database.putOfflineAlbum({ id: 'removing-a', title: 'A', desc: '', trackCount: 1, downloadedAt: 1,
+    visibility: 'public', trackUrls: [path] });
+  let finish!: () => void;
+  mocks.evict.mockImplementationOnce(async () => { await new Promise<void>(resolve => { finish = resolve; }); });
+  const removing = database.deleteOfflineAlbum('removing-a');
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  await database.putOfflineTrack({ url: retained, albumId: 'new-b', title: 'B', blob: new Blob(['new shared bytes']), downloadedAt: 2, visibility: 'public' });
+  await database.putOfflineAlbum({ id: 'new-b', title: 'B', desc: '', trackCount: 1, downloadedAt: 2,
+    visibility: 'public', trackUrls: [retained] });
+  finish(); await removing;
+  expect(mocks.evict).toHaveBeenCalledWith(backendKeys(path), expect.any(Function));
+  expect(await (await database.getOfflineTrack(retained))?.blob.text()).toBe('new shared bytes');
+});
+
+it('does not treat an external host with the same API path as a backend alias', async () => {
+  const path = '/api/audio/drive/external-not-alias';
+  const external = `https://outside.example${path}`;
+  for (const [id, url] of [['backend-a', path], ['external-b', external]]) {
+    await database.putOfflineTrack({ url, albumId: id, title: id, blob: new Blob([id]), downloadedAt: 1, visibility: 'public' });
+    await database.putOfflineAlbum({ id, title: id, desc: '', trackCount: 1, downloadedAt: 1, visibility: 'public', trackUrls: [url] });
+  }
+  await database.deleteOfflineAlbum('backend-a');
+  expect(mocks.evict).toHaveBeenCalledWith(backendKeys(path), expect.any(Function));
+  expect(databases.get('tutam_offline_audio')?.get('tracks')?.has(external)).toBe(true);
+});
+
+it('retains authoritative bytes for an album that adds a shared reference during native eviction', async () => {
+  const url = '/api/audio/drive/new-reference-during-eviction';
+  await database.putOfflineTrack({ url, albumId: 'removing-a', title: 'Shared', blob: new Blob(['shared bytes']),
+    downloadedAt: 1, visibility: 'public' });
+  await database.putOfflineAlbum({ id: 'removing-a', title: 'A', desc: '', trackCount: 1,
+    downloadedAt: 1, visibility: 'public', trackUrls: [url] });
+  let finish!: () => void;
+  mocks.evict.mockImplementationOnce(async () => { await new Promise<void>(resolve => { finish = resolve; }); });
+  const removing = database.deleteOfflineAlbum('removing-a');
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  await database.putOfflineAlbum({ id: 'new-b', title: 'B', desc: '', trackCount: 1,
+    downloadedAt: 2, visibility: 'public', trackUrls: [url] });
+  finish(); await removing;
+
+  expect(databases.get('tutam_offline_audio')?.get('albums')?.has('removing-a')).toBe(false);
+  expect(databases.get('tutam_offline_audio')?.get('albums')?.has('new-b')).toBe(true);
+  expect((await database.getOfflineTracksForAlbum('new-b')).map(track => track.url)).toEqual([url]);
+  expect(await (await database.getOfflineTrack(url))?.blob.text()).toBe('shared bytes');
+});
+
+it('retains the album and original Blob when the final IDB commit fails after native eviction', async () => {
+  const url = '/api/audio/drive/failed-final-removal-commit';
+  await database.putOfflineTrack({ url, albumId: 'failed-commit', title: 'Retain', blob: new Blob(['retained bytes']),
+    downloadedAt: 1, visibility: 'public' });
+  await database.putOfflineAlbum({ id: 'failed-commit', title: 'Retain', desc: '', trackCount: 1,
+    downloadedAt: 1, visibility: 'public', trackUrls: [url] });
+  failNextAudioWriteCommit = true;
+
+  await expect(database.deleteOfflineAlbum('failed-commit')).rejects.toThrow('Audio commit failed');
+
+  expect(mocks.evict).toHaveBeenCalledTimes(1);
+  expect(databases.get('tutam_offline_audio')?.get('albums')?.has('failed-commit')).toBe(true);
+  expect(await (await database.getOfflineTrack(url))?.blob.text()).toBe('retained bytes');
+  await database.deleteOfflineAlbum('failed-commit');
+  expect(mocks.evict).toHaveBeenCalledTimes(2);
+  expect(databases.get('tutam_offline_audio')?.get('tracks')?.has(url)).toBe(false);
+});
+
+it('blocks late and queued deletions captured by the old principal while native eviction is pending', async () => {
+  for (const id of ['old-active', 'old-queued']) {
+    const url = `/api/audio/drive/${id}`;
+    await database.putOfflineTrack({ url, albumId: id, title: id, blob: new Blob([id]),
+      downloadedAt: 1, visibility: 'private', ownerId: 'offline-admin-a' });
+    await database.putOfflineAlbum({ id, title: id, desc: '', trackCount: 1, downloadedAt: 1,
+      visibility: 'private', ownerId: 'offline-admin-a', trackUrls: [url] });
+  }
+  let finish!: () => void;
+  mocks.evict.mockImplementationOnce(async () => { await new Promise<void>(resolve => { finish = resolve; }); });
+  const active = database.deleteOfflineAlbum('old-active');
+  const queued = database.deleteOfflineAlbum('old-queued');
+  const results = Promise.allSettled([active, queued]);
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  mocks.session = { ...mocks.session, user: { ...mocks.session.user!, id: 'offline-admin-b' } };
+  finish();
+
+  for (const result of await results) {
+    expect(result.status).toBe('rejected');
+    if (result.status === 'rejected') expect(result.reason).toMatchObject({ name: 'AbortError' });
+  }
+  expect(mocks.evict).toHaveBeenCalledTimes(1);
+  expect(databases.get('tutam_offline_audio')?.get('albums')?.size).toBe(2);
+  expect(databases.get('tutam_offline_audio')?.get('tracks')?.size).toBe(2);
+});
+
+it('does not remove a replacement of the same album saved during native eviction', async () => {
+  const url = '/api/audio/drive/replaced-removal';
+  const original = { id: 'replaced-removal', title: 'Original', desc: '', trackCount: 1,
+    downloadedAt: 1, visibility: 'public' as const, trackUrls: [url] };
+  await database.putOfflineTrack({ url, albumId: original.id, title: 'Original', blob: new Blob(['original']),
+    downloadedAt: 1, visibility: 'public' });
+  await database.putOfflineAlbum(original);
+  let finish!: () => void;
+  mocks.evict.mockImplementationOnce(async () => { await new Promise<void>(resolve => { finish = resolve; }); });
+  const removing = database.deleteOfflineAlbum(original.id);
+  const result = Promise.allSettled([removing]);
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  await database.putOfflineAlbum({ ...original, title: 'Replacement', downloadedAt: 2 });
+  finish();
+
+  expect((await result)[0]).toMatchObject({ status: 'rejected', reason: { name: 'AbortError' } });
+  expect(databases.get('tutam_offline_audio')?.get('albums')?.get(original.id)?.title).toBe('Replacement');
+  expect(databases.get('tutam_offline_audio')?.get('tracks')?.has(url)).toBe(true);
 });
 
 it('retains a shared private blob for its other album without granting another principal access', async () => {

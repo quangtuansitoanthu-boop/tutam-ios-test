@@ -15,6 +15,10 @@ import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
+import androidx.media3.session.MediaController;
+import androidx.media3.session.MediaSession;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import com.getcapacitor.JSObject;
@@ -32,6 +36,164 @@ import org.junit.runner.RunWith;
 
 @RunWith(AndroidJUnit4.class)
 public class DharmaAudioWidgetResumeTest {
+    private static final class ConnectionCall extends PluginCall {
+        final CountDownLatch finished = new CountDownLatch(1);
+        JSObject result;
+        String error;
+        ConnectionCall() { super(null, "DharmaAudio", "audit", "getState", new JSObject()); }
+        @Override public void resolve(JSObject result) { this.result = result; finished.countDown(); }
+        @Override public void reject(String message, String code, Exception error, JSObject data) {
+            this.error = message; finished.countDown();
+        }
+    }
+
+    @Test public void failedFutureIsRetiredAndTheNextInjectedLocalSessionConnectionCanExecute() throws Exception {
+        Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File directory = new File(target.getCacheDir(), "controller-retry-audit-" + java.util.UUID.randomUUID());
+        assertTrue(directory.mkdir());
+        java.util.Set<String> preferences = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+        Context isolated = new ContextWrapper(target) {
+            @Override public Context getApplicationContext() { return this; }
+            @Override public File getNoBackupFilesDir() { return directory; }
+            @Override public File getFilesDir() { return directory; }
+            @Override public File getCacheDir() { return directory; }
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) {
+                String key = directory.getName() + "-" + name;
+                preferences.add(key);
+                return target.getSharedPreferences(key, mode);
+            }
+        };
+        AtomicReference<ExoPlayer> playerRef = new AtomicReference<>();
+        AtomicReference<MediaSession> sessionRef = new AtomicReference<>();
+        AtomicReference<ListenableFuture<MediaController>> futureRef = new AtomicReference<>();
+        AtomicReference<DharmaAudioPlugin> pluginRef = new AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean adopted = new java.util.concurrent.atomic.AtomicBoolean();
+        java.lang.reflect.Field connecting = DharmaAudioPlugin.class.getDeclaredField("connecting"); connecting.setAccessible(true);
+        java.lang.reflect.Field controllerField = DharmaAudioPlugin.class.getDeclaredField("controller"); controllerField.setAccessible(true);
+        SettableFuture<MediaController> failed = SettableFuture.create();
+        failed.setException(new java.io.IOException("Controlled connection failure"));
+        try {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                ExoPlayer player = new ExoPlayer.Builder(isolated).build(); player.setVolume(0);
+                playerRef.set(player);
+                MediaSession session = new MediaSession.Builder(isolated, player).setId(directory.getName()).build();
+                sessionRef.set(session);
+                futureRef.set(new MediaController.Builder(isolated, session.getToken()).buildAsync());
+                pluginRef.set(new DharmaAudioPlugin() { @Override public Context getContext() { return isolated; } });
+                try { connecting.set(pluginRef.get(), failed); }
+                catch (IllegalAccessException error) { throw new AssertionError(error); }
+            });
+            ConnectionCall first = new ConnectionCall();
+            pluginRef.get().getState(first);
+            assertTrue(first.finished.await(5, TimeUnit.SECONDS));
+            assertEquals("Cannot connect native audio", first.error);
+            assertNull(connecting.get(pluginRef.get()));
+            assertNull(controllerField.get(pluginRef.get()));
+            MediaController controller = futureRef.get().get(5, TimeUnit.SECONDS);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                try {
+                    // Inject only the connection boundary; use a real local Media3 session and controller.
+                    // The production SessionToken/service builder reconnect is deliberately not simulated.
+                    connecting.set(pluginRef.get(), futureRef.get()); controllerField.set(pluginRef.get(), controller);
+                    adopted.set(true);
+                    java.lang.reflect.Method reset = DharmaAudioPlugin.class.getDeclaredMethod("resetConnection", ListenableFuture.class);
+                    reset.setAccessible(true); reset.invoke(pluginRef.get(), failed);
+                } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+            });
+            assertSame("An old failure must not invalidate the replacement", futureRef.get(), connecting.get(pluginRef.get()));
+            ConnectionCall second = new ConnectionCall();
+            pluginRef.get().getState(second);
+            assertTrue(second.finished.await(5, TimeUnit.SECONDS));
+            assertNull(second.error);
+            assertNotNull(second.result);
+            assertTrue(second.result.has("trackIndex"));
+            assertSame(controller, controllerField.get(pluginRef.get()));
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                if (pluginRef.get() != null) pluginRef.get().handleOnDestroy();
+                if (!adopted.get() && futureRef.get() != null) MediaController.releaseFuture(futureRef.get());
+                if (sessionRef.get() != null) sessionRef.get().release();
+                if (playerRef.get() != null) playerRef.get().release();
+            });
+            for (String name : preferences) assertTrue(target.deleteSharedPreferences(name));
+            File[] files = directory.listFiles();
+            if (files != null) for (File file : files) assertTrue(file.delete());
+            assertTrue(directory.delete());
+        }
+    }
+
+    @Test public void absentBackgroundServicesResolveSafeDefaults() {
+        Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context isolated = new ContextWrapper(target) {
+            @Override public Object getSystemService(String name) {
+                if (Context.ACTIVITY_SERVICE.equals(name) || Context.POWER_SERVICE.equals(name)) return null;
+                throw new AssertionError("Unexpected service " + name);
+            }
+        };
+        DharmaAudioPlugin plugin = new DharmaAudioPlugin() { @Override public Context getContext() { return isolated; } };
+        ConnectionCall call = new ConnectionCall();
+        plugin.backgroundStatus(call);
+        assertNotNull(call.result);
+        assertFalse(call.result.optBoolean("restricted", true));
+        assertFalse(call.result.optBoolean("batteryOptimized", true));
+    }
+
+    @Test public void widgetQueueAcceptsCanonicalPrivatePathsAndRejectsSymlinkEscapes() throws Exception {
+        Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File directory = new File(target.getCacheDir(), "canonical-widget-audit-" + java.util.UUID.randomUUID());
+        assertTrue(directory.mkdir());
+        File real = new File(directory, "private");
+        File alias = new File(directory, "alias");
+        File media = new File(real, "local.mp3");
+        File outside = new File(directory, "outside.mp3");
+        File escape = new File(real, "escape.mp3");
+        Context isolated = new ContextWrapper(target) {
+            @Override public Context getApplicationContext() { return this; }
+            @Override public File getNoBackupFilesDir() { return directory; }
+            @Override public android.content.pm.ApplicationInfo getApplicationInfo() {
+                android.content.pm.ApplicationInfo info = new android.content.pm.ApplicationInfo(target.getApplicationInfo());
+                info.dataDir = alias.getAbsolutePath(); return info;
+            }
+        };
+        java.lang.reflect.Field[] fields = new java.lang.reflect.Field[3];
+        Object[] previous = new Object[3];
+        String[] names = { "savedTracks", "savedFingerprint", "queueDirty" };
+        for (int i = 0; i < names.length; i++) {
+            fields[i] = DharmaAudioWidgetStore.class.getDeclaredField(names[i]); fields[i].setAccessible(true); previous[i] = fields[i].get(null);
+        }
+        AtomicReference<ExoPlayer> playerRef = new AtomicReference<>();
+        try {
+            assertTrue(real.mkdir());
+            android.system.Os.symlink(real.getAbsolutePath(), alias.getAbsolutePath());
+            assertTrue(media.createNewFile()); assertTrue(outside.createNewFile());
+            android.system.Os.symlink(outside.getAbsolutePath(), escape.getAbsolutePath());
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                ExoPlayer player = new ExoPlayer.Builder(isolated).build(); player.setVolume(0); playerRef.set(player);
+                for (File candidate : new File[]{media, new File(alias, "local.mp3"), escape}) {
+                    player.setMediaItem(new MediaItem.Builder().setMediaId(Uri.fromFile(candidate).toString()).setUri(Uri.fromFile(candidate)).build());
+                    DharmaAudioWidgetStore.invalidateQueue();
+                    DharmaAudioWidgetStore.save(isolated, player, new org.json.JSONObject());
+                    try {
+                        org.json.JSONObject envelope = new org.json.JSONObject(new String(new android.util.AtomicFile(
+                            new File(directory, "dharma-audio-widget-queue-v1.json")).readFully(), StandardCharsets.UTF_8));
+                        org.json.JSONArray rows = new org.json.JSONArray(envelope.getString("payload"));
+                        assertEquals(candidate.equals(escape) ? 0 : 1, rows.length());
+                        if (rows.length() == 1) assertEquals(Uri.fromFile(candidate).toString(), rows.getJSONObject(0).getString("uri"));
+                    } catch (Exception error) { throw new AssertionError(error); }
+                }
+            });
+        } finally {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> { if (playerRef.get() != null) playerRef.get().release(); });
+            for (int i = 0; i < fields.length; i++) fields[i].set(null, previous[i]);
+            if (escape.exists()) assertTrue(escape.delete());
+            if (media.exists()) assertTrue(media.delete());
+            if (alias.exists()) assertTrue(alias.delete());
+            if (real.exists()) assertTrue(real.delete());
+            File[] files = directory.listFiles();
+            if (files != null) for (File file : files) assertTrue(file.delete());
+            assertTrue(directory.delete());
+        }
+    }
     @Test public void widgetPlayRetriesIdleSourceErrorWithoutDiscardingQueueOrPosition() throws Exception {
         Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
         File directory = new File(target.getCacheDir(), "widget-retry-test-" + System.nanoTime());

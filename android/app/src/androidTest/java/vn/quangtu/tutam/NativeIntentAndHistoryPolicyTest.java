@@ -65,6 +65,87 @@ public class NativeIntentAndHistoryPolicyTest {
         assertNotEquals(name, DivinationHistoryPlugin.historyFileName(key.substring(1) + "ế"));
     }
 
+    @Test public void mergedStartupActivityDeclaresEveryRequiredConfigurationChange() throws Exception {
+        android.content.Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        android.content.pm.ActivityInfo info = context.getPackageManager().getActivityInfo(
+            new ComponentName(context, StartupActivity.class), 0);
+        int expected = android.content.pm.ActivityInfo.CONFIG_ORIENTATION | android.content.pm.ActivityInfo.CONFIG_KEYBOARD_HIDDEN
+            | android.content.pm.ActivityInfo.CONFIG_KEYBOARD | android.content.pm.ActivityInfo.CONFIG_SCREEN_SIZE
+            | android.content.pm.ActivityInfo.CONFIG_LOCALE | android.content.pm.ActivityInfo.CONFIG_SMALLEST_SCREEN_SIZE
+            | android.content.pm.ActivityInfo.CONFIG_SCREEN_LAYOUT | android.content.pm.ActivityInfo.CONFIG_UI_MODE
+            | android.content.pm.ActivityInfo.CONFIG_NAVIGATION;
+        assertEquals(expected, info.configChanges & expected);
+    }
+
+    @Test public void startupInsetsReachArtworkBeforeWebViewConsumptionWithoutAccumulatingMargins() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            android.content.Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+            android.widget.FrameLayout artwork = StartupArtworkView.create(context, 0);
+            android.view.View loading = null;
+            for (int i = 0; i < artwork.getChildCount(); i++) {
+                if (artwork.getChildAt(i) instanceof android.widget.LinearLayout) loading = artwork.getChildAt(i);
+            }
+            assertNotNull(loading);
+            int base = loading.getPaddingBottom();
+            try {
+                MainActivity activity = new MainActivity();
+                field("startupScreen").set(activity, artwork);
+                android.view.View webViewSurface = new android.view.View(context);
+                webViewSurface.setLayoutParams(new android.widget.FrameLayout.LayoutParams(-1, -1));
+                java.lang.reflect.Method listener = null;
+                // Invoke the actual insets callback without booting a WebView or adding a production test seam.
+                // Discover its unique signature rather than depending on the compiler's generated lambda name.
+                for (java.lang.reflect.Method method : MainActivity.class.getDeclaredMethods()) {
+                    if (method.isSynthetic() && method.getReturnType() == androidx.core.view.WindowInsetsCompat.class
+                        && java.util.Arrays.equals(method.getParameterTypes(), new Class<?>[]{android.view.View.class, androidx.core.view.WindowInsetsCompat.class})) {
+                        assertNull("Expected one inset owner", listener); listener = method;
+                    }
+                }
+                assertNotNull(listener); listener.setAccessible(true);
+                for (int bottom : new int[]{72, 24, 0}) {
+                    androidx.core.view.WindowInsetsCompat insets = new androidx.core.view.WindowInsetsCompat.Builder()
+                        .setInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars(), androidx.core.graphics.Insets.of(8, 0, 12, bottom))
+                        .setInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars(), androidx.core.graphics.Insets.of(0, 32, 0, 0))
+                        .setVisible(androidx.core.view.WindowInsetsCompat.Type.systemBars(), true).build();
+                    assertSame(androidx.core.view.WindowInsetsCompat.CONSUMED, listener.invoke(activity, webViewSurface, insets));
+                    assertEquals(base + bottom, loading.getPaddingBottom());
+                    android.view.ViewGroup.MarginLayoutParams margins = (android.view.ViewGroup.MarginLayoutParams) webViewSurface.getLayoutParams();
+                    assertEquals(8, margins.leftMargin); assertEquals(32, margins.topMargin);
+                    assertEquals(12, margins.rightMargin); assertEquals(bottom, margins.bottomMargin);
+                }
+            } catch (Exception error) { throw new AssertionError(error); }
+        });
+    }
+
+    @Test public void practiceArtworkReusesFourLiveNinetySixPixelBitmapsAcrossRequests() throws Exception {
+        android.content.Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        java.lang.reflect.Method artwork = vn.quangtu.tutam.widgets.PracticeWidgetProvider.class
+            .getDeclaredMethod("artwork", android.content.Context.class, int.class);
+        artwork.setAccessible(true);
+        android.graphics.Bitmap[] first = new android.graphics.Bitmap[4];
+        for (int round = 0; round < 3; round++) for (int index = 0; index < first.length; index++) {
+            android.graphics.Bitmap bitmap = (android.graphics.Bitmap) artwork.invoke(null, context, index);
+            assertNotNull(bitmap);
+            assertFalse(bitmap.isRecycled());
+            assertEquals(96, bitmap.getWidth());
+            assertEquals(96, bitmap.getHeight());
+            if (round == 0) first[index] = bitmap;
+            else assertSame("Widget sizes and instances must share their cached artwork", first[index], bitmap);
+        }
+        for (int index = 1; index < first.length; index++) assertNotSame(first[0], first[index]);
+    }
+
+    @Test public void nullWidgetBroadcastsReturnBeforeAnyContextAccess() {
+        android.content.Context trap = new android.content.ContextWrapper(null) {
+            @Override public android.content.Context getApplicationContext() { throw new AssertionError("Unexpected widget work"); }
+            @Override public Object getSystemService(String name) { throw new AssertionError("Unexpected service lookup"); }
+            @Override public String getPackageName() { throw new AssertionError("Unexpected package lookup"); }
+        };
+        new vn.quangtu.tutam.widgets.BuddhistCalendarWidgetProvider().onReceive(trap, null);
+        new vn.quangtu.tutam.widgets.PracticeWidgetProvider().onReceive(trap, null);
+        new vn.quangtu.tutam.audio.DharmaAudioWidgetProvider().onReceive(trap, null);
+    }
+
     private Field field(String name) throws Exception {
         Field field = MainActivity.class.getDeclaredField(name);
         field.setAccessible(true);
@@ -163,5 +244,12 @@ public class NativeIntentAndHistoryPolicyTest {
         RecordedCall export = new RecordedCall(new JSObject().put("fileName", "audit.png").put("base64", "iVBORw0KGgo="));
         new ImageExportPlugin().shareImage(export);
         assertEquals("Activity unavailable", export.rejection);
+        RecordedCall bars = new RecordedCall(new JSObject());
+        new AppSystemBarsPlugin().setFullscreen(bars);
+        assertEquals("Activity unavailable", bars.rejection);
+        RecordedCall reader = new RecordedCall(new JSObject());
+        new ReaderSpeechPlugin().openSettings(reader);
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        assertEquals("Cannot open speech settings", reader.rejection);
     }
 }

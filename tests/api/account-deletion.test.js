@@ -12,6 +12,7 @@ import pledges from '../../migrations/0032-thanh-tinh-pledges.sql?raw';
 import moderation from '../../migrations/0038-ugc-moderation.sql?raw';
 import deletion from '../../migrations/0039-account-deletion.sql?raw';
 import reportVersions from '../../migrations/0040-ugc-report-versions.sql?raw';
+import statsCounter from '../../migrations/0049-app-public-stats-counter.sql?raw';
 import { deleteAccount } from '../../src/lib/server/services/account-deletion.ts';
 
 // These selected migrations contain no trigger bodies or semicolons in literals.
@@ -35,6 +36,8 @@ beforeAll(async () => {
   // Data must exist before the actual D1 migration rebuilds the three tables.
   await applyD1Migrations(env.DB, [migration('0039-account-deletion.sql', deletion)]);
   await applyD1Migrations(env.DB, [migration('0040-ugc-report-versions.sql', reportVersions)]);
+  await applyD1Migrations(env.DB, [{ name: '0049-app-public-stats-counter.sql', queries: statsCounter.trim()
+    .split(/;\s*\n\s*\n/gu).map(sql => sql.trim().endsWith(';') ? sql.trim() : `${sql.trim()};`) }]);
 });
 
 it('runs 0039 with enforced D1 foreign keys, preserving seeded campaign data and capability', async () => {
@@ -60,9 +63,13 @@ it('deletes private data and author PII while retaining another member’s reply
     env.DB.prepare("INSERT INTO pt_player_sync(id,pt_recent_albums) VALUES ('google_creator','[{\"id\":1}]')"),
     env.DB.prepare("INSERT INTO thanh_tinh_pledges(anon_id_hash,user_id,email,joined_at,last_active_at) VALUES ('pledge','creator','private@example.test',?,?)").bind(now, now),
     env.DB.prepare("INSERT INTO active_visitors(visitor_id_hash,network_hash,last_seen_at,principal_id) VALUES ('visitor','network',1,'creator')"),
+    env.DB.prepare(`INSERT INTO visitor_daily_presence(visit_date,visitor_id_hash,network_hash,first_seen_at,last_seen_at)
+      VALUES ('2026-11-04','retained-visitor','fixture-network',0,0)`),
     env.DB.prepare("INSERT INTO ugc_public_profiles(public_id,owner_id,submitted_display_name,submitted_at) VALUES ('public-creator','creator','Creator',?)").bind(now),
   ]);
   await deleteAccount(env, { appUserId: 'creator', role: 'user' });
+  expect(await env.DB.prepare('SELECT user_count,visitor_count FROM app_public_stats WHERE id=1').first())
+    .toEqual({ user_count: 1, visitor_count: 1 });
   for (const [table, column, owner] of [['app_users', 'id', 'creator'], ['user_sync_data', 'id', 'creator'],
     ['pt_player_sync', 'id', 'google_creator'], ['thanh_tinh_pledges', 'user_id', 'creator'],
     ['active_visitors', 'principal_id', 'creator'], ['ugc_public_profiles', 'owner_id', 'creator']]) {
@@ -85,9 +92,11 @@ it('deletes private data and author PII while retaining another member’s reply
 it('retains the final administrator and private data on D1', async () => {
   await env.DB.prepare("INSERT INTO app_users(id,role) VALUES ('last-admin','admin')").run();
   await env.DB.prepare("INSERT INTO pt_player_sync(id,pt_recent_albums) VALUES ('google_last-admin','[{\"id\":2}]')").run();
+  const counterBefore = await env.DB.prepare('SELECT user_count,visitor_count FROM app_public_stats WHERE id=1').first();
   await expect(deleteAccount(env, { appUserId: 'last-admin', role: 'admin' }))
     .rejects.toMatchObject({ status: 409, code: 'last_admin_protected' });
   expect(await env.DB.prepare("SELECT role FROM app_users WHERE id='last-admin'").first()).toEqual({ role: 'admin' });
   expect(await env.DB.prepare("SELECT pt_recent_albums FROM pt_player_sync WHERE id='google_last-admin'").first())
     .toEqual({ pt_recent_albums: '[{"id":2}]' });
+  expect(await env.DB.prepare('SELECT user_count,visitor_count FROM app_public_stats WHERE id=1').first()).toEqual(counterBefore);
 });

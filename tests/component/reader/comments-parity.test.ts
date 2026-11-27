@@ -28,7 +28,21 @@ describe('reader comments parity', () => {
     expect(source).toContain('commentsRequest?.abort()');
     expect(source).toContain('const generation = ++commentsGeneration');
     expect(source).toContain('comments = []');
-    expect(source).toContain('generation === commentsGeneration && requestedArticleId === articleId');
+    const predicate = source.match(/const current = \(\) => ([\s\S]*?);/)?.[1];
+    expect(predicate).toBeTruthy();
+    type State = { controller: AbortController; generation: number; commentsGeneration: number;
+      requestedArticleId: string; articleId: string; requestedPrincipal: string; principalId: string };
+    // Thực thi guard thật để thứ tự các điều kiện không làm test phụ thuộc format source.
+    const accepts = new Function('state', `const { controller, generation, commentsGeneration,
+      requestedArticleId, articleId, requestedPrincipal, principalId } = state; return (${predicate});`) as (state: State) => boolean;
+    const state: State = { controller: new AbortController(), generation: 1, commentsGeneration: 1,
+      requestedArticleId: 'a', articleId: 'a', requestedPrincipal: 'first', principalId: 'first' };
+    expect(accepts(state)).toBe(true);
+    expect(accepts({ ...state, commentsGeneration: 2 })).toBe(false);
+    expect(accepts({ ...state, articleId: 'b' })).toBe(false);
+    expect(accepts({ ...state, principalId: 'second' })).toBe(false);
+    state.controller.abort();
+    expect(accepts(state)).toBe(false);
     expect(source).toContain('submittedArticleId !== articleId');
     expect(source).toContain('signal: controller.signal');
   });

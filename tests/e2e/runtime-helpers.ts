@@ -96,8 +96,8 @@ export async function settleClient(page: Page): Promise<void> {
 /** Explicitly choose online reading; cached offline copies open without this prompt. */
 export async function choosePdfOnline(page: Page): Promise<void> {
   const choice = page.getByRole('button', { name: 'Đọc online', exact: true });
-  await expect.poll(async () => await choice.isVisible()
-    || await page.locator('.pdf-page canvas[data-rendered]').first().isVisible()).toBe(true);
+  // Locator assertion kích hoạt overlay handler trong lúc màn đọc hoàn tất tải.
+  await expect(choice.or(page.locator('.pdf-page canvas[data-rendered]').first()).first()).toBeVisible();
   if (await choice.isVisible()) await choice.click();
   await expect(page.locator('.pdf-page canvas[data-rendered]').first()).toBeVisible();
 }

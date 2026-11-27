@@ -2340,5 +2340,7 @@
   :global([data-theme='dark']) .pdf-error,:global(.bg-dark) .pdf-error{background:#2a110f;color:#ff9d94;border-color:rgba(255,157,148,.2)}
   :global([data-theme='dark']) .pdf-error-retry-btn,:global(.bg-dark) .pdf-error-retry-btn{background:#3b1714;color:#ffb8b0;border-color:#ff9d94}
   .pdf-shell :is(.pdf-pager-btn,.pdf-zoom-btn,.pdf-quote-floating-btn,.pdf-bookmark-close-btn,.pdf-bookmark-del-btn){min-width:var(--touch-target-size)!important;min-height:var(--touch-target-size)!important}
+  .pdf-shell .pdf-pager-zoom-text{width:var(--touch-target-size);min-width:var(--touch-target-size);max-width:var(--touch-target-size);height:var(--touch-target-size);flex-basis:var(--touch-target-size)}
+  .pdf-shell .pdf-bookmark-jump-btn{min-height:var(--touch-target-size)!important}
   .pdf-bookmark-panel{padding-bottom:env(safe-area-inset-bottom,0px)}
 </style>

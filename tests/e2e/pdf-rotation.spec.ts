@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { choosePdfOnline, openReaderTools, settleClient } from './runtime-helpers';
+import { choosePdfOnline, deferStartupNotification, openReaderTools, settleClient } from './runtime-helpers';
 
 test('PDF retains the selected spread after portrait navigation and rotation back to landscape', async ({ page }) => {
+  await deferStartupNotification(page);
   await page.goto('/kinh-sach?article=e2e-pdf');
   await settleClient(page);
   await choosePdfOnline(page);

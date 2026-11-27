@@ -174,3 +174,66 @@ it('does not expose old shared offline comments or cache private review reasons'
   expect(document.body.textContent).not.toContain('Public comment');
   expect(cached.has('/offline-comments/article-1')).toBe(true);
 });
+
+it.each(['server-json', 'server-html', 'spa-html'] as const)('restores only the same-principal saved comments after a %s GET response', async kind => {
+  const path = '/offline-comments/owner-a/article-1';
+  cached.set(path, Response.json([publicComment]));
+  cached.set('/offline-comments/owner-b/article-1', Response.json([{ ...publicComment, noi_dung: 'Other account cache' }]));
+  mocks.fetch.mockResolvedValueOnce(kind === 'server-json'
+    ? Response.json({ error: 'unavailable' }, { status: 503 })
+    : new Response('<html>Unavailable</html>', { status: kind === 'server-html' ? 503 : 200, headers: { 'content-type': 'text/html' } }));
+  await openComments(); await settle();
+  expect(document.body.textContent).not.toContain('Other account cache');
+  expect(document.body.textContent).toContain('Không thể tải bình luận');
+  expect(await cached.get(path)!.clone().json()).toEqual([publicComment]);
+  expect(mocks.fetch).toHaveBeenCalledTimes(1);
+});
+
+it.each([401, 403].flatMap(status => [{ status, html: false }, { status, html: true }]))('keeps an authoritative $status GET rejection (HTML: $html) from falling back to saved comments', async ({ status, html }) => {
+  cached.set('/offline-comments/owner-a/article-1', Response.json([publicComment]));
+  mocks.fetch.mockResolvedValueOnce(html
+    ? new Response('<html>Forbidden</html>', { status, headers: { 'content-type': 'text/html' } })
+    : Response.json({ error: 'forbidden' }, { status }));
+  component = mount(CommentsPanel, { target: document.body, props: { articleId: 'article-1' } });
+  await settle(); await settle();
+  expect(document.body.textContent).not.toContain('Public comment');
+  expect(document.body.textContent).toContain('Không thể tải bình luận');
+  expect(mocks.fetch).toHaveBeenCalledTimes(1);
+});
+
+it('discards a saved comment read that finishes after switching accounts', async () => {
+  let finishSaved!: (response: Response) => void;
+  const match = vi.fn((path: string) => path === '/offline-comments/owner-a/article-1'
+    ? new Promise<Response>(resolve => { finishSaved = resolve; }) : Promise.resolve(undefined));
+  vi.stubGlobal('caches', { open: async () => ({ match, put: vi.fn() }) });
+  mocks.fetch.mockResolvedValueOnce(Response.json({ error: 'unavailable' }, { status: 503 }));
+  component = mount(CommentsPanel, { target: document.body, props: { articleId: 'article-1' } });
+  await vi.waitFor(() => expect(match).toHaveBeenCalledWith('/offline-comments/owner-a/article-1'));
+  mocks.session = { ...mocks.session, user: { ...mocks.session.user, id: 'owner-b' } };
+  mocks.fetch.mockResolvedValueOnce(Response.json([{ ...publicComment, noi_dung: 'Current account comment' }]));
+  window.dispatchEvent(new CustomEvent('test:community-session-change', { detail: mocks.session }));
+  await vi.waitFor(() => { flushSync(); expect(document.body.textContent).toContain('Current account comment'); });
+  finishSaved(Response.json([{ ...publicComment, noi_dung: 'Previous account cache' }])); await settle();
+  expect(document.body.textContent).not.toContain('Previous account cache');
+  expect(document.body.textContent).toContain('Current account comment');
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+});
+
+it('discards a saved read after a newer request aborts it, even when a block event arrives', async () => {
+  let finishSaved!: (response: Response) => void;
+  const match = vi.fn(() => new Promise<Response>(resolve => { finishSaved = resolve; }));
+  vi.stubGlobal('caches', { open: async () => ({ match, put: vi.fn() }) });
+  mocks.fetch.mockResolvedValueOnce(Response.json({ error: 'unavailable' }, { status: 503 }));
+  component = mount(CommentsPanel, { target: document.body, props: { articleId: 'article-1' } });
+  await vi.waitFor(() => expect(match).toHaveBeenCalledTimes(1));
+  const firstSignal = mocks.fetch.mock.calls[0][1].signal as AbortSignal;
+  window.dispatchEvent(new CustomEvent(COMMUNITY_BLOCKS_CHANGED_EVENT, { detail: { principalId: 'owner-a', authorId: 'public-other', blocked: true } }));
+  mocks.fetch.mockResolvedValueOnce(Response.json([{ ...publicComment, authorId: 'allowed-author', noi_dung: 'Current network comment' }]));
+  window.dispatchEvent(new Event('online'));
+  await vi.waitFor(() => { flushSync(); expect(document.body.textContent).toContain('Current network comment'); });
+  expect(firstSignal.aborted).toBe(true);
+  finishSaved(Response.json([publicComment])); await settle();
+  expect(document.body.textContent).not.toContain('Public comment');
+  expect(document.body.textContent).toContain('Current network comment');
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+});

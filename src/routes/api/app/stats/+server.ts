@@ -11,5 +11,5 @@ export const GET: RequestHandler = async (event) => {
   if (!runtime.migrationSealed) {
     return apiError(503, 'migration_unsealed', 'Dữ liệu chưa được xác minh.', runtime.requestId);
   }
-  return handleAppStatsRequest(runtime.env);
+  return handleAppStatsRequest(runtime.env, runtime.requestId);
 };

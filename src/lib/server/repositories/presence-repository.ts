@@ -303,8 +303,10 @@ export function createPresenceRepository(env: CloudflareEnvLike) {
               ORDER BY last_seen_at ASC
               LIMIT 500
             )
-          `).bind(analyticsCutoff).run();
-          purged += Number(analyticsResult.meta?.changes || 0);
+            RETURNING 1 AS deleted
+          `).bind(analyticsCutoff).all<{ deleted: number }>();
+          // Trigger cập nhật counter cũng tăng meta.changes; chỉ đếm dòng daily đã xóa.
+          purged += analyticsResult.results?.length ?? 0;
           const backlog = await env.DB.prepare(`
             SELECT EXISTS(
               SELECT 1 FROM visitor_daily_presence WHERE last_seen_at < ? LIMIT 1

@@ -291,16 +291,45 @@ export async function listOfflineAlbums(access?: OfflineAudioAccess): Promise<Of
   return allowed.filter((album): album is OfflineAlbum => Boolean(album));
 }
 
+let albumRemoval: Promise<void> = Promise.resolve();
 export async function deleteOfflineAlbum(albumId: string): Promise<void> {
   const id = String(albumId);
   const context = accessContext();
+  // Chỉ xếp hàng xóa: album khác vẫn ghi tham chiếu mới trong lúc native xử lý.
+  const work = albumRemoval.then(() => removeOfflineAlbum(id, context));
+  albumRemoval = work.catch(() => {});
+  return work;
+}
+
+async function removeOfflineAlbum(id: string, context: AccessContext): Promise<void> {
+  context.assertCurrent();
   // Resolve legacy URL references from local catalog owners before opening IDB writes.
   const proof = await catalogProof(context, true);
   const database = await openOfflineAudioDatabase();
   context.assertCurrent();
-  const transaction = database.transaction(['tracks', 'albums'], 'readwrite');
+  const { evictNativeTalkCache, nativeTalkCacheKeys } = await import('./native-talk-audio');
+  context.assertCurrent();
+  const pending = await removeOfflineAlbumRows(database, id, context, proof, nativeTalkCacheKeys, 'readonly');
+  context.assertCurrent();
+  if (pending.urls.length) {
+    await evictNativeTalkCache(pending.urls, () => { context.assertCurrent(); return true; });
+    context.assertCurrent();
+  }
+  // Blob IDB là bản gốc; native chỉ là cache có thể dựng lại khi commit cuối lỗi.
+  await removeOfflineAlbumRows(database, id, context, proof, nativeTalkCacheKeys, 'readwrite', pending.albumVersion);
+  context.assertCurrent();
+}
+
+async function removeOfflineAlbumRows(
+  database: IDBDatabase, id: string, context: AccessContext, proof: CatalogProof[],
+  cacheKeys: (url: string) => readonly string[], mode: IDBTransactionMode, expectedAlbumVersion?: string,
+): Promise<{ urls: string[]; albumVersion: string }> {
+  context.assertCurrent();
+  const transaction = database.transaction(['tracks', 'albums'], mode);
   const evictedUrls: string[] = [];
+  let albumVersion = '';
   let principalError: unknown;
+  const done = transactionDone(transaction);
   const albums = transaction.objectStore('albums');
   const albumRequest = albums.getAll();
   albumRequest.onsuccess = () => {
@@ -309,34 +338,44 @@ export async function deleteOfflineAlbum(albumId: string): Promise<void> {
     const urls = (album: OfflineAlbum) => album.trackUrls?.length ? album.trackUrls
       : proof.filter(item => item.id === String(album.id)).flatMap(item => item.tracks.map(track => track.url));
     const target = stored.find(album => String(album.id) === id);
+    albumVersion = JSON.stringify(target ?? null);
+    if (expectedAlbumVersion !== undefined && expectedAlbumVersion !== albumVersion) {
+      principalError = new DOMException('Offline album changed', 'AbortError');
+      transaction.abort();
+      return;
+    }
     const targetUrls = new Set(target ? urls(target) : []);
     const remaining = stored.filter(album => String(album.id) !== id);
     const retainedUrls = new Set(remaining.flatMap(urls));
+    const retainedCacheKeys = new Set([...retainedUrls].flatMap(url => [...cacheKeys(url)]));
+    const candidateCacheKeys = new Set<string>();
     // Another principal's legacy catalog is unavailable here: retain bytes until its references can be resolved.
     const unresolvedLegacy = remaining.some(album => !album.trackUrls?.length && urls(album).length === 0);
     const legacyAlbumIds = new Set(remaining.filter(album => !album.trackUrls?.length).map(album => String(album.id)));
-    albums.delete(id);
+    if (mode === 'readwrite') albums.delete(id);
     const cursorRequest = transaction.objectStore('tracks').openCursor();
     cursorRequest.onsuccess = () => {
       try { context.assertCurrent(); } catch (error) { principalError = error; transaction.abort(); return; }
       const cursor = cursorRequest.result;
-      if (!cursor) return;
+      if (!cursor) {
+        for (const key of candidateCacheKeys) if (!retainedCacheKeys.has(key)) evictedUrls.push(key);
+        return;
+      }
       const track = cursor.value as OfflineTrack;
       if ((String(track.albumId) === id || targetUrls.has(track.url))
         && !unresolvedLegacy && !retainedUrls.has(track.url) && !legacyAlbumIds.has(String(track.albumId))) {
-        cursor.delete();
-        evictedUrls.push(track.url);
+        if (mode === 'readwrite') cursor.delete();
+        for (const key of cacheKeys(track.url)) candidateCacheKeys.add(key);
+      } else {
+        // Hai URL IDB khác nhau vẫn có thể trỏ cùng file native của backend cũ.
+        for (const key of cacheKeys(track.url)) retainedCacheKeys.add(key);
       }
       cursor.continue();
     };
   };
-  await transactionDone(transaction).catch(error => { throw principalError ?? error; });
+  await done.catch(error => { throw principalError ?? error; });
   context.assertCurrent();
-  if (evictedUrls.length) {
-    const { evictNativeTalkCache } = await import('./native-talk-audio');
-    context.assertCurrent();
-    await evictNativeTalkCache(evictedUrls, () => { context.assertCurrent(); return true; });
-  }
+  return { urls: evictedUrls, albumVersion };
 }
 
 export async function offlineAlbumStatus(

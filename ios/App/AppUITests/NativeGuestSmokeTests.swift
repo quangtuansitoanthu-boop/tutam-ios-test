@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import Vision
 
 // Audit CI tách mỗi lớp trên runner mới; các phương thức cùng lớp vẫn dùng chung app/quyền.
 // Không chỉnh storage hoặc quyền bằng test hook.
@@ -40,9 +41,7 @@ class NativeGuestUITestCase: XCTestCase {
         app.launch()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30), "Native WKWebView must load")
         if retryBlankWebView {
-            let startupPrompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
-                format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
-            )).firstMatch
+            let startupPrompt = startupNotificationPrompt(app)
             let visible = NSPredicate { _, _ in app.links["Cá nhân"].firstMatch.exists || startupPrompt.exists }
             let ready = XCTNSPredicateExpectation(predicate: visible, object: NSObject())
             if XCTWaiter.wait(for: [ready], timeout: 120) != .completed {
@@ -71,11 +70,21 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
+    func startupNotificationPrompt(_ app: XCUIApplication) -> XCUIElement {
+        // iOS can change the generated dialog role's language after a cold deep link.
+        // Match the app-owned name while keeping the role suffix outside the contract.
+        return app.webViews.firstMatch.otherElements.matching(NSPredicate(
+            format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
+            "Thông báo tu tập,", "Practice notifications,"
+        )).firstMatch
+    }
+
+    @MainActor
     func waitForStartupCoverToClear(_ app: XCUIApplication) {
         let web = app.webViews.firstMatch
         let status = web.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Ứng dụng Tu tập Phật pháp")).firstMatch
         let loading = web.staticTexts.matching(NSPredicate(format: "label IN %@", ["Đang tải ứng dụng...", "Loading app..."] as NSArray)).firstMatch
-        let prompt = web.otherElements.matching(NSPredicate(format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray)).firstMatch
+        let prompt = startupNotificationPrompt(app)
         let personal = app.links["Cá nhân"].firstMatch
         waitUntil("The actual loading artwork must clear before touching the rendered app", timeout: 60) {
             app.state == .runningForeground && (personal.exists || prompt.exists) && !status.exists && !loading.exists
@@ -84,10 +93,7 @@ class NativeGuestUITestCase: XCTestCase {
 
     @MainActor
     func deferStartupNotificationPrompt(_ app: XCUIApplication, timeout: TimeInterval = 0) {
-        let prompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
-            format: "label IN %@",
-            ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
-        )).firstMatch
+        let prompt = startupNotificationPrompt(app)
         guard prompt.exists || (timeout > 0 && prompt.waitForExistence(timeout: timeout)) else { return }
         let later = prompt.buttons.matching(NSPredicate(
             format: "label IN %@", ["Để sau", "Maybe later"] as NSArray
@@ -499,6 +505,70 @@ class NativeGuestUITestCase: XCTestCase {
 }
 
 final class NativeGuestSmokeTests: NativeGuestUITestCase {
+    private func normalizedQuoteFeedback(_ text: String) -> String {
+        return text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .replacingOccurrences(of: "đ", with: "d")
+            .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+
+    private func containsQuoteSaveFeedback(_ text: String) -> Bool {
+        let expected = ["Đã lưu ảnh PNG vào máy.", "Saved PNG image to your device."].map(normalizedQuoteFeedback)
+        let lines = text.split(separator: "\n").map { normalizedQuoteFeedback(String($0)) }
+        for start in lines.indices {
+            var message = ""
+            for line in lines[start...] {
+                message += message.isEmpty ? line : " " + line
+                if expected.contains(message) { return true }
+                if !expected.contains(where: { $0.hasPrefix(message) }) { break }
+            }
+        }
+        return false
+    }
+
+    @MainActor
+    private func recognizeScreenText(_ screenshot: XCUIScreenshot) throws -> String {
+        guard let image = screenshot.image.cgImage else {
+            throw NSError(domain: "NativeGuestSmokeTests.ScreenCapture", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "The screen capture has no image pixels"])
+        }
+        // Vision đọc pixel màn hình thật, độc lập với truy vấn AX từ xa của WebKit.
+        // https://developer.apple.com/documentation/vision/recognizing-text-in-images
+        let request = VNRecognizeTextRequest(completionHandler: nil)
+        request.recognitionLevel = .accurate
+        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+    }
+
+    @MainActor
+    private func waitForVisibleQuoteSaveFeedback() {
+        // Tiến trình Files có thể chặn AX lâu hơn thời gian toast hiện 2,8 giây.
+        // Giữ ngân sách15giây cũ và kiểm tra đúng thông báo VI/EN đang hiển thị.
+        let deadline = ProcessInfo.processInfo.systemUptime + 15
+        var screenshot = XCUIScreen.main.screenshot()
+        var recognizedText = ""
+        var found = false
+        repeat {
+            screenshot = XCUIScreen.main.screenshot()
+            do {
+                recognizedText = try recognizeScreenText(screenshot)
+                found = containsQuoteSaveFeedback(recognizedText)
+            } catch {
+                recognizedText = "Vision text recognition failed: \(error)"
+            }
+            if found { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        let image = XCTAttachment(screenshot: screenshot)
+        image.name = "quote-native-save-feedback-screen"
+        image.lifetime = .keepAlways
+        add(image)
+        let text = XCTAttachment(string: recognizedText)
+        text.name = "quote-native-save-feedback-recognized-text"
+        text.lifetime = .keepAlways
+        add(text)
+        XCTAssertTrue(found, "A completed native save must report its exact visible success message")
+    }
+
     @MainActor
     func testQuoteImageUsesNativeSavePickerAndCancelKeepsDialogUsable() {
         let app = launchGuest()
@@ -542,12 +612,20 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         unexpectedSuccess.isInverted = true
         XCTAssertEqual(XCTWaiter.wait(for: [unexpectedSuccess], timeout: 2), .completed, "Canceling the destination must not report a successful PNG save")
         evidence("quote-image-cancel-preserves-dialog", app: app)
+        // Initialize Vision before saving so model startup cannot consume the short-lived toast.
+        do {
+            let canceledText = try recognizeScreenText(XCUIScreen.main.screenshot())
+            XCTAssertFalse(containsQuoteSaveFeedback(canceledText), "Canceling must not display a successful native PNG save")
+        } catch {
+            XCTFail("Screen text recognition must be ready before the native save: \(error)")
+            return
+        }
         tap(saveImage, app: app)
         XCTAssertTrue(pickerSave.waitForExistence(timeout: 20), "A second export must open a fresh native destination after cancellation")
         XCTAssertFalse(saveImage.isEnabled, "The second export must keep its source file until native completion")
         XCTAssertTrue(pickerSave.isHittable)
         pickerSave.tap()
-        XCTAssertTrue(falseSuccess.waitForExistence(timeout: 15), "A completed native save must report success")
+        waitForVisibleQuoteSaveFeedback()
         waitUntil("Saving the native PNG must return to the usable quote dialog") {
             !pickerSave.exists && title.exists && saveImage.exists && saveImage.isEnabled
         }
@@ -688,9 +766,7 @@ final class NativeNotificationTypingTests: NativeGuestUITestCase {
 
         XCUIDevice.shared.press(.home)
         app.activate()
-        let prompt = app.webViews.firstMatch.otherElements.matching(NSPredicate(
-            format: "label IN %@", ["Thông báo tu tập, hộp thoại web", "Practice notifications, web dialog"] as NSArray
-        )).firstMatch
+        let prompt = startupNotificationPrompt(app)
         XCTAssertFalse(prompt.waitForExistence(timeout: 3), "An automatic reminder must leave ongoing typing uninterrupted")
         search.typeText(" sach")
         XCTAssertEqual(search.value as? String, "kinh sach")
@@ -865,13 +941,30 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         plainEditor.name = "copy-typed-text-after-disabling-ghost"
         plainEditor.lifetime = .keepAlways
         add(plainEditor)
-        let settledEditor = app.textViews["Tự gõ bản chép của bạn"].firstMatch
+        // Phân trang native chỉ đưa phần chữ trang hiện tại vào TextView.
+        // Sau khi kiểm tra chế độ mặc định, dùng UI cuộn liên tục để kiểm tra cả đầu/cuối bản chép.
+        tap(app.buttons["Tùy chọn"].firstMatch, app: app)
+        let continuous = app.switches["Cuộn liên tục"].firstMatch
+        XCTAssertTrue(continuous.waitForExistence(timeout: 10))
+        XCTAssertEqual(continuous.value as? String, "0", "Native copying must initially keep its paged mode")
+        tap(continuous, app: app)
+        XCTAssertEqual(continuous.value as? String, "1")
         waitUntil("The editor must retain the corrected Vietnamese heading and follow the reference across lines", timeout: 20) {
-            guard let text = settledEditor.value as? String else { return false }
-            let words = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-            return words.contains("TỊNH KHẨU NGHIỆP CHƠN NGÔN")
-                && words.contains("GIỚI")
-                && !words.contains("(3 lần)")
+            // TextView đã cache có thể trỏ vào AX của bàn phím vừa đóng.
+            // Đọc snapshot app mới và giữ nguyên các điều kiện về nội dung thực trong editor.
+            guard let snapshot = try? app.snapshot() else { return false }
+            var pending = snapshot.children
+            while let node = pending.popLast() {
+                if node.elementType == .textView && node.label == "Tự gõ bản chép của bạn" {
+                    guard let text = node.value as? String else { return false }
+                    let words = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+                    return words.contains("TỊNH KHẨU NGHIỆP CHƠN NGÔN")
+                        && words.contains("GIỚI")
+                        && !words.contains("(3 lần)")
+                }
+                pending.append(contentsOf: node.children)
+            }
+            return false
         }
         evidence("copy-ghost-text-retained-after-keyboard", app: app)
     }
@@ -1422,7 +1515,7 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
     }
 
     @MainActor
-    private func saveEvent(_ title: String, app: XCUIApplication) {
+    private func saveEvent(_ title: String, app: XCUIApplication, expectsAddedDialog: Bool = true) {
         dismissPersonalKeyboard(app)
         let saveButton = app.buttons["Lưu ngày lễ"].firstMatch
         reveal(saveButton, app: app)
@@ -1474,14 +1567,16 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
             XCTFail("A valid save must close the draft after one tap; diagnostic second tap cannot satisfy this requirement")
             return
         }
-        // The success dialog intentionally makes the saved list inert until it is acknowledged.
-        let savedAlert = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Đã thêm ngày lễ cá nhân")).firstMatch
-        XCTAssertTrue(savedAlert.waitForExistence(timeout: 15), "One Save tap must show the actual success dialog")
-        XCTAssertTrue(savedAlert.staticTexts["Ngày lễ đã được lưu trên thiết bị."].firstMatch.exists)
-        let acknowledge = savedAlert.buttons["Đóng"].firstMatch
-        XCTAssertTrue(acknowledge.isHittable)
-        acknowledge.tap()
-        waitPersonalUntil("Acknowledging Save must restore the saved list") { !savedAlert.exists }
+        // Only adding shows this modal; editing updates the existing row and displays inline feedback.
+        if expectsAddedDialog {
+            let savedAlert = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Đã thêm ngày lễ cá nhân")).firstMatch
+            XCTAssertTrue(savedAlert.waitForExistence(timeout: 15), "One Save tap must show the actual success dialog")
+            XCTAssertTrue(savedAlert.staticTexts["Ngày lễ đã được lưu trên thiết bị."].firstMatch.exists)
+            let acknowledge = savedAlert.buttons["Đóng"].firstMatch
+            XCTAssertTrue(acknowledge.isHittable)
+            acknowledge.tap()
+            waitPersonalUntil("Acknowledging Save must restore the saved list") { !savedAlert.exists }
+        }
         XCTAssertFalse(app.textFields["Tên ngày lễ *"].firstMatch.exists, "The saved draft must remain closed after acknowledgement")
         XCTAssertTrue(existsOrWait(app.staticTexts[title].firstMatch, timeout: 15))
     }
@@ -1728,7 +1823,8 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
         addEvent(solar, solar: true, day: 7, month: 11, app: app)
         editEvent(solar, app: app)
         replaceName(edited, app: app)
-        saveEvent(edited, app: app)
+        saveEvent(edited, app: app, expectsAddedDialog: false)
+        XCTAssertFalse(app.staticTexts[solar].firstMatch.exists, "Editing must replace the original row, not add a duplicate")
         relaunchPersonal(app, captureNavigationEvidence: false)
         editEvent(lunar, app: app)
         XCTAssertEqual(namedControl("Ngày Âm lịch:", app: app).value as? String, "15")

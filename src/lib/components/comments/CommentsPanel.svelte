@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getContext, onMount, tick, untrack } from 'svelte';
   import { fetchWithSessionRefresh, getBrowserSession, requireBrowserCsrf } from '$lib/browser/session-csrf';
+  import { isHtmlResponse } from '$lib/browser/native-api';
   import { formatVietnamDate } from '$lib/utils/vietnam-date-format';
   import { SESSION_CONTEXT, SESSION_CHANGE_EVENT, getBrowserSessionSnapshot, type SessionStore } from '$lib/stores/session.svelte';
   import type { PageSessionDTO } from '$lib/server/auth/types';
@@ -201,6 +202,8 @@
     commentsRequest?.abort();
     const controller = new AbortController();
     commentsRequest = controller;
+    const current = () => !controller.signal.aborted && generation === commentsGeneration
+      && requestedArticleId === articleId && requestedPrincipal === principalId;
     if (!append) { comments = []; nextCursor = ''; }
     error = '';
     loading = true;
@@ -208,14 +211,18 @@
       const path = cachePath(requestedArticleId, requestedPrincipal);
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         const rows = await savedComments(path);
-        if (generation === commentsGeneration && requestedArticleId === articleId) { comments = Array.isArray(rows) ? rows : []; nextCursor = ''; }
+        if (current()) { comments = Array.isArray(rows) ? rows : []; nextCursor = ''; }
         return;
       }
       const response = await fetchWithSessionRefresh(`/api/articles/${encodeURIComponent(requestedArticleId)}/comments?includeOwn=1${append && nextCursor ? `&after=${encodeURIComponent(nextCursor)}` : ''}`, {
         signal: controller.signal
       });
+      // Lỗi tạm thời dùng bản public đã lưu; 401/403 vẫn giữ kết quả từ chối của server.
+      if (response.status >= 500 || (response.status !== 401 && response.status !== 403 && isHtmlResponse(response))) {
+        throw new Error('comments_read_unavailable');
+      }
       const result = response.ok ? await response.json() : [];
-      if (generation === commentsGeneration && requestedArticleId === articleId) {
+      if (current()) {
         const incoming: Comment[] = Array.isArray(result) ? result.filter(row => !row.authorId || !hiddenAuthors.has(row.authorId)) : [];
         comments = append ? [...new Map([...comments, ...incoming].map(row => [row.id, row])).values()] : incoming;
         nextCursor = response.headers.get('X-Next-Cursor') || '';
@@ -225,9 +232,9 @@
         }
       }
     } catch (cause) {
-      if (!(cause instanceof DOMException && cause.name === 'AbortError') && generation === commentsGeneration) {
+      if (!(cause instanceof DOMException && cause.name === 'AbortError') && current()) {
         const saved = !append ? await savedComments(cachePath(requestedArticleId, requestedPrincipal)) : null;
-        if (generation !== commentsGeneration || requestedArticleId !== articleId) return;
+        if (!current()) return;
         if (saved) comments = saved;
         error = t.loadFailed;
       }

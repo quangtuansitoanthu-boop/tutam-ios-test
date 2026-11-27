@@ -613,7 +613,7 @@ async function dispatch(event: EventLike, env: NonNullable<ReturnType<typeof get
 
   if (path === '/api/app/stats') {
     if (request.method !== 'GET') return methodNotAllowed(['GET'], requestId);
-    return handleAppStatsRequest(env);
+    return handleAppStatsRequest(env, requestId);
   }
 
   if (path === '/api/thanh-tinh/stats') {
@@ -1523,7 +1523,7 @@ const appStatsPending = new WeakMap<CloudflareEnvLike['DB'], Promise<AppStatsDat
 
 const BASE_INSTALL_COUNT = 1230;
 
-export async function handleAppStatsRequest(env: CloudflareEnvLike): Promise<Response> {
+export async function handleAppStatsRequest(env: CloudflareEnvLike, requestId: string = crypto.randomUUID()): Promise<Response> {
   const now = Date.now();
   const cached = appStatsMemoryCache.get(env.DB);
   if (cached && now < cached.expiresAt) {
@@ -1534,18 +1534,14 @@ export async function handleAppStatsRequest(env: CloudflareEnvLike): Promise<Res
 
   let pending = appStatsPending.get(env.DB);
   if (!pending) {
-    // Giữ ngữ nghĩa unique visitor cũ; counter tương ứng cần schema được duyệt riêng.
     pending = (async () => {
-      let realCount = 0;
-      try {
-        const [userRow, visitorRow] = await Promise.all([
-          env.DB.prepare('SELECT COUNT(*) AS total FROM app_users').first<{ total?: number }>(),
-          env.DB.prepare('SELECT COUNT(DISTINCT visitor_id_hash) AS total FROM visitor_daily_presence').first<{ total?: number }>(),
-        ]);
-        realCount = Math.max(Number(userRow?.total || 0), Number(visitorRow?.total || 0));
-      } catch {
-        realCount = 0;
+      const row = await env.DB.prepare('SELECT user_count, visitor_count FROM app_public_stats WHERE id = 1')
+        .first<{ user_count: number; visitor_count: number }>();
+      if (!row || !Number.isSafeInteger(row.user_count) || row.user_count < 0
+        || !Number.isSafeInteger(row.visitor_count) || row.visitor_count < 0) {
+        throw new Error('app_stats_counter_unavailable');
       }
+      const realCount = Math.max(row.user_count, row.visitor_count);
       const data = { total: BASE_INSTALL_COUNT + realCount, base: BASE_INSTALL_COUNT, real: realCount };
       appStatsMemoryCache.set(env.DB, { data, expiresAt: now + 30 * 60 * 1000 });
       return data;
@@ -1557,6 +1553,9 @@ export async function handleAppStatsRequest(env: CloudflareEnvLike): Promise<Res
     return json(await pending, 200, {
       'Cache-Control': 'public, max-age=1800, s-maxage=3600, stale-while-revalidate=86400',
     });
+  } catch {
+    // Thiếu migration không được kéo COUNT/full scan trở lại luồng đọc công khai.
+    return apiError(503, 'app_stats_unavailable', 'Thống kê ứng dụng chưa sẵn sàng.', requestId);
   } finally {
     if (appStatsPending.get(env.DB) === pending) appStatsPending.delete(env.DB);
   }
