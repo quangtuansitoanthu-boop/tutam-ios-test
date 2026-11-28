@@ -3,6 +3,7 @@ export const COPYING_BOOKS = [
   { id: 'dia-tang', title: 'Kinh Địa Tạng Bồ Tát Bổn Nguyện', count: 13, unit: 'phẩm' },
   { id: 'phap-hoa', title: 'Kinh Diệu Pháp Liên Hoa', count: 28, unit: 'phẩm' },
   { id: 'lang-nghiem', title: 'Kinh Thủ Lăng Nghiêm', count: 10, unit: 'quyển' },
+  { id: 'duoc-su', title: 'KINH DƯỢC SƯ', count: 1, unit: 'quyển' },
 ] as const;
 export type CopyBookId = typeof COPYING_BOOKS[number]['id'];
 export interface CopyBook { id: string; title: string; articleId: string; version: string; chapters: CopyChapter[]; layouts?: number[][][][] }

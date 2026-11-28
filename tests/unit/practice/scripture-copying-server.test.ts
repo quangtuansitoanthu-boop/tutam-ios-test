@@ -5,6 +5,8 @@ import { createCopyingService } from '../../../src/lib/server/services/scripture
 import book from '../../../src/lib/data/scripture-copying/dia-tang.json';
 import legacy from '../../../src/lib/data/scripture-copying/dia-tang-legacy.json';
 import lotus from '../../../src/lib/data/scripture-copying/phap-hoa.json';
+import duocSu from '../../../src/lib/data/scripture-copying/duoc-su.json';
+import { copySourceText } from '../../../src/lib/domain/practice/copying-formatting';
 import { normalizeCopyText } from '../../../src/lib/domain/practice/scripture-copying';
 
 function harness(owner: string | null = 'a') {
@@ -161,4 +163,54 @@ describe('authenticated explicit copying saves on real SQLite', () => {
   expect(await h.service.latest()).toMatchObject({ sutraId: legacy.id, chapter: 1, sourceVersion: legacy.version, texts: input.texts });
   await expect(h.service.save({ ...h.input, revision: 1, mutationId: crypto.randomUUID() })).rejects.toMatchObject({ status: 409 });
   expect(h.db.prepare('SELECT source_version, texts_json FROM scripture_copy_chapters').get()).toMatchObject({ source_version: legacy.version, texts_json: JSON.stringify(input.texts) });
+});
+
+it('round-trips a Medicine Buddha copy and uncertain retry on the existing schema without changing legacy rows', async () => {
+  const h = harness();
+  await h.service.save({ ...h.input, sourceVersion: legacy.version, texts: legacy.chapters[0].blocks });
+  const oldRows = h.db.prepare('SELECT * FROM scripture_copy_chapters WHERE sutra_id = ?').all(legacy.id);
+  const input = { ...h.input, sutraId: duocSu.id, sourceVersion: duocSu.version,
+    runId: '00000000-0000-4000-8000-000000000005', mutationId: '00000000-0000-4000-8000-000000000006',
+    texts: duocSu.chapters[0].blocks.map(source => copySourceText(source).normalize('NFD')) };
+  h.prepare.mockClear();
+  const ack = await h.service.save(input);
+  expect(ack).toMatchObject({ revision: 1, complete: true, completedBlocks: input.texts.length });
+  expect(h.prepare).toHaveBeenCalledTimes(1);
+  const committed = h.db.prepare('SELECT * FROM scripture_copy_chapters WHERE sutra_id = ?').all(duocSu.id);
+  expect(committed).toHaveLength(1);
+
+  h.prepare.mockClear();
+  expect(await h.service.read(duocSu.id, 1, input.runId)).toEqual({ runId: input.runId,
+    sourceVersion: duocSu.version, texts: input.texts, ...ack });
+  expect(h.prepare).toHaveBeenCalledTimes(1);
+  h.prepare.mockClear();
+  expect(await h.service.save(input)).toEqual(ack);
+  expect(h.prepare).toHaveBeenCalledTimes(2);
+  expect(h.db.prepare('SELECT * FROM scripture_copy_chapters WHERE sutra_id = ?').all(duocSu.id)).toEqual(committed);
+
+  h.prepare.mockClear();
+  expect(await h.service.list(duocSu.id, 1)).toEqual([{ runId: input.runId, sourceVersion: duocSu.version, ...ack }]);
+  expect(h.prepare).toHaveBeenCalledTimes(1);
+  const other = h.serviceFor('b');
+  expect(await other.read(duocSu.id, 1, input.runId)).toBeNull();
+  expect(await other.list(duocSu.id, 1)).toEqual([]);
+
+  h.prepare.mockClear();
+  await expect(h.service.save({ ...input, texts: [input.texts[0] + ' thay đổi', ...input.texts.slice(1)] }))
+    .rejects.toMatchObject({ status: 409, code: 'copy_conflict' });
+  expect(h.prepare).toHaveBeenCalledTimes(2);
+  expect(h.db.prepare('SELECT * FROM scripture_copy_chapters WHERE sutra_id = ?').all(duocSu.id)).toEqual(committed);
+  expect(h.db.prepare('SELECT * FROM scripture_copy_chapters WHERE sutra_id = ?').all(legacy.id)).toEqual(oldRows);
+});
+
+it('rejects Medicine Buddha version, chapter and identifier mismatches before issuing SQL', async () => {
+  const h = harness();
+  const input = { ...h.input, sutraId: duocSu.id, sourceVersion: duocSu.version,
+    texts: duocSu.chapters[0].blocks.map(() => '') };
+  for (const sourceVersion of ['', 'unknown', legacy.version]) {
+    await expect(h.service.save({ ...input, sourceVersion })).rejects.toMatchObject({ status: 409, code: 'copy_source_changed' });
+  }
+  await expect(h.service.save({ ...input, chapter: 2 })).rejects.toMatchObject({ status: 400, code: 'invalid_copy_chapter' });
+  await expect(h.service.save({ ...input, sutraId: duocSu.articleId })).rejects.toMatchObject({ status: 400, code: 'invalid_copy_chapter' });
+  expect(h.prepare).not.toHaveBeenCalled();
 });

@@ -1084,6 +1084,10 @@
     color:var(--on-gold,#24180c);
     box-shadow:inset 0 1.5px 0 rgba(255,255,255,.65),inset 0 -3px 0 rgba(90,56,8,.28),0 6px 16px -3px color-mix(in srgb,var(--gold) 44%,transparent);
   }
+  .tt-preview .tt-reader-practice-btn{
+    background:linear-gradient(145deg,var(--practice-coin-gold),var(--practice-coin-amber));
+    color:var(--highlight-ink);
+  }
   .tt-preview__toc{
     border-radius:var(--radius-card);
     border:1px solid color-mix(in srgb,var(--gold) 22%,rgba(255,255,255,.8));

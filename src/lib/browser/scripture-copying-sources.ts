@@ -8,6 +8,7 @@ export async function loadCopyBook(id: CopyBookId, version?: string): Promise<Co
     'dia-tang': () => import('$lib/data/scripture-copying/dia-tang.json'),
     'phap-hoa': () => import('$lib/data/scripture-copying/phap-hoa.json'),
     'lang-nghiem': () => import('$lib/data/scripture-copying/lang-nghiem.json'),
+    'duoc-su': () => import('$lib/data/scripture-copying/duoc-su.json'),
   };
   const book = id === 'dia-tang' && version === legacyDiaTangVersion
     ? (await import('$lib/data/scripture-copying/dia-tang-legacy.json')).default

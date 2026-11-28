@@ -34,7 +34,7 @@ test('Nguyện xin stays in one reference paragraph without changing the saved d
   const prayerText = 'Nguyện xin các vị gia hộ cho con:';
   const prayerBlock = book.chapters[0].blocks.findIndex((text: string) => text.includes(prayerText));
   expect(prayerBlock).toBeGreaterThanOrEqual(0);
-  await page.locator('#copy-block').selectOption(String(prayerBlock));
+  await selectPassage(page, prayerBlock);
   const prefix = book.chapters[0].blocks[prayerBlock].split(prayerText)[0];
   const typed = normalizeCopyText(prefix) + ' xin các vị gia hộ cho con:';
   await editorFor(page).pressSequentially(typed);
@@ -188,17 +188,53 @@ async function localText(page: Page, block = 0) {
   }), block);
 }
 
+async function localBlock(page: Page, chapter = 1) {
+  return page.evaluate(({ id, version, chapter }) => new Promise<number>((resolve, reject) => {
+    const request = indexedDB.open('tutam-scripture-copying-v1');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result, transaction = db.transaction('drafts');
+      const read = transaction.objectStore('drafts').get(`tt_copy_v1:guest:${id}:${version}:${chapter}`);
+      transaction.oncomplete = () => { resolve(read.result.block); db.close(); };
+      transaction.onerror = () => { reject(transaction.error); db.close(); };
+    };
+  }), { id: book.id, version: book.version, chapter });
+}
+
+async function selectPassage(page: Page, block: number) {
+  const options = page.locator('#copy-options');
+  const alreadyOpen = await options.isVisible();
+  const editor = editorFor(page);
+  const restoreFocus = await editor.evaluate(node => node === document.activeElement);
+  if (!alreadyOpen) await page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true }).click();
+  const select = options.locator('#mobile-copy-block');
+  await expect(select).toBeVisible();
+  await expect(select).toBeEnabled();
+  try {
+    await select.selectOption(String(block));
+    await expect(select).toHaveValue(String(block));
+    await expect(select.locator('option:checked')).toContainText(new RegExp(`^${block + 1}\\s*/`));
+  } finally {
+    if (!alreadyOpen) {
+      await options.getByRole('button', { name: 'Đóng tùy chọn', exact: true }).click();
+      await expect(options).toHaveCount(0);
+      if (restoreFocus) await editor.focus();
+    }
+  }
+  await expect.poll(() => localBlock(page)).toBe(block);
+}
+
 test('switching from a late passage to a shorter chapter never mixes old draft layout or throws 500', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await open(page);
-  await page.locator('#copy-block').selectOption({ value: '34' });
+  await selectPassage(page, 34);
   await editorFor(page).pressSequentially('Bản nháp đoạn cuối');
   await page.getByRole('button', { name: 'Đổi kinh hoặc phẩm', exact: true }).click();
   await page.locator('#copy-chapter').selectOption({ value: '2' });
   await beginScriptureCopying(page);
   await expect(editorFor(page)).toBeVisible();
-  await expect(page.locator('#copy-block')).toHaveValue('0');
+  await expect.poll(() => localBlock(page, 2)).toBe(0);
   await expect(page.locator('#copy-source-text')).not.toBeEmpty();
   await expect(page.getByText('Internal Error', { exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);

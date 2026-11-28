@@ -23,6 +23,7 @@
   import sourceLayouts from '$lib/data/scripture-copying/layouts.json';
   import { Check, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, PenLine, Settings, Save, Maximize, Minimize, ArrowDownUp, BookOpen, SlidersHorizontal, Volume2, Square, X } from '@lucide/svelte';
   import { copyingSentences, copyingCursorPosition, copyingSourceWordLines } from '$lib/domain/practice/copying-follow';
+  import { buildCopyReferenceSections, findCopyReferenceSection, projectCopyReferenceSection, annotateCopyReferenceProjection, copyReferenceSourceOffset, type CopyReferenceSection } from '$lib/domain/practice/copying-reference';
   import { createInterfaceTranslator } from '$lib/i18n/copying-interface';
   const localizeUi = createInterfaceTranslator();
   const locale = getLocaleContext();
@@ -172,7 +173,7 @@
   });
   function toggleSampleSpeech() {
     if (speechState === 'playing') sampleSpeech.pause();
-    else if (speechState !== 'loading') sampleSpeech.play();
+    else if (speechState !== 'loading') { referenceChoice = null; sampleSpeech.play(); }
   }
   async function openSpeechSettings() {
     sampleSpeech.pause();
@@ -1067,20 +1068,45 @@
   });
   const sourceSentences = $derived.by(() => {
     if (loading || !chapter || !draft || draft.sutraId !== selected || draft.chapter !== chapterNumber) return [];
-    const source = chapter.blocks[block], layout = book?.layouts?.[chapterNumber - 1]?.[block] ?? sourceLayouts[selected]?.[chapterNumber - 1]?.[block];
+    const source = chapter.blocks[block], layout = book?.layouts?.[chapterNumber - 1]?.[block] ?? sourceLayouts[selected as keyof typeof sourceLayouts]?.[chapterNumber - 1]?.[block];
     if (typeof source !== 'string') return [];
     return copyingSentences(chapter.blocks, block, layout ? copySourceLayoutLines(source, layout) : undefined);
   });
   const sourceWordLines = $derived(copyingSourceWordLines(sourceSentences));
-  const sourceSentenceGroups = $derived.by(() => {
-    const groups: { line: (typeof sourceSentences)[number]; index: number }[][] = [];
-    sourceSentences.forEach((line, index) => {
-      const last = groups[groups.length - 1];
-      if (last && last[0].line.paragraph === line.paragraph) last.push({ line, index });
-      else groups.push([{ line, index }]);
-    });
-    return groups;
+  const followText = $derived(caretPosition === null ? text : text.slice(0, caretPosition));
+  const currentPosition = $derived(copyingCursorPosition(sourceSentences, followText));
+  const currentSentence = $derived(currentPosition.sentence);
+  const currentWord = $derived(currentPosition.word);
+  const referenceActiveSource = $derived({
+    chapter: chapterNumber, block, sourceText: chapter ? copySourceText(chapter.blocks[block] ?? '') : '', sentences: sourceSentences,
   });
+  // Reference browsing never rewrites the existing draft or its internal blocks.
+  let referenceChoice = $state<{ scope: string; bookId: string; version: string; id: string } | null>(null);
+  const referenceSections = $derived(book ? buildCopyReferenceSections(book) : []);
+  const referenceSection = $derived(
+    referenceChoice?.scope === scope && referenceChoice.bookId === book?.id && referenceChoice.version === book?.version
+      ? referenceSections.find(item => item.id === referenceChoice?.id)
+      : findCopyReferenceSection(referenceSections, chapterNumber, block, undefined, copyReferenceSourceOffset(
+        referenceActiveSource, speechState === 'playing' && readingSentence !== null
+          ? { sentence: readingSentence, word: readingWord } : currentPosition
+      ))
+  );
+  const referenceIndex = $derived(Math.max(0, referenceSections.findIndex(item => item.id === referenceSection?.id)));
+  const referenceProjection = $derived(book && referenceSection
+    ? projectCopyReferenceSection(book, referenceSection, sourceLayouts[selected as keyof typeof sourceLayouts])
+    : { lines: [] });
+  const sourceSentenceGroups = $derived(annotateCopyReferenceProjection(referenceProjection, referenceActiveSource).lines);
+  function chooseReference(index: number) {
+    const item = referenceSections[index];
+    if (!book || !item || networkBusy || restarting) return;
+    sampleSpeech.stop();
+    referenceChoice = { scope, bookId: book.id, version: book.version, id: item.id };
+    if (sourceElement) sourceElement.scrollTop = 0;
+  }
+  function referenceIsComplete(item: CopyReferenceSection): boolean {
+    return Boolean(chapter && draft && draft.sutraId === selected && draft.chapter === item.chapter
+      && item.ranges.every(range => copyingTextCompletion(chapter!.blocks[range.block], draft!.texts[range.block] ?? '').accepted));
+  }
   const typedRuns = $derived.by(() => {
     let offset = 0;
     const start = editorPages[editorPage], end = editorPages[editorPage + 1] ?? text.length;
@@ -1106,10 +1132,6 @@
     const start = editorPages[editorPage], end = editorPages[editorPage + 1] ?? Infinity;
     return clipGhostRuns(alignedRuns, start, end);
   });
-  const followText = $derived(caretPosition === null ? text : text.slice(0, caretPosition));
-  const currentPosition = $derived(copyingCursorPosition(sourceSentences, followText));
-  const currentSentence = $derived(currentPosition.sentence);
-  const currentWord = $derived(currentPosition.word);
   $effect(() => {
     void sourceLayoutVersion;
     const word = currentWord;
@@ -1386,7 +1408,7 @@
         <section class="source-panel" aria-labelledby="copy-source-title">
           <div class="panel-heading source-heading">
             <h2 id="copy-source-title">{localizeUi('Kinh mẫu')}</h2>
-            <div class="block-nav"><button class="icon-button" type="button" aria-label={localizeUi('Đoạn trước')} disabled={block === 0} onclick={() => goBlock(block - 1)}><ChevronLeft size={20} aria-hidden="true" /></button><label for="copy-block">{localizeUi('Đoạn')}</label><select id="copy-block" value={block} onchange={e => goBlock(Number(e.currentTarget.value))}>{#each chapter.blocks as _, i}<option value={i}>{i + 1} / {chapter.blocks.length}{copyingTextCompletion(chapter.blocks[i], draft.texts[i] ?? '').accepted ? ' ✓' : ''}</option>{/each}</select><button class="icon-button" type="button" aria-label={localizeUi('Đoạn sau')} disabled={block === chapter.blocks.length - 1} onclick={() => goBlock(block + 1)}><ChevronRight size={20} aria-hidden="true" /></button></div>
+            <div class="block-nav"><button class="icon-button" type="button" aria-label={localizeUi('Đoạn trước')} disabled={referenceIndex === 0} onclick={() => chooseReference(referenceIndex - 1)}><ChevronLeft size={20} aria-hidden="true" /></button><label for="copy-block">{localizeUi('Đoạn')}</label><select id="copy-block" value={referenceIndex} title={referenceSection?.title} onchange={e => chooseReference(Number(e.currentTarget.value))}>{#each referenceSections as item, i (item.id)}<option value={i}>{i + 1} / {referenceSections.length} · {item.title}{referenceIsComplete(item) ? ' ✓' : ''}</option>{/each}</select><button class="icon-button" type="button" aria-label={localizeUi('Đoạn sau')} disabled={referenceIndex === referenceSections.length - 1} onclick={() => chooseReference(referenceIndex + 1)}><ChevronRight size={20} aria-hidden="true" /></button></div>
             <button class="icon-button source-tools-trigger" type="button" aria-label={localizeUi('Tùy chọn kinh mẫu')} aria-expanded={sourceToolsOpen} aria-controls="copy-source-tools" title={localizeUi('Tùy chọn kinh mẫu')} onclick={() => sourceToolsOpen = !sourceToolsOpen}><SlidersHorizontal size={18} aria-hidden="true" /></button>
           </div>
           <div class="source-tools" class:tools-open={sourceToolsOpen} id="copy-source-tools">
@@ -1398,7 +1420,7 @@
           {#if sourceVisible}
             <!-- svelte-ignore a11y_no_noninteractive_tabindex (The reference scroll area must be keyboard accessible.) -->
             <div id="copy-source-text" bind:this={sourceElement} class="source notranslate" translate="no" lang="vi" class:admin-copy={canPaste} role="document" tabindex="0" aria-label={localizeUi('Nội dung kinh mẫu')} style:font-size={sourceFontSize + 'px'} oncopy={disallow} oncut={disallow} oncontextmenu={disallow}>
-              {#each sourceSentenceGroups as group}<p class="source-paragraph" style:text-align={group[0].line.align}>{#each group as {index: sentenceIndex}}<span class="source-line" class:source-line--current={sentenceIndex === currentSentence} class:source-line--reading={speechState === 'playing' && sentenceIndex === readingSentence} data-copy-sentence={sentenceIndex} aria-current={sentenceIndex === currentSentence ? 'true' : undefined}>{#each sourceWordLines[sentenceIndex] as part}<span data-copy-word={part.word} class:source-guidance={part.italic} class:source-word--current={sentenceIndex === currentSentence && part.word === currentWord} class:source-word--reading={speechState === 'playing' && sentenceIndex === readingSentence && (readingWord === undefined || part.word === readingWord)}>{#if part.bold}<strong>{part.text}</strong>{:else}{part.text}{/if}</span>{/each}</span>{/each}</p>{/each}
+              {#each sourceSentenceGroups as group}<p class="source-paragraph" style:text-align={group.align}>{#each group.groups as run}<span class="source-line" class:source-line--current={run.sentence !== undefined && run.sentence === currentSentence} class:source-line--reading={run.sentence !== undefined && speechState === 'playing' && run.sentence === readingSentence} data-copy-sentence={run.sentence} aria-current={run.sentence !== undefined && run.sentence === currentSentence ? 'true' : undefined}>{#each run.parts as part}<span data-copy-word={part.word} class:source-guidance={part.italic} class:source-word--current={run.sentence !== undefined && run.sentence === currentSentence && part.word === currentWord} class:source-word--reading={run.sentence !== undefined && speechState === 'playing' && run.sentence === readingSentence && (readingWord === undefined || part.word === readingWord)}>{#if part.bold}<strong>{part.text}</strong>{:else}{part.text}{/if}</span>{/each}</span>{/each}</p>{/each}
             </div>
           {/if}
         </section>
@@ -1406,7 +1428,7 @@
           <div class="panel-heading editor-heading">
             <label id="copy-editor-title" for="copy-text">{localizeUi('Bản chép của bạn')}</label>
             <button class="editor-tools-trigger" type="button" aria-label={editorToolsLabel} aria-expanded={editorToolsOpen} aria-controls="copy-editor-tools" onclick={() => editorToolsOpen = !editorToolsOpen}>{#if editorToolsOpen}<ChevronUp size={16} aria-hidden="true" />{:else}<SlidersHorizontal size={16} aria-hidden="true" />{/if}<span>{editorToolsLabel}</span></button>
-            <button class="ghost-toggle-btn" type="button" disabled={composing} aria-pressed={ghostEnabled} title={localizeUi(ghostEnabled ? 'Đang bật chữ in mờ (vở chép kinh)' : 'Bật chữ in mờ để chép')} onclick={toggleGhostMode}>{localizeUi('Chữ mờ')}<span class="ghost-switch" aria-hidden="true"></span></button>
+            <button class="ghost-toggle-btn" type="button" disabled={composing} aria-pressed={ghostEnabled} onpointerdown={event => { if (editor?.hasFocus()) event.preventDefault(); }} title={localizeUi(ghostEnabled ? 'Đang bật chữ in mờ (vở chép kinh)' : 'Bật chữ in mờ để chép')} onclick={toggleGhostMode}>{localizeUi('Chữ mờ')}<span class="ghost-switch" aria-hidden="true"></span></button>
           </div>
           <div class="editor-tools" class:tools-open={editorToolsOpen} id="copy-editor-tools">
               <div class="compact-editor-display">
@@ -1656,7 +1678,7 @@
   /* Giấy vẫn sáng trong chế độ tối; chữ trên giấy dùng màu mực riêng. */
   .copy-writing .copy-note,.copy-writing .review-actions .muted,.copy-writing .review-actions strong{color:var(--copy-paper-ink)}
   .copy-writing .editor-tools>.icon-button{color:var(--text)}
-  .mobile-writing-options{display:none}
+  .mobile-writing-options{display:none}@media(min-width:701px){.mobile-writing-options{display:block}.mobile-writing-options>:not(label[for="mobile-copy-block"]):not(#mobile-copy-block){display:none}}
   .source-paragraph{margin:0 0 .15em;white-space:pre-line;text-align-last:auto}
   .source-paragraph[style*="justify"]{text-align-last:left}
   .source-paragraph .source-line{margin:0;white-space:normal}

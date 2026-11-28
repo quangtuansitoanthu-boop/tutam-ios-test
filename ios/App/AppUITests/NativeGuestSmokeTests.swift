@@ -3946,3 +3946,346 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
 //   OCR chính PNG mới bằng Vision; phải kiểm tra chữ ký PNG/nội dung, không chỉ đếm file/nhãn.
 // - Crash/force-kill cleanup cần fault injection riêng; deinit không được bảo đảm khi process chết.
 // - Chưa phủ deny TCC, AirDrop/extension, iCloud hay thiết bị thật; không đăng nhập dịch vụ để né.
+
+// QA riêng cho TOC tham chiếu; không thay 21 ca hoặc audit18 đang có.
+final class NativeCopyingReferenceTests: NativeGuestUITestCase {
+    private struct Fixture: Sendable {
+        let id: String
+        let book: String
+        let titles: [String]
+        let internalBlocks: Int
+        let input: String
+        let typed: String
+        let firstAnchor: String
+        let lastAnchor: String
+    }
+
+    private static let diaTang = Fixture(
+        id: "dia-tang", book: "Kinh Địa Tạng Bồ Tát Bổn Nguyện",
+        titles: [
+            "LỜI NGUYỆN TRƯỚC KHI TỤNG KINH",
+            "PHẨM 1: THẦN THÔNG TRÊN CUNG TRỜI ĐAO LỢI",
+            "PHẨM 2: PHÂN THÂN TẬP HỘI",
+            "PHẨM 3: QUÁN CHÚNG SINH NGHIỆP DUYÊN",
+            "PHẨM 4: NGHIỆP CẢM CỦA CHÚNG SINH",
+            "PHẨM 5: DANH HIỆU CỦA ĐỊA NGỤC",
+            "PHẨM 6: NHƯ LAI TÁN THÁN",
+            "PHẨM 7: LỢI ÍCH KẺ CÒN NGƯỜI MẤT",
+            "PHẨM 8: CÁC VUA DIÊM LA KHEN NGỢI",
+            "PHẨM 9: XƯNG DANH HIỆU CHƯ PHẬT",
+            "PHẨM 10: SO SÁNH NHƠN DUYÊN CÔNG ĐỨC CỦA SỰ BỐ THÍ",
+            "PHẨM 11: ĐỊA THẦN HỘ PHÁP",
+            "PHẨM 12: THẤY NGHE ĐƯỢC LỢI ÍCH",
+            "PHẨM 13: DẶN DÒ CỨU ĐỘ NHÂN THIÊN",
+            "PHÁT NGUYỆN & HỒI HƯỚNG"
+        ], internalBlocks: 42,
+        input: "TINH KHAU NGHIEP CHON NGON", typed: "TỊNH KHẨU NGHIỆP CHƠN NGÔN",
+        firstAnchor: "TỊNH KHẨU NGHIỆP CHƠN NGÔN", lastAnchor: "Liên Trì Hải Hội Phật")
+
+    private static let phapHoa = Fixture(
+        id: "phap-hoa", book: "Kinh Diệu Pháp Liên Hoa",
+        titles: [
+            "Phẩm 1: Phẩm Tựa",
+            "Phẩm 2:  Phẩm Phương Tiện",
+            "Phẩm 3: Phẩm Thí Dụ",
+            "Phẩm 4: Phẩm Tín Giải",
+            "Phẩm 5: Phẩm Dược Thảo Dụ",
+            "Phẩm 6: Phẩm Thọ Ký",
+            "Phẩm 7: Phẩm Hoá Thành Dụ",
+            "Phẩm 8: Phẩm Ngũ Bá Đệ Tử Thọ Ký",
+            "Phẩm 9: Phẩm Thọ Học Vô Học Nhân Ký",
+            "Phẩm 10: Phẩm Pháp Sư",
+            "Phẩm 11: Phẩn Hiện Bảo Tháp",
+            "Phẩm 12: Phẩm Đề Bà Đạt Đa",
+            "Phẩm 13: Phẩm Trì",
+            "Phẩm 14: Phẩm An Lạc Hạnh",
+            "Phẩm 15: Phẩm Tùng Địa Dũng Xuất",
+            "Phẩm 16: Phẩm Như Lai Thọ Lượng",
+            "Phẩm 17: Phẩm Phân Biệt",
+            "Phẩm 18: Phẩm Tuỳ Hỷ Công Đức",
+            "Phẩm 19: Phẩm Pháp Sư Công Đức",
+            "Phẩm 20: Phẩm Thường Bất Khinh Bồ Tát",
+            "Phẩm 21: Phẩm Như Lai Thần Lực",
+            "Phẩm 22: Phẩm Chúc Luỹ",
+            "Phẩm 23: Phẩm Dược Vương Bồ Tát Bổn Sự",
+            "Phẩm 24: Phẩm Diệu Âm Bồ Tát",
+            "Phẩm 25: Phẩm Quán Thế Âm Bồ Tát Phổ Môn",
+            "Phẩm 26: Phẩm Đà La Ni",
+            "Phẩm 27: Phẩm Diệu Trang Nghiêm Vương Bổn Sự",
+            "Phẩm 28: Phẩm Phổ Hiền Bồ Tát Khuyến Phát"
+        ], internalBlocks: 40,
+        input: "NGHI THUC SAM HOI TRUOC KHI TUNG KINH", typed: "NGHI THỨC SÁM HỐI TRƯỚC KHI TỤNG KINH",
+        firstAnchor: "NGHI THỨC SÁM HỐI TRƯỚC KHI TỤNG KINH", lastAnchor: "PHẨM \"PHỒ-HIỀN BỔ-TÁT KHUYẾN-PHÁT\"")
+
+    private static let langNghiem = Fixture(
+        id: "lang-nghiem", book: "Kinh Thủ Lăng Nghiêm",
+        titles: [
+            "Quyển 1",
+            "Quyển 2",
+            "Quyển 3",
+            "Quyển 4",
+            "Quyển 5",
+            "Quyển 6",
+            "Quyển 7",
+            "Quyển 8",
+            "Quyển 9",
+            "Quyển 10"
+        ], internalBlocks: 57,
+        input: "NGHI THUC SAM HOI TRUOC KHI TUNG KINH", typed: "NGHI THỨC SÁM HỐI TRƯỚC KHI TỤNG KINH",
+        firstAnchor: "NGHI THỨC SÁM HỐI TRƯỚC KHI TỤNG KINH", lastAnchor: "KINH THỦ-LĂNG-NGHIÊM QUYỂN MƯỜI")
+
+    private static let duocSu = Fixture(
+        id: "duoc-su", book: "KINH DƯỢC SƯ",
+        titles: [
+            "KINH DƯỢC SƯ"
+        ], internalBlocks: 28,
+        input: "KINH DUOC SU", typed: "KINH DƯỢC SƯ",
+        firstAnchor: "Đốt nén tâm hương trước Phật đài", lastAnchor: "Tự quy y Tăng")
+
+    @MainActor
+    func testCopyingDiaTangReferenceTOCAndTypedGhost() { verifyBook(Self.diaTang) }
+
+    @MainActor
+    func testCopyingPhapHoaReferenceTOCAndTypedGhost() { verifyBook(Self.phapHoa) }
+
+    @MainActor
+    func testCopyingLangNghiemReferenceTOCAndTypedGhost() { verifyBook(Self.langNghiem) }
+
+    @MainActor
+    func testCopyingDuocSuReferenceFormattingAndTypedGhost() { verifyBook(Self.duocSu) }
+
+    private func words(_ text: String) -> String {
+        text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+
+    @MainActor
+    private func unique(_ query: XCUIElementQuery, _ message: String, app: XCUIApplication) -> XCUIElement? {
+        let matches = query.allElementsBoundByIndex
+        guard matches.count == 1 else {
+            evidence("copying-ambiguous-" + message, app: app)
+            XCTFail("\(message): cần đúng một phần tử AX thực, nhận \(matches.count)")
+            return nil
+        }
+        return matches[0]
+    }
+
+    @MainActor
+    private func reference(_ app: XCUIApplication) -> XCUIElement? {
+        unique(app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Nội dung kinh mẫu")),
+               "reference-document", app: app)
+    }
+
+    @MainActor
+    private func option(_ index: Int, fixture: Fixture) -> String {
+        "\(index + 1) / \(fixture.titles.count) · \(words(fixture.titles[index]))"
+    }
+
+    @MainActor
+    private func referenceChoice(_ index: Int, fixture: Fixture, app: XCUIApplication) -> XCUIElement? {
+        // Other có value là role HTML select đã thấy ở AX native cũ; không đoán picker wheel.
+        unique(app.otherElements.matching(NSPredicate(format: "value == %@", option(index, fixture: fixture))),
+               fixture.id + "-reference-choice-\(index)", app: app)
+    }
+
+    @MainActor
+    private func snapshotTexts(_ snapshot: XCUIElementSnapshot) -> [String] {
+        if snapshot.elementType == .staticText { return [snapshot.label] }
+        return snapshot.children.flatMap { snapshotTexts($0) }
+    }
+
+    @MainActor
+    private func assertReference(_ anchor: String, app: XCUIApplication) {
+        guard let source = reference(app), let snapshot = try? source.snapshot() else {
+            XCTFail("Không đọc được snapshot kinh mẫu thực")
+            return
+        }
+        XCTAssertTrue(words(snapshotTexts(snapshot).joined(separator: " ")).contains(words(anchor)),
+                      "Mục tham chiếu được chọn phải chứa đúng nội dung riêng của mục đó")
+    }
+
+    @MainActor
+    private func assertTyped(_ expected: String, app: XCUIApplication) {
+        waitUntil("Bản chép phải giữ nguyên prefix thực sau thao tác TOC/ghost") {
+            guard let snapshot = try? app.snapshot() else { return false }
+            var pending = snapshot.children
+            var values: [String] = []
+            while let node = pending.popLast() {
+                if node.elementType == .textView && node.label == "Tự gõ bản chép của bạn" {
+                    guard let value = node.value as? String else { return false }
+                    values.append(self.words(value))
+                }
+                pending.append(contentsOf: node.children)
+            }
+            return values == [self.words(expected)]
+        }
+    }
+
+    @MainActor
+    private func inspectTOC(_ fixture: Fixture, app: XCUIApplication) {
+        guard let control = referenceChoice(0, fixture: fixture, app: app) else { return }
+        tap(control, app: app)
+        // NativeSelectPicker ưu tiên select.title: tên dialog là tên mục hiện tại, không phải "Đoạn".
+        let names = [fixture.titles[0] + ", hộp thoại web", fixture.titles[0] + ", web dialog"]
+        let query = app.otherElements.matching(NSPredicate(format: "label IN %@", names as NSArray))
+        waitUntil("TOC phải mở dialog đúng tên mục đang chọn") { query.count == 1 }
+        guard let dialog = unique(query, fixture.id + "-toc-dialog", app: app) else { return }
+        guard let snapshot = try? dialog.snapshot() else {
+            evidence("copying-" + fixture.id + "-toc-snapshot-failed", app: app)
+            XCTFail("Không đọc được snapshot option TOC thực")
+            return
+        }
+        evidence("copying-" + fixture.id + "-actual-toc", app: app)
+        var pending = snapshot.children
+        var labels: [String] = []
+        while let node = pending.popLast() {
+            // RosarySelect dùng aria-pressed; cùng picker đã được AX native xác minh là Switch.
+            if node.elementType == .switch { labels.append(node.label) }
+            pending.append(contentsOf: node.children)
+        }
+        let expected = fixture.titles.indices.map { option($0, fixture: fixture) }
+        XCTAssertEqual(labels.count, expected.count, "Đếm toàn bộ option thực, không đếm block nội bộ")
+        XCTAssertEqual(Set(labels), Set(expected), "Tên và số thứ tự TOC phải khớp bộ kinh đã chọn")
+        guard let close = unique(dialog.buttons.matching(NSPredicate(format: "label == %@", "Đóng bảng chọn")),
+                                 fixture.id + "-toc-close", app: app) else { return }
+        tap(close, app: app)
+        waitUntil("Đóng TOC phải trả tương tác về màn chép") { !dialog.exists }
+    }
+
+    @MainActor
+    private func verifyBook(_ fixture: Fixture) {
+        let app = launchGuest()
+        openNativeLink(URL(string: "vn.quangtu.tutam:///tu-tap/chep-kinh")!, app: app)
+        deferStartupNotificationPrompt(app, timeout: 7)
+        let buttons = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", fixture.book))
+        let switches = app.switches.matching(NSPredicate(format: "label CONTAINS %@", fixture.book))
+        waitUntil("Thẻ bộ kinh thực phải sẵn sàng", timeout: 45) {
+            (buttons.count == 1 && switches.count == 0 && buttons.element.isEnabled) ||
+            (switches.count == 1 && buttons.count == 0 && switches.element.isEnabled)
+        }
+        let choices = buttons.allElementsBoundByIndex + switches.allElementsBoundByIndex
+        guard choices.count == 1 else {
+            evidence("copying-" + fixture.id + "-ambiguous-book", app: app)
+            XCTFail("Cần đúng thẻ bộ kinh native đã xác minh nhãn")
+            return
+        }
+        let book = choices[0]
+        tap(book, app: app)
+        let begins = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Tôi đã đọc, tiếp tục chép"))
+        waitUntil("Hướng dẫn phải sẵn sàng để xác nhận", timeout: 30) { begins.count == 1 && begins.element.isEnabled }
+        guard let begin = unique(begins, fixture.id + "-guide-confirm", app: app) else { return }
+        tap(begin, app: app)
+        inspectTOC(fixture, app: app)
+        assertReference(fixture.firstAnchor, app: app)
+        if fixture.id == "duoc-su" { inspectDuocSuLines(app) }
+
+        guard let ghost = unique(app.switches.matching(NSPredicate(format: "label == %@", "Chữ mờ")),
+                                 fixture.id + "-ghost", app: app),
+              let editor = unique(app.textViews.matching(NSPredicate(format: "label == %@", "Tự gõ bản chép của bạn")),
+                                  fixture.id + "-editor", app: app) else { return }
+        XCTAssertEqual(ghost.value as? String, "0")
+        tap(ghost, app: app)
+        XCTAssertEqual(ghost.value as? String, "1")
+        tap(editor, app: app)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        editor.typeText(fixture.input)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(ghost.isEnabled)
+        tap(ghost, app: app)
+        XCTAssertEqual(ghost.value as? String, "0")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "Tắt chữ mờ khi đang gõ phải giữ bàn phím")
+        XCTAssertTrue(ghost.isEnabled)
+        tap(ghost, app: app)
+        XCTAssertTrue(ghost.isEnabled)
+        XCTAssertEqual(ghost.value as? String, "1")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "Bật lại chữ mờ khi đang gõ phải giữ bàn phím")
+        evidence("copying-" + fixture.id + "-ghost-keyboard", app: app)
+        let doneQuery = app.toolbars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray))
+        guard let done = unique(doneQuery, fixture.id + "-keyboard-done", app: app) else { return }
+        XCTAssertTrue(done.isHittable)
+        done.tap()
+        waitUntil("Done thực phải đóng bàn phím") { !app.keyboards.firstMatch.exists }
+        tap(ghost, app: app)
+        XCTAssertEqual(ghost.value as? String, "0")
+        assertTyped(fixture.typed, app: app)
+
+        guard let previous = unique(app.buttons.matching(NSPredicate(format: "label == %@", "Đoạn trước")),
+                                    fixture.id + "-previous", app: app),
+              let next = unique(app.buttons.matching(NSPredicate(format: "label == %@", "Đoạn sau")),
+                                fixture.id + "-next", app: app) else { return }
+        XCTAssertFalse(previous.isEnabled)
+        XCTAssertEqual(next.isEnabled, fixture.titles.count > 1)
+        for index in fixture.titles.indices.dropFirst() {
+            XCTAssertTrue(next.isEnabled)
+            tap(next, app: app)
+            let expected = option(index, fixture: fixture)
+            waitUntil("Đoạn sau phải đổi đúng mục tham chiếu \(expected)") {
+                app.otherElements.matching(NSPredicate(format: "value == %@", expected)).count == 1
+            }
+        }
+        XCTAssertFalse(next.isEnabled)
+        assertReference(fixture.lastAnchor, app: app)
+        assertTyped(fixture.typed, app: app)
+        evidence("copying-" + fixture.id + "-last-reference-prefix-retained", app: app)
+        for index in fixture.titles.indices.dropLast().reversed() {
+            XCTAssertTrue(previous.isEnabled)
+            tap(previous, app: app)
+            let expected = option(index, fixture: fixture)
+            waitUntil("Đoạn trước phải trở lại đúng mục \(expected)") {
+                app.otherElements.matching(NSPredicate(format: "value == %@", expected)).count == 1
+            }
+        }
+        XCTAssertFalse(previous.isEnabled)
+        assertReference(fixture.firstAnchor, app: app)
+        assertTyped(fixture.typed, app: app)
+        guard let options = unique(app.buttons.matching(NSPredicate(format: "label == %@", "Tùy chọn và bản đã lưu")),
+                                   fixture.id + "-options", app: app) else { return }
+        tap(options, app: app)
+        let internalChoice = app.otherElements.matching(NSPredicate(format: "label == %@ AND value == %@", "Đoạn", "1 / \(fixture.internalBlocks)"))
+        waitUntil("TOC không được đổi block nội bộ đang chép") { internalChoice.count == 1 }
+        guard let close = unique(app.buttons.matching(NSPredicate(format: "label == %@", "Đóng tùy chọn")),
+                                 fixture.id + "-options-close", app: app) else { return }
+        tap(close, app: app)
+        assertTyped(fixture.typed, app: app)
+        evidence("copying-" + fixture.id + "-first-reference-final", app: app)
+    }
+
+    @MainActor
+    private func textTokens(_ snapshot: XCUIElementSnapshot) -> [(String, CGRect)] {
+        if snapshot.elementType == .staticText {
+            return snapshot.label.components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }.map { ($0, snapshot.frame) }
+        }
+        return snapshot.children.flatMap { textTokens($0) }
+    }
+
+    @MainActor
+    private func inspectDuocSuLines(_ app: XCUIApplication) {
+        guard let source = reference(app), let snapshot = try? source.snapshot() else {
+            XCTFail("Không đọc được kinh Dược Sư đã format")
+            return
+        }
+        let tokens = textTokens(snapshot)
+        let title = ["KINH", "DƯỢC", "SƯ"]
+        XCTAssertEqual(Array(tokens.prefix(3)).map { $0.0 }, title)
+        let verse = ["Đốt", "nén", "tâm", "hương", "trước", "Phật", "đài"]
+        let leading = Array(tokens.prefix(64))
+        let matches = leading.indices.filter { $0 + verse.count <= leading.count &&
+            Array(leading[$0..<($0 + verse.count)]).map { $0.0 } == verse }
+        guard tokens.count >= 3, matches.count == 1 else {
+            evidence("copying-duoc-su-unknown-line-AX", app: app)
+            XCTFail("Cần đúng dòng mở đầu Dược Sư trong AX nguồn trước khi đo bố cục")
+            return
+        }
+        let titleFrame = tokens.prefix(3).reduce(CGRect.null) { $0.union($1.1) }
+        let verseFrame = leading[matches[0]..<(matches[0] + verse.count)].reduce(CGRect.null) { $0.union($1.1) }
+        XCTAssertTrue(snapshot.frame.contains(titleFrame) && snapshot.frame.contains(verseFrame))
+        XCTAssertLessThan(titleFrame.maxY, verseFrame.minY, "Tiêu đề và câu kệ phải thành các dòng riêng")
+        XCTAssertEqual(titleFrame.midX, snapshot.frame.midX, accuracy: snapshot.frame.width * 0.08)
+        XCTAssertEqual(verseFrame.midX, snapshot.frame.midX, accuracy: snapshot.frame.width * 0.08)
+        let geometry = XCTAttachment(string: "source=\(snapshot.frame)\ntitle=\(titleFrame)\nverse=\(verseFrame)\nAX chỉ đo dòng/căn giữa; không suy font, bold hoặc italic.")
+        geometry.name = "copying-duoc-su-native-line-geometry"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        evidence("copying-duoc-su-formatted-lines", app: app)
+    }
+}

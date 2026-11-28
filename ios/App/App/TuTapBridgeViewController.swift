@@ -96,6 +96,47 @@ fileprivate struct TuTapQAImageExportEvent: Encodable, Sendable {
     let errorCode: Int
 }
 
+fileprivate enum TuTapQAImageSharePhase: String, Encodable, Sendable {
+    case begin, fileReady, writeFailed, presenterUnavailable, willPresent, presentCompletion
+    case completion, cleanup, cleanupComplete
+}
+
+fileprivate struct TuTapQAImageShareFileFacts: Encodable, Sendable {
+    let exists: Bool
+    let bytes: Int
+    let readable: Bool
+    let imageDecoded: Bool
+    let pixelWidth: Int
+    let pixelHeight: Int
+}
+
+fileprivate struct TuTapQAImageShareEvent: Encodable, Sendable {
+    let type = "native-image-share"
+    let phase: TuTapQAImageSharePhase
+    let operationId: String
+    let pid: Int
+    let uptime: TimeInterval
+    let mainThread: Bool
+    let fileFacts: TuTapQAImageShareFileFacts?
+    let presenterProvided: Bool
+    let presenterClass: String
+    let presenterBeingPresented: Bool
+    let presenterBeingDismissed: Bool
+    let presenterHasPresentedController: Bool
+    let presenterHasWindow: Bool
+    let controllerProvided: Bool
+    let controllerIsCurrent: Bool
+    let controllerBeingPresented: Bool
+    let controllerBeingDismissed: Bool
+    let controllerHasPresenter: Bool
+    let controllerHasWindow: Bool
+    let appState: Int
+    let sceneActivation: Int
+    let completed: Bool?
+    let cleanupDirectoryExists: Bool?
+    let operationErrorDomain: String
+    let operationErrorCode: Int
+}
 private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
     private let eventsQueue = DispatchQueue(label: "vn.quangtu.tutam.qa-events", qos: .utility)
 
@@ -182,6 +223,17 @@ private final class TuTapQAEventsHandler: NSObject, WKScriptMessageHandler {
         }
     }
 
+    func recordImageShare(_ event: TuTapQAImageShareEvent) {
+        guard ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") else { return }
+        eventsQueue.async {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            guard let data = try? encoder.encode(event),
+                  let serialized = String(data: data, encoding: .utf8) else { return }
+            NSLog("[TutamQA] %@", serialized)
+            self.appendEvent(serialized)
+        }
+    }
     func recordNativeLifecycle(_ event: TuTapQANativeLifecycleEvent) {
         guard ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") else { return }
         eventsQueue.async {
@@ -523,6 +575,10 @@ class TuTapBridgeViewController: CAPBridgeViewController {
         qaEventsHandlerIfRequested()?.recordImageExport(event)
     }
 
+    fileprivate func recordImageShareDiagnostic(_ event: TuTapQAImageShareEvent) {
+        qaEventsHandlerIfRequested()?.recordImageShare(event)
+    }
+
     private func recordNativeLifecycle(_ phase: TuTapQANativeLifecyclePhase) {
         guard let handler = qaEventsHandler else { return }
         let process = ProcessInfo.processInfo
@@ -740,6 +796,8 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
 #if DEBUG
     private var qaExportOperationId = "none"
     private var qaExportFile: URL?
+    private var qaShareOperationId = "none"
+    private var qaShareEventCount = 0
 
     private func recordQAExport(_ phase: TuTapQAImageExportPhase, presenter: UIViewController? = nil,
                                 file: URL? = nil, error: Error? = nil) {
@@ -772,6 +830,47 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
             pickerHasPresenter: onMain ? (picker?.presentingViewController != nil) : false,
             domain: domain, errorCode: (-999999...999999).contains(code) ? code : 0)
         (bridge?.viewController as? TuTapBridgeViewController)?.recordImageExportDiagnostic(event)
+    }
+
+    // Read and decode only on the existing export queue; do not retain the UIImage.
+    private static func readQAShareFileFacts(_ file: URL) -> TuTapQAImageShareFileFacts {
+        let manager = FileManager.default
+        let attributes = try? manager.attributesOfItem(atPath: file.path)
+        let decoded = autoreleasepool { () -> (Bool, Int, Int) in
+            guard let image = UIImage(contentsOfFile: file.path), let pixels = image.cgImage else { return (false, 0, 0) }
+            return (true, pixels.width, pixels.height)
+        }
+        return TuTapQAImageShareFileFacts(exists: manager.fileExists(atPath: file.path),
+            bytes: (attributes?[.size] as? NSNumber)?.intValue ?? -1,
+            readable: manager.isReadableFile(atPath: file.path), imageDecoded: decoded.0,
+            pixelWidth: decoded.1, pixelHeight: decoded.2)
+    }
+
+    private func recordQAShare(_ phase: TuTapQAImageSharePhase, presenter: UIViewController? = nil,
+                               controller: UIActivityViewController? = nil, fileFacts: TuTapQAImageShareFileFacts? = nil,
+                               completed: Bool? = nil, cleanupDirectoryExists: Bool? = nil, error: Error? = nil) {
+        guard Thread.isMainThread, ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") else { return }
+        if phase == .begin { qaShareOperationId = UUID().uuidString; qaShareEventCount = 0 }
+        guard qaShareEventCount < 8 else { return }
+        qaShareEventCount += 1
+        let nativeError = error as NSError?
+        let domains = ["NSCocoaErrorDomain", "NSPOSIXErrorDomain", "NSURLErrorDomain"]
+        let domain = nativeError.map { domains.contains($0.domain) ? $0.domain : "other" } ?? "none"
+        let code = nativeError?.code ?? 0
+        let window = presenter?.viewIfLoaded?.window ?? controller?.viewIfLoaded?.window ?? bridge?.viewController?.viewIfLoaded?.window
+        let event = TuTapQAImageShareEvent(phase: phase, operationId: qaShareOperationId,
+            pid: Int(ProcessInfo.processInfo.processIdentifier), uptime: ProcessInfo.processInfo.systemUptime, mainThread: true,
+            fileFacts: fileFacts, presenterProvided: presenter != nil,
+            presenterClass: presenter.map { NSStringFromClass(type(of: $0)) } ?? "none",
+            presenterBeingPresented: presenter?.isBeingPresented ?? false, presenterBeingDismissed: presenter?.isBeingDismissed ?? false,
+            presenterHasPresentedController: presenter?.presentedViewController != nil, presenterHasWindow: presenter?.viewIfLoaded?.window != nil,
+            controllerProvided: controller != nil, controllerIsCurrent: controller.map { shareController === $0 } ?? false,
+            controllerBeingPresented: controller?.isBeingPresented ?? false, controllerBeingDismissed: controller?.isBeingDismissed ?? false,
+            controllerHasPresenter: controller?.presentingViewController != nil, controllerHasWindow: controller?.viewIfLoaded?.window != nil,
+            appState: UIApplication.shared.applicationState.rawValue, sceneActivation: window?.windowScene?.activationState.rawValue ?? -2,
+            completed: completed, cleanupDirectoryExists: cleanupDirectoryExists,
+            operationErrorDomain: domain, operationErrorCode: (-999999...999999).contains(code) ? code : 0)
+        (bridge?.viewController as? TuTapBridgeViewController)?.recordImageShareDiagnostic(event)
     }
 #endif
 
@@ -934,6 +1033,9 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                 return
             }
             self.shareCall = call
+#if DEBUG
+            self.recordQAShare(.begin, presenter: presenter)
+#endif
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tu-tap-share-" + UUID().uuidString, isDirectory: true)
             self.shareDirectory = directory
             let file = directory.appendingPathComponent(name)
@@ -945,19 +1047,32 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                     try? FileManager.default.removeItem(at: directory)
                     DispatchQueue.main.async { [weak self] in
                         guard let self = self, self.shareCall === call else { return }
+#if DEBUG
+                        self.recordQAShare(.writeFailed, error: error)
+#endif
                         self.finishShare(shared: nil, error: error)
                     }
                     return
                 }
+#if DEBUG
+                let qaShareFileFacts: TuTapQAImageShareFileFacts? = ProcessInfo.processInfo.arguments.contains("-tutam-qa-events")
+                    ? Self.readQAShareFileFacts(file) : nil
+#endif
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self, self.shareCall === call else {
                         try? FileManager.default.removeItem(at: directory)
                         return
                     }
+#if DEBUG
+                    self.recordQAShare(.fileReady, fileFacts: qaShareFileFacts)
+#endif
                     guard let presenter = self.findTopViewController(from: self.bridge?.viewController),
                           presenter.viewIfLoaded?.window != nil,
                           !presenter.isBeingDismissed,
                           UIApplication.shared.applicationState != .background else {
+#if DEBUG
+                        self.recordQAShare(.presenterUnavailable)
+#endif
                         self.finishShare(shared: nil)
                         return
                     }
@@ -970,14 +1085,24 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
                         popover.permittedArrowDirections = []
                     }
                     self.shareController = controller
+#if DEBUG
+                    self.recordQAShare(.willPresent, presenter: presenter, controller: controller)
+#endif
                     controller.completionWithItemsHandler = { [weak self] _, completed, _, error in
                         DispatchQueue.main.async { [weak self] in
                             guard let self = self, self.shareCall === call else { return }
+#if DEBUG
+                            self.recordQAShare(.completion, presenter: self.shareController?.presentingViewController,
+                                               controller: self.shareController, completed: completed, error: error)
+#endif
                             self.finishShare(shared: completed, error: error)
                         }
                     }
                     presenter.present(controller, animated: true) { [weak self, weak controller] in
                         guard let self = self, let controller = controller, self.shareController === controller else { return }
+#if DEBUG
+                        self.recordQAShare(.presentCompletion, presenter: controller.presentingViewController, controller: controller)
+#endif
                         guard controller.presentingViewController != nil else {
                             self.finishShare(shared: nil)
                             return
@@ -989,6 +1114,11 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
     }
 
     private func finishShare(shared: Bool?, error: Error? = nil) {
+#if DEBUG
+        self.recordQAShare(.cleanup, presenter: shareController?.presentingViewController,
+                           controller: shareController, completed: shared, error: error)
+        let qaShareDirectory = shareDirectory
+#endif
         let call = shareCall
         shareCall = nil
         shareController?.completionWithItemsHandler = nil
@@ -996,6 +1126,10 @@ public class ImageExportPlugin: CAPPlugin, CAPBridgedPlugin, UIDocumentPickerDel
         shareController = nil
         if let directory = shareDirectory { try? FileManager.default.removeItem(at: directory) }
         shareDirectory = nil
+#if DEBUG
+        self.recordQAShare(.cleanupComplete,
+                           cleanupDirectoryExists: qaShareDirectory.map { FileManager.default.fileExists(atPath: $0.path) }, error: error)
+#endif
         if let error = error { call?.reject("Cannot share PNG image", "SHARE_FAILED", error) }
         else if let shared = shared { call?.resolve(["shared": shared]) }
         else { call?.reject("Cannot open share sheet", "SHARE_FAILED") }
