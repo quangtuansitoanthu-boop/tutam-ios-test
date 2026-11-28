@@ -1,0 +1,1 @@
+import{o as e,s as t}from"./DcIBqZnJ.js";import"./DuNB5WrU.js";import{t as n}from"./CoXXVBWt.js";var r=new Set([`$$slots`,`$$events`,`$$legacy`]);function i(i,a){let o=e(a,r),s=[[`rect`,{width:`14`,height:`20`,x:`5`,y:`2`,rx:`2`,ry:`2`}],[`path`,{d:`M12 18h.01`}]];n(i,t({name:`smartphone`},()=>o,{get iconNode(){return s}}))}export{i as t};

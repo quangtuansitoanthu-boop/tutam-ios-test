@@ -4183,10 +4183,14 @@ final class NativeCopyingReferenceTests: NativeGuestUITestCase {
 
     @MainActor
     private func openTOC(_ fixture: Fixture, current: Int, app: XCUIApplication) -> (dialog: XCUIElement, snapshot: XCUIElementSnapshot, rows: [TOCRow], header: CGRect)? {
-        let trigger = app.webViews.firstMatch.buttons.matching(NSPredicate(format: "label == %@", "Mục lục"))
+        // Use the same app-root scope as the Extended test after the guide-to-writing transition.
+        let trigger = app.buttons.matching(NSPredicate(format: "label == %@", "Mục lục"))
+        waitUntil("Nút Mục lục phải sẵn sàng sau khi mở màn chép", timeout: 20) {
+            trigger.count == 1 && trigger.element.isEnabled
+        }
         guard trigger.count == 1 else { XCTFail("Phải có đúng một nút Mục lục"); return nil }
         tapVisible(trigger.element, app: app)
-        let candidates = app.webViews.firstMatch.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Mục lục kinh mẫu"))
+        let candidates = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Mục lục kinh mẫu"))
         waitUntil("Nút Mục lục phải mở vùng TOC HTML của kinh mẫu") { candidates.count > 0 }
         let viewport = app.frame
         var dialogs: [(dialog: XCUIElement, snapshot: XCUIElementSnapshot, rows: [TOCRow], header: CGRect)] = []

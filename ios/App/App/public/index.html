@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#FAF1E4" />
+    <script data-url-fragment-guard>
+      (function() {
+        function normalizeFragment() {
+          try { decodeURIComponent(location.hash); }
+          catch (_) { history.replaceState(history.state, '', location.pathname + location.search); }
+        }
+        // Run before the router decodes the initial URL or a history change.
+        normalizeFragment();
+        window.addEventListener('hashchange', normalizeFragment);
+        window.addEventListener('popstate', normalizeFragment);
+      })();
+    </script>
+    <link rel="icon" sizes="48x48" href="/assets/branding/temple-favicon.png" />
+    <script data-app-bootstrap>
+      (function() {
+        var isNativePlatform = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+        if (isNativePlatform) {
+          var viewport = document.querySelector('meta[name="viewport"]');
+          viewport.setAttribute('content', viewport.getAttribute('content') + ', minimum-scale=1, maximum-scale=1, user-scalable=no');
+        }
+        if (isNativePlatform ||
+            (location.protocol === 'https:' && location.hostname === 'localhost')) {
+          document.documentElement.setAttribute('data-native-app', 'true');
+          if (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'android' &&
+              window.Capacitor.isPluginAvailable && window.Capacitor.isPluginAvailable('AppSystemBars')) {
+            document.documentElement.setAttribute('data-native-insets', 'true');
+          }
+          if (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'android' &&
+              window.Capacitor.isPluginAvailable && window.Capacitor.isPluginAvailable('StartupScreen')) {
+            document.documentElement.setAttribute('data-native-startup', 'true');
+          }
+        }
+        try {
+          var savedUiFontScale = localStorage.getItem('tutam_ui_font_scale');
+          var uiFontScale = Number(savedUiFontScale && savedUiFontScale.trim() ? savedUiFontScale : '1');
+          if (!Number.isFinite(uiFontScale)) uiFontScale = 1;
+          uiFontScale = Math.round(Math.min(1.2, Math.max(0.8, uiFontScale)) * 10) / 10;
+          document.documentElement.style.setProperty('--ui-font-scale', String(uiFontScale));
+        } catch (e) {}
+        try {
+          var mode = localStorage.getItem('tutam_dark_mode');
+          var savedPalette = localStorage.getItem('tutam_app_light_palette');
+          if (savedPalette === null) {
+            savedPalette = [localStorage.getItem('tutam_read_bg'), localStorage.getItem('tt_bg'), localStorage.getItem('tt_practice_bg')]
+              .filter(function(value) { return ['white', 'cream', 'gray', 'purple'].indexOf(value) >= 0; })[0];
+          }
+          var palette = ['white', 'cream', 'gray', 'purple'].indexOf(savedPalette) >= 0 ? savedPalette : 'white';
+          var isDark = mode === '1' || (mode !== '0' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-app-palette', isDark ? 'dark' : mode === '0' ? palette : 'cream');
+          document.documentElement.style.backgroundColor = 'var(--bg)';
+          if (isDark) {
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute('content', '#15120d');
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script data-web-reading-fonts>
+      (function() {
+        // Capacitor injects at document start; the bootstrap above also marks its local origin.
+        if (document.documentElement.getAttribute('data-native-app') === 'true' ||
+            (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
+            (location.protocol === 'capacitor:' && location.hostname === 'localhost')) return;
+        var api = document.createElement('link');
+        api.rel = 'preconnect';
+        api.href = 'https://fonts.googleapis.com';
+        document.head.appendChild(api);
+        var files = document.createElement('link');
+        files.rel = 'preconnect';
+        files.href = 'https://fonts.gstatic.com';
+        files.crossOrigin = 'anonymous';
+        document.head.appendChild(files);
+        var sheet = document.createElement('link');
+        sheet.rel = 'stylesheet';
+        sheet.href = 'https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap';
+        sheet.media = 'print';
+        sheet.onload = function() { sheet.media = 'all'; };
+        document.head.appendChild(sheet);
+      })();
+    </script>
+    <style>
+      :root[data-theme='dark'], html[data-theme='dark'], html[data-theme='dark'] body {
+        background-color: #15120d !important;
+        color: #e6dfd5;
+      }
+      :root, html, body {
+        background-color: var(--bg, #fff);
+        margin: 0;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+      }
+    </style>
+    <style>
+      #app-startup { display: none; }
+      html[data-native-app='true'] #app-startup {
+        position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+        overflow: hidden; background: #f6efe0; opacity: 1; transition: opacity 220ms ease-out;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      #app-startup .startup-blur {
+        display: none; position: absolute; inset: -24px; width: calc(100% + 48px); height: calc(100% + 48px);
+        object-fit: cover; filter: blur(26px) saturate(1.06); opacity: 0.92; pointer-events: none;
+      }
+      #app-startup .startup-bg, #app-startup .startup-title {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: cover; object-position: center center; pointer-events: none;
+      }
+      #app-startup .startup-scrim {
+        position: absolute; left: 0; right: 0; bottom: 0;
+        height: calc(96px + env(safe-area-inset-bottom, 0px));
+        background: linear-gradient(180deg, rgba(24, 17, 10, 0) 0%, rgba(24, 17, 10, 0.28) 45%, rgba(24, 17, 10, 0.58) 100%);
+        pointer-events: none;
+      }
+      #app-startup .startup-loading {
+        position: relative; display: inline-flex; align-items: center; gap: 8px;
+        margin: 0 18px calc(22px + env(safe-area-inset-bottom, 0px));
+        font-size: 12.5px; font-weight: 600; color: #fff8ea; letter-spacing: 0.02em;
+        text-shadow: 0 1px 6px rgba(18, 11, 4, 0.65); pointer-events: none;
+      }
+      #app-startup .startup-spinner {
+        width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box;
+        border: 2px solid rgba(255, 245, 222, 0.30); border-top-color: #f5ce7a; border-right-color: #e3b14e;
+        box-shadow: 0 1px 4px rgba(18, 11, 4, 0.35);
+        animation: startup-spin 0.9s linear infinite;
+      }
+      html[data-native-app='true'] #app-startup.startup-ready { opacity: 0; pointer-events: none; }
+      @keyframes startup-spin { to { transform: rotate(360deg); } }
+      @media (min-aspect-ratio: 3/5), (max-aspect-ratio: 9/20) {
+        #app-startup .startup-blur { display: block; }
+        #app-startup .startup-bg, #app-startup .startup-title { object-fit: contain; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #app-startup .startup-spinner { animation: none; }
+        html[data-native-app='true'] #app-startup { transition: none; }
+      }
+    </style>
+    <style>
+      html[data-native-startup='true'] #app-startup { display: none; }
+    </style>
+    <link href="/_app/immutable/entry/start.ENRjXZxL.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BLqVpAk9.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CZ7x856Z.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Dcv5g5a1.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DcIBqZnJ.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/KrtS262k.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Bp_gRmrK.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CeF-a_YF.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.CpzyNZmM.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/ep3M1nHW.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DuNB5WrU.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/sfkHXit-.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BdSt3PVO.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CCcHNG-d.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/ClojhSpx.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Zt5bV9_f.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/C82YZAUe.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Cvk7IR7R.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BMlFbYbr.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/C-I7to_K.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/0.Dmqu87hv.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/vuMJQPvm.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Hi3Ugkz5.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/MVIm3O6a.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BH6-GoX_.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DoNuCsvy.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CoXXVBWt.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DevkknqU2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Cz0PXRwf.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/ljK1Trg3.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/sGAu8tTD.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/rVQyLBka.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D2xA2mWb.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CKgeLfL5.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Cgt0gngI.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/p4QAuDXi.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/aO5MbDgl2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Du7jZQOb.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/lTWB3BmR.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/B0c04Hvz.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/r-ixnGNA.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Lo7jg7oX.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CyV0HF_2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/2fogUCUw.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BDzxzZJP.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CINkW0UH.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CNe8wft0.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CSoFYg_G.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D4ndo8Uv.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BLSxRFaS.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CAQBNHF-.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Cm0smeMO.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DEtQKItm.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DxlZupOt.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D0FHl9TP.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CZtiF-kA2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/VtsTbLNd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/P5xpUxYb.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Bsi2uY9B2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/590PMpxn2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DRLswh_j.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/ByscsLr9.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BEq40Hc2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/C4qaq-q9.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CIDPasV7.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DlUCSvs9.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/B7XjHFyi.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DdsE1jpi.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BUaO6xc8.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CdteWRmm.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Bzo0wVDN.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CyTnAYRF.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/C9UJiyo4.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CVfVyCj4.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/z0anAucn2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Boo8Su_w.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/jx6o8msI2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CYGXzFVY.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DCArG4im.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/sQC8moxi.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/HBSzYY-P.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/lHLrpEoG.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CzHp2cqP.js" rel="modulepreload">
+		
+		<link href="/_app/immutable/assets/AppArtwork.AH6iPkhE.css" rel="stylesheet">
+		<link href="/_app/immutable/assets/NotificationBell.C4R1RYXU.css" rel="stylesheet">
+		<link href="/_app/immutable/assets/RosarySelect.D8yeCwET.css" rel="stylesheet">
+		<link href="/_app/immutable/assets/0.S0VoFE9T.css" rel="stylesheet">
+		<link href="/_app/immutable/assets/PhapBaoModal.Ct-HpYOa.css" rel="stylesheet">
+    <script>
+      // CSS đã nạp: lấy đúng token nền trước khi body được vẽ, không sao chép bảng màu.
+      try {
+        var appBackground = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+        var appThemeMeta = document.querySelector('meta[name="theme-color"]');
+        if (appBackground && appThemeMeta) appThemeMeta.setAttribute('content', appBackground);
+      } catch (e) {}
+    </script>
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div id="app-startup" role="status">
+      <img class="startup-blur" data-startup-blur alt="" aria-hidden="true" />
+      <img class="startup-bg" data-startup-bg alt="" />
+      <img class="startup-title" data-startup-title alt="" />
+      <div class="startup-scrim" aria-hidden="true"></div>
+      <div class="startup-loading">
+        <span class="startup-spinner" aria-hidden="true"></span>
+        <span data-startup-loading></span>
+      </div>
+    </div>
+    <script data-startup-artwork>
+      if (document.documentElement.dataset.nativeStartup === 'true') {
+        document.getElementById('app-startup').remove();
+      } else if (document.documentElement.dataset.nativeApp === 'true') {
+        var indexKey = 'tutam_startup_background_index';
+        var launchIndex;
+        try { launchIndex = sessionStorage.getItem(indexKey); } catch (e) {}
+        var backgroundIndex = 0;
+        if (/^[0-9]$/.test(launchIndex)) {
+          backgroundIndex = Number(launchIndex);
+        } else {
+          try {
+            var previous = localStorage.getItem(indexKey);
+            if (/^[0-9]$/.test(previous)) backgroundIndex = (Number(previous) + 1) % 10;
+            localStorage.setItem(indexKey, String(backgroundIndex));
+          } catch (e) {}
+          try { sessionStorage.setItem(indexKey, String(backgroundIndex)); } catch (e) {}
+        }
+        var startupSrc = '/images/calendar/cu-si/' + String(backgroundIndex + 1).padStart(2, '0') + '.webp';
+        document.querySelector('[data-startup-blur]').src = startupSrc;
+        var painting = document.querySelector('[data-startup-bg]');
+        var title = document.querySelector('[data-startup-title]');
+        painting.src = startupSrc;
+        var startupLocale = 'vi';
+        try { if (localStorage.getItem('tutam_locale') === 'en') startupLocale = 'en'; } catch (e) {}
+        var englishStartup = startupLocale === 'en';
+        title.src = englishStartup ? '/images/calendar/cu-si-title-en.webp' : '/images/calendar/cu-si-title.webp';
+        document.querySelector('[data-startup-loading]').textContent = englishStartup ? 'Loading app...' : 'Đang tải ứng dụng...';
+        var cover = document.getElementById('app-startup');
+        cover.lang = startupLocale;
+        cover.setAttribute('aria-label', englishStartup ? 'Buddhist Practice App. For lay practitioners.' : 'Ứng dụng Tu tập Phật pháp. Dành cho cư sĩ tại gia.');
+        cover.artworkPainted = Promise.all([painting, title].map(function (image) {
+          if (image.decode) return image.decode().catch(function () {});
+          if (!image.complete) return new Promise(function (resolve) { image.onload = image.onerror = resolve; });
+        })).then(function () {
+          return new Promise(function (resolve) {
+            requestAnimationFrame(function () {
+              var shownAt = performance.now();
+              cover.dataset.shownAt = String(shownAt);
+              resolve(shownAt);
+            });
+          });
+        });
+      }
+      // A recoverable startup error must never leave a permanent cover over the app.
+      window.setTimeout(function() { var screen = document.getElementById('app-startup'); if (screen) screen.remove(); }, 30000);
+    </script>
+    <div style="display: contents">
+			<script>
+				{
+					__sveltekit_1bpkrjy = {
+						base: ""
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/_app/immutable/entry/start.ENRjXZxL.js"),
+						import("/_app/immutable/entry/app.CpzyNZmM.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div>
+  </body>
+</html>

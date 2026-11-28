@@ -1,662 +1,381 @@
-name: Verify iOS native app
-
-on:
-  workflow_dispatch:
-    inputs:
-      test_suite:
-        description: 'XCTest scope on iPhone Simulator (trace runs 2 diagnostic tests)'
-        required: false
-        default: 'smoke'
-        type: choice
-        options:
-          - smoke
-          - full
-          - audio
-          - typing
-          - audit
-          - home
-          - personal
-          - diagnostic
-          - trace
-          - quote
-          - dream
-          - biorhythm
-          - share
-          - copying
-          - copying-paragraphs
-          - followup
-          - tools
-          - closing
-          - crud
-  push:
-    branches:
-      - 'codex/qa-*'
-
+name: Verify iOS native copying audit
+'on':
+  workflow_dispatch: {}
 permissions:
   contents: read
-
 concurrency:
-  group: ios-native-verification-${{ github.ref }}
-  cancel-in-progress: true
-
+  group: ios-copying-audit-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   ios:
-    name: ios (${{ matrix.suite }})
-    runs-on: macos-15
-    timeout-minutes: 70
-    strategy:
-      fail-fast: false
-      max-parallel: 6
-      matrix:
-        suite: ${{ fromJSON(inputs.test_suite == 'closing' && '["quote","share","audio","crud"]' || inputs.test_suite == 'audit' && '["smoke","extended","personal","snapshot","audio","typing"]' || inputs.test_suite == 'diagnostic' && '["smoke","personal"]' || inputs.test_suite == 'trace' && '["quote","navigation"]' || inputs.test_suite == 'tools' && '["quote","dream","biorhythm","typing","audio"]' || inputs.test_suite == 'followup' && '["dream","biorhythm","share"]' || format('["{0}"]', inputs.test_suite || 'smoke')) }}
+    runs-on: xcode-27
+    timeout-minutes: 60
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      TUTAM_QA_SIMULATOR_SDK_VERSION: '27.2'
       TUTAM_BUNDLE_SYNCED: '1'
-      VITE_GOOGLE_IOS_CLIENT_ID: ${{ vars.GOOGLE_IOS_CLIENT_ID }}
-      # Each audit class gets a fresh runner/install; permission grants must not leak into Typing.
-      IOS_TEST_SUITE: ${{ matrix.suite }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Apply QA audit source overlay if present
-        run: |
-          if [ -f .github/qa-audit-overlay.tar.gz ]; then
-            tar -xzf .github/qa-audit-overlay.tar.gz
-            rm -f .github/qa-audit-overlay.tar.gz
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 24
+        cache: npm
+    - name: Verify pinned Apple simulator toolchain
+      run: |
+        set -euo pipefail
+        test "$(xcodebuild -version | sed -n '1p')" = 'Xcode 27.2'
+        test "$(xcodebuild -version | sed -n '2p')" = 'Build version 27B52'
+        test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = '27.2'
+        pod --version
+    - name: Install locked dependencies
+      run: npm ci
+    - name: Verify frozen prebuilt assets and sync only native dependencies
+      run: |
+        set -euo pipefail
+        test ! -e .github/qa-audit-overlay.tar.gz
+        node --input-type=module <<'JS'
+        import fs from 'node:fs'; import path from 'node:path'; import {createHash} from 'node:crypto';
+        const sha=b=>createHash('sha256').update(b).digest('hex');
+        const root='ios/App/App/public', raw=fs.readFileSync(path.join(root,'mobile-assets-manifest.json'));
+        if(sha(raw)!=='eb60adaaa3be0a690f993cc9bba0fa2403ddac97d385d04aebedf8bbbd86e0d6')throw Error('Frozen manifest changed');
+        const manifest=JSON.parse(raw);if(manifest.version!==1||manifest.files.length!==1105)throw Error('Unexpected frozen asset count');
+        for(const f of manifest.files){const b=fs.readFileSync(path.join(root,f.path));if(b.length!==f.bytes||sha(b)!==f.sha256)throw Error(f.path);}
+        JS
+        mkdir -p build
+        cp -a ios/App/App/public/. build/
+        npx cap sync ios
+    - name: Isolate production hosts before native simulator UI tests
+      run: |
+        set -euo pipefail
+        mkdir -p build/release-evidence
+        python3 - <<'PY'
+        import json, os, pathlib, re, subprocess
+        proxy=subprocess.check_output(['scutil','--proxy'],text=True)
+        assert not re.search(r'(?:HTTPEnable|HTTPSEnable|SOCKSEnable|ProxyAutoConfigEnable|ProxyAutoDiscoveryEnable)\s*:\s*1\b',proxy), 'Proxy-enabled runner cannot prove production host isolation'
+        assert not any(value for key,value in os.environ.items() if key.lower() in ('http_proxy','https_proxy','all_proxy')), 'Proxy environment must be disabled for native UI isolation'
+        hosts=set(["quangtu.vn","www.quangtu.vn","quangtu.vercel.app","quangtu-web.quangtu-ansitoanthu.workers.dev"])
+        assert {'quangtu.vn','quangtu-web.quangtu-ansitoanthu.workers.dev','quangtu.vercel.app'}.issubset(hosts), 'Expected native origins and legacy alias are missing'
+        assert all(re.fullmatch(r'[a-z0-9.-]+',host) for host in hosts)
+        backup=pathlib.Path(os.environ['RUNNER_TEMP'])/'tutam-native-qa-hosts.backup'
+        assert not backup.exists(), 'Refusing to replace a previous hosts backup'
+        original=pathlib.Path('/etc/hosts').read_bytes()
+        backup.write_bytes(original)
+        lines=[]
+        for line in original.decode().splitlines():
+            address,separator,comment=line.partition('#')
+            parts=address.split()
+            if len(parts)>1 and any(host.lower() in hosts for host in parts[1:]):
+                aliases=[host for host in parts[1:] if host.lower() not in hosts]
+                if aliases:
+                    lines.append(parts[0]+'\t'+' '.join(aliases)+((' #'+comment) if separator else ''))
+                elif separator:
+                    lines.append('#'+comment)
+            else:
+                lines.append(line)
+        lines.append('# Tu Tap native CI: production-host isolation, not full offline mode')
+        for host in sorted(hosts):
+            lines.extend(['127.0.0.1\t'+host,'::1\t'+host])
+        subprocess.run(['sudo','tee','/etc/hosts'],input='\n'.join(lines)+'\n',text=True,check=True,stdout=subprocess.DEVNULL)
+        pathlib.Path('build/release-evidence/production-hosts.json').write_text(json.dumps(sorted(hosts),indent=2))
+        PY
+        sudo dscacheutil -flushcache
+        python3 - <<'PY'
+        import ipaddress, json, os, pathlib, socket
+        hosts=json.loads(pathlib.Path('build/release-evidence/production-hosts.json').read_text())
+        proof={}
+        for host in hosts:
+            proof[host]={}
+            for family,name in [(socket.AF_INET,'ipv4'),(socket.AF_INET6,'ipv6')]:
+                addresses=sorted({entry[4][0] for entry in socket.getaddrinfo(host,443,family,socket.SOCK_STREAM)})
+                assert addresses and all(ipaddress.ip_address(address).is_loopback for address in addresses), 'Production host still resolves externally: '+host
+                proof[host][name]=addresses
+        pathlib.Path('build/release-evidence/production-host-isolation.json').write_text(json.dumps({'scope':'production hosts only; not full offline','addresses':proof},indent=2))
+        with open(os.environ['GITHUB_ENV'],'a') as output:
+            output.write('TUTAM_QA_HOSTS_ISOLATED=1\n')
+        PY
+    - name: Select and boot an available iPhone simulator
+      run: |
+        set -euo pipefail
+        test "$TUTAM_QA_HOSTS_ISOLATED" = 1
+        xcrun simctl list devices available --json > build/release-evidence/simulator-devices.json
+        simulator_id=$(python3 - <<'PY'
+        import json, os
+        data=json.load(open('build/release-evidence/simulator-devices.json'))
+        sdk=os.environ['TUTAM_QA_SIMULATOR_SDK_VERSION']
+        expected=tuple(int(part) for part in sdk.split('.'))
+        for runtime, devices in sorted(data['devices'].items(), reverse=True):
+            if '.iOS-' not in runtime:
+                continue
+            version=tuple(int(part) for part in runtime.rsplit('.iOS-',1)[1].split('-'))
+            if version != expected:
+                continue
+            for device in devices:
+                if device.get('isAvailable') and device['name'].startswith('iPhone'):
+                    with open('build/release-evidence/simulator-selection.json','w') as evidence:
+                        json.dump({'sdkVersion':sdk,'runtime':runtime,'device':device['name'],'udid':device['udid']},evidence)
+                    print(device['udid'])
+                    raise SystemExit(0)
+        raise SystemExit(f'No available iPhone simulator matching the selected SDK {sdk}')
+        PY
+        )
+        echo "TUTAM_QA_SIMULATOR=$simulator_id" >> "$GITHUB_ENV"
+        # Keep software-keyboard prerequisites deterministic on this disposable CI runner.
+        # Existing Simulator preference used by ProtonVPN/ios-app CI and Appium's simulator driver.
+        defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+        TUTAM_KEYBOARD_SIMULATOR="$simulator_id" python3 - <<'PY'
+        import json, os, plistlib, subprocess
+        domain='com.apple.iphonesimulator'
+        prefs=plistlib.loads(subprocess.check_output(['defaults','export',domain,'-']))
+        devices=prefs.setdefault('DevicePreferences',{})
+        assert isinstance(devices,dict), 'Unexpected Simulator device preferences'
+        selected=devices.setdefault(os.environ['TUTAM_KEYBOARD_SIMULATOR'],{})
+        assert isinstance(selected,dict), 'Unexpected selected-device preferences'
+        previous=selected.get('ConnectHardwareKeyboard')
+        prefs['ConnectHardwareKeyboard']=False
+        selected['ConnectHardwareKeyboard']=False
+        subprocess.run(['defaults','import',domain,'-'],input=plistlib.dumps(prefs),check=True)
+        check=plistlib.loads(subprocess.check_output(['defaults','export',domain,'-']))
+        assert check['ConnectHardwareKeyboard'] is False
+        assert check['DevicePreferences'][os.environ['TUTAM_KEYBOARD_SIMULATOR']]['ConnectHardwareKeyboard'] is False
+        with open('build/release-evidence/simulator-keyboard-preferences.json','w') as evidence:
+            json.dump({'selectedDevicePrevious':previous,'globalHardwareKeyboard':False,'selectedDeviceHardwareKeyboard':False},evidence)
+        PY
+        if ! xcrun simctl list devices booted | grep -Fq "$simulator_id"; then
+          xcrun simctl boot "$simulator_id"
+        fi
+        xcrun simctl bootstatus "$simulator_id" -b
+    - name: Build native copying UI tests against frozen release assets
+      timeout-minutes: 12
+      run: |
+        set -euo pipefail
+        node --input-type=module <<'JS'
+        import fs from 'node:fs'; import {createHash} from 'node:crypto';
+        const sha=b=>createHash('sha256').update(b).digest('hex');
+        if(sha(fs.readFileSync('ios/App/AppUITests/NativeGuestSmokeTests.swift'))!=='a6f3688253b72349c65176ce118d99c57b85b4ea5f660b80f326b129be2cb61d')throw Error('UI test source changed');
+        JS
+        xcodebuild -quiet -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
+          -sdk iphonesimulator -destination "platform=iOS Simulator,id=$TUTAM_QA_SIMULATOR" \
+          -derivedDataPath build/ios-simulator \
+          -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingDiaTangReferenceTOCAndTypedGhost \
+          -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingPhapHoaReferenceTOCAndTypedGhost \
+          -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingLangNghiemReferenceTOCAndTypedGhost \
+          -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingDuocSuReferenceFormattingAndTypedGhost \
+          -only-testing:AppUITests/NativeExtendedGuestTests/testNativeScriptureCopyingReferenceAndGhost \
+          -only-testing:AppUITests/NativeCopyingParagraphTests/testNativeCopyingPreservesEmptyParagraphsInDurableDraft \
+          CODE_SIGNING_ALLOWED=NO build-for-testing
+        node --input-type=module <<'JS'
+        import fs from 'node:fs'; import path from 'node:path'; import {createHash} from 'node:crypto';
+        const sha=b=>createHash('sha256').update(b).digest('hex');
+        const root='build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app/public';
+        const raw=fs.readFileSync(path.join(root,'mobile-assets-manifest.json'));
+        if(sha(raw)!=='eb60adaaa3be0a690f993cc9bba0fa2403ddac97d385d04aebedf8bbbd86e0d6')throw Error('Simulator bundle differs from frozen release');
+        for(const file of JSON.parse(raw).files){const data=fs.readFileSync(path.join(root,file.path));if(data.length!==file.bytes||sha(data)!==file.sha256)throw Error(file.path);}
+        fs.writeFileSync('build/release-evidence/simulator-assets-proof.json',JSON.stringify({manifestSHA256:sha(raw),assets:JSON.parse(raw).files.length,commit:process.env.GITHUB_SHA,pass:true},null,2));
+        JS
+    - name: Require all six targeted native copying tests
+      timeout-minutes: 40
+      run: |
+        set -uo pipefail
+        # Collect every class in this one build even if an earlier class fails.
+        set +e
+        test "$TUTAM_QA_HOSTS_ISOLATED" = 1 || exit 1
+        app='build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app'
+        for suite in copying copying-paragraphs copying-smoke; do
+          export IOS_TEST_SUITE="$suite"
+          setup_status=0
+          if xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam data >/dev/null 2>&1; then
+            xcrun simctl uninstall "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam
+            command_status=$?
+            if [ "$command_status" -ne 0 ]; then setup_status=$command_status; fi
           fi
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - name: Verify Apple toolchain
-        run: |
-          set -euo pipefail
-          test -d "$DEVELOPER_DIR"
-          xcode_version="$(xcodebuild -version)"
-          printf '%s\n' "$xcode_version"
-          test "$(printf '%s\n' "$xcode_version" | head -n 1)" = 'Xcode 26.2'
-          simulator_sdk="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-          test "$simulator_sdk" = '26.2'
-          printf 'TUTAM_QA_SIMULATOR_SDK_VERSION=%s\n' "$simulator_sdk" >> "$GITHUB_ENV"
-          pod --version
-      - name: Install locked dependencies
-        run: npm ci
-      - name: Check TypeScript and native bridge contracts
-        run: |
-          npm run check
-          npx vitest run --config tests/unit/vitest.config.ts tests/unit/audio/native-platform-parity.test.ts tests/unit/audio/native-talk-audio.test.ts tests/unit/audio/native-player-controller.test.ts tests/unit/audio/audio-player-controller.test.ts
-          npx vitest run --config tests/unit/vitest.config.ts tests/unit/facebook-limited-token.test.ts tests/unit/facebook-limited-identity.test.ts tests/unit/native-auth-security.test.ts tests/unit/native-login-transport.test.ts
-      - name: Select bundled media for the simulator audio fixture
-        if: env.IOS_TEST_SUITE == 'audio' || env.IOS_TEST_SUITE == 'audit'
-        run: |
-          node --input-type=module <<'JS'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          for (const file of ['src/lib/data/offline-talks.json', 'static/offline-data/talks.json']) {
-            const rows = JSON.parse(readFileSync(file, 'utf8'));
-            const album = rows.find(row => row.id === 'pt_drive_9332ba09c8672ac69faf1ed7fca0a8b9');
-            if (!album?.tracks[0]?.url.startsWith('/api/audio/drive/')) throw new Error('Missing original fixture track');
-            album.tracks[0].url = '/assets/audio/nhac-thien-01.m4a';
-            writeFileSync(file, JSON.stringify(rows));
-          }
-          JS
-      - name: Build iOS web assets and install native dependencies
-        run: |
-          if [ -z "${VITE_GOOGLE_IOS_CLIENT_ID:-}" ]; then
-            export VITE_GOOGLE_IOS_CLIENT_ID="$(python3 - <<'PY'
-          import plistlib
-          with open('ios/App/App/Info.plist', 'rb') as f:
-              plist = plistlib.load(f)
-          for entry in plist.get('CFBundleURLTypes', []):
-              for scheme in entry.get('CFBundleURLSchemes', []):
-                  if scheme.startswith('com.googleusercontent.apps.'):
-                      print('.'.join(reversed(scheme.split('.'))))
-                      raise SystemExit(0)
-          PY
-          )"
-          fi
-          npm run build:mobile -- --platform ios
-      - name: Isolate production hosts before native simulator UI tests
-        run: |
-          set -euo pipefail
-          mkdir -p build/release-evidence
-          python3 - <<'PY'
-          import json, os, pathlib, re, subprocess
-          proxy=subprocess.check_output(['scutil','--proxy'],text=True)
-          assert not re.search(r'(?:HTTPEnable|HTTPSEnable|SOCKSEnable|ProxyAutoConfigEnable|ProxyAutoDiscoveryEnable)\s*:\s*1\b',proxy), 'Proxy-enabled runner cannot prove production host isolation'
-          assert not any(value for key,value in os.environ.items() if key.lower() in ('http_proxy','https_proxy','all_proxy')), 'Proxy environment must be disabled for native UI isolation'
-          source=pathlib.Path('src/lib/browser/native-backend-origin.ts').read_text()
-          hosts=set(re.findall(r'https://([a-z0-9.-]+)',source))
-          navigation=pathlib.Path('capacitor.config.ts').read_text()
-          hosts.update(host for host in re.findall(r"'([a-z0-9.-]+)'",navigation) if host.endswith('.quangtu.vn'))
-          links=pathlib.Path('src/lib/browser/native-app-links.ts').read_text()
-          hosts.update(host for host in re.findall(r"'([a-z0-9.-]+)'",links) if host.endswith('.quangtu.vn'))
-          assert {'quangtu.vn','quangtu-web.quangtu-ansitoanthu.workers.dev','quangtu.vercel.app'}.issubset(hosts), 'Expected native origins and legacy alias are missing'
-          assert all(re.fullmatch(r'[a-z0-9.-]+',host) for host in hosts)
-          backup=pathlib.Path(os.environ['RUNNER_TEMP'])/'tutam-native-qa-hosts.backup'
-          assert not backup.exists(), 'Refusing to replace a previous hosts backup'
-          original=pathlib.Path('/etc/hosts').read_bytes()
-          backup.write_bytes(original)
-          lines=[]
-          for line in original.decode().splitlines():
-              address,separator,comment=line.partition('#')
-              parts=address.split()
-              if len(parts)>1 and any(host.lower() in hosts for host in parts[1:]):
-                  aliases=[host for host in parts[1:] if host.lower() not in hosts]
-                  if aliases:
-                      lines.append(parts[0]+'\t'+' '.join(aliases)+((' #'+comment) if separator else ''))
-                  elif separator:
-                      lines.append('#'+comment)
-              else:
-                  lines.append(line)
-          lines.append('# Tu Tap native CI: production-host isolation, not full offline mode')
-          for host in sorted(hosts):
-              lines.extend(['127.0.0.1\t'+host,'::1\t'+host])
-          subprocess.run(['sudo','tee','/etc/hosts'],input='\n'.join(lines)+'\n',text=True,check=True,stdout=subprocess.DEVNULL)
-          pathlib.Path('build/release-evidence/production-hosts.json').write_text(json.dumps(sorted(hosts),indent=2))
-          PY
-          sudo dscacheutil -flushcache
-          python3 - <<'PY'
-          import ipaddress, json, os, pathlib, socket
-          hosts=json.loads(pathlib.Path('build/release-evidence/production-hosts.json').read_text())
-          proof={}
-          for host in hosts:
-              proof[host]={}
-              for family,name in [(socket.AF_INET,'ipv4'),(socket.AF_INET6,'ipv6')]:
-                  addresses=sorted({entry[4][0] for entry in socket.getaddrinfo(host,443,family,socket.SOCK_STREAM)})
-                  assert addresses and all(ipaddress.ip_address(address).is_loopback for address in addresses), 'Production host still resolves externally: '+host
-                  proof[host][name]=addresses
-          pathlib.Path('build/release-evidence/production-host-isolation.json').write_text(json.dumps({'scope':'production hosts only; not full offline','addresses':proof},indent=2))
-          with open(os.environ['GITHUB_ENV'],'a') as output:
-              output.write('TUTAM_QA_HOSTS_ISOLATED=1\n')
-          PY
-      - name: Prepare installed simulator dyld shared caches for tools QA
-        if: inputs.test_suite == 'closing' || inputs.test_suite == 'tools' || inputs.test_suite == 'audit' || inputs.test_suite == 'followup' || env.IOS_TEST_SUITE == 'share' || env.IOS_TEST_SUITE == 'smoke' || env.IOS_TEST_SUITE == 'crud'
-        timeout-minutes: 10
-        run: |
-          set -euo pipefail
-          mkdir -p build/release-evidence
-          dyld_status=0
-          xcrun simctl runtime dyld_shared_cache update --all > build/release-evidence/simulator-dyld-cache-update.log 2>&1 || dyld_status=$?
-          printf '%s\n' "$dyld_status" > build/release-evidence/simulator-dyld-cache-update-exit-code.txt
-          printf 'Installed runtime dyld cache preparation exit code: %s\n' "$dyld_status"
-          exit "$dyld_status"
-      - name: Select and boot an available iPhone simulator
-        run: |
-          set -euo pipefail
-          test "$TUTAM_QA_HOSTS_ISOLATED" = 1
-          xcrun simctl list devices available --json > build/release-evidence/simulator-devices.json
-          simulator_id=$(python3 - <<'PY'
-          import json, os
-          data=json.load(open('build/release-evidence/simulator-devices.json'))
-          sdk=os.environ['TUTAM_QA_SIMULATOR_SDK_VERSION']
-          expected=tuple(int(part) for part in sdk.split('.'))
-          for runtime, devices in sorted(data['devices'].items(), reverse=True):
-              if '.iOS-' not in runtime:
-                  continue
-              version=tuple(int(part) for part in runtime.rsplit('.iOS-',1)[1].split('-'))
-              if version != expected:
-                  continue
-              for device in devices:
-                  if device.get('isAvailable') and device['name'].startswith('iPhone'):
-                      with open('build/release-evidence/simulator-selection.json','w') as evidence:
-                          json.dump({'sdkVersion':sdk,'runtime':runtime,'device':device['name'],'udid':device['udid']},evidence)
-                      print(device['udid'])
-                      raise SystemExit(0)
-          raise SystemExit(f'No available iPhone simulator matching the selected SDK {sdk}')
-          PY
-          )
-          echo "TUTAM_QA_SIMULATOR=$simulator_id" >> "$GITHUB_ENV"
-          # Keep software-keyboard prerequisites deterministic on this disposable CI runner.
-          # Existing Simulator preference used by ProtonVPN/ios-app CI and Appium's simulator driver.
-          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-          TUTAM_KEYBOARD_SIMULATOR="$simulator_id" python3 - <<'PY'
-          import json, os, plistlib, subprocess
-          domain='com.apple.iphonesimulator'
-          prefs=plistlib.loads(subprocess.check_output(['defaults','export',domain,'-']))
-          devices=prefs.setdefault('DevicePreferences',{})
-          assert isinstance(devices,dict), 'Unexpected Simulator device preferences'
-          selected=devices.setdefault(os.environ['TUTAM_KEYBOARD_SIMULATOR'],{})
-          assert isinstance(selected,dict), 'Unexpected selected-device preferences'
-          previous=selected.get('ConnectHardwareKeyboard')
-          prefs['ConnectHardwareKeyboard']=False
-          selected['ConnectHardwareKeyboard']=False
-          subprocess.run(['defaults','import',domain,'-'],input=plistlib.dumps(prefs),check=True)
-          check=plistlib.loads(subprocess.check_output(['defaults','export',domain,'-']))
-          assert check['ConnectHardwareKeyboard'] is False
-          assert check['DevicePreferences'][os.environ['TUTAM_KEYBOARD_SIMULATOR']]['ConnectHardwareKeyboard'] is False
-          with open('build/release-evidence/simulator-keyboard-preferences.json','w') as evidence:
-              json.dump({'selectedDevicePrevious':previous,'globalHardwareKeyboard':False,'selectedDeviceHardwareKeyboard':False},evidence)
-          PY
-          if ! xcrun simctl list devices booted | grep -Fq "$simulator_id"; then
-            xcrun simctl boot "$simulator_id"
-          fi
-          xcrun simctl bootstatus "$simulator_id" -b
-      - name: Build iOS app, native plugins and UI tests once for the selected simulator
-        run: |
-          set -euo pipefail
-          test "$TUTAM_QA_HOSTS_ISOLATED" = 1
-          testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests)
-          if [ "$IOS_TEST_SUITE" = "audio" ]; then
-            testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
-          elif [ "$IOS_TEST_SUITE" = "typing" ]; then
-            testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
-          elif [ "$IOS_TEST_SUITE" = "home" ]; then
-            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testHomePersonalAnniversariesLunarSolarCancelSaveDeleteAndPersistence)
-          elif [ "$IOS_TEST_SUITE" = "crud" ]; then
-            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarSolarCrudInvalidDateCancelAndPersistence)
-          elif [ "$IOS_TEST_SUITE" = "quote" ]; then
-            testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests/testQuoteImageUsesNativeSavePickerAndCancelKeepsDialogUsable)
-          elif [ "$IOS_TEST_SUITE" = "dream" ]; then
-            testing_args=(-only-testing:AppUITests/NativeDreamV3Tests/testDreamV3SearchReadingSizeRotationAndBack)
-          elif [ "$IOS_TEST_SUITE" = "biorhythm" ]; then
-            testing_args=(-only-testing:AppUITests/NativeBiorhythmTests/testBiorhythmBirthEntryResultsGuideRotationAndSingleBack)
-          elif [ "$IOS_TEST_SUITE" = "copying" ]; then
-            testing_args=(-only-testing:AppUITests/NativeCopyingReferenceTests)
-          elif [ "$IOS_TEST_SUITE" = "copying-paragraphs" ]; then
-            testing_args=(-only-testing:AppUITests/NativeCopyingParagraphTests)
-          elif [ "$IOS_TEST_SUITE" = "share" ]; then
-            testing_args=(-only-testing:AppUITests/NativeQuoteShareTests/testQuoteShareDoubleTapCancelThenSaveImageToPhotosWithPermissionAndContent)
-          elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
-            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalNearFutureReminderDeliversToSystemAndCanBeDeleted)
-          elif [ "$IOS_TEST_SUITE" = "extended" ]; then
-            testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
-          elif [ "$IOS_TEST_SUITE" = "personal" ]; then
-            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests)
-          elif [ "$IOS_TEST_SUITE" = "snapshot" ]; then
-            testing_args=(-only-testing:AppUITests/NativeSimulatorSnapshotTests)
-          elif [ "$IOS_TEST_SUITE" = "full" ] || [ "$IOS_TEST_SUITE" = "audit" ]; then
-            testing_args=(
-              -only-testing:AppUITests/NativeGuestSmokeTests
-              -only-testing:AppUITests/NativeExtendedGuestTests
-              -only-testing:AppUITests/NativePersonalReminderTests
-              -only-testing:AppUITests/NativeSimulatorSnapshotTests
-            )
-            if [ "$IOS_TEST_SUITE" = "audit" ]; then
-              testing_args+=(
-                -only-testing:AppUITests/NativeTalkPlayerTests
-                -only-testing:AppUITests/NativeNotificationTypingTests
-              )
-            fi
-          fi
-          xcodebuild -quiet \
-            -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
-            -sdk iphonesimulator -destination "platform=iOS Simulator,id=$TUTAM_QA_SIMULATOR" \
-            -derivedDataPath build/ios-simulator \
-            "${testing_args[@]}" \
-            CODE_SIGNING_ALLOWED=NO build-for-testing
-      - name: Verify latest book in the built iOS app
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib, json, os, pathlib
-          expected_sha = 'a2e14e4a5132285d3a56d94102b7dc5a0e265e0a56d656d530edf0d56d9d9d9b'
-          expected_bytes = 2225196
-          expected_ids = [str(value) for value in range(14533, 14573)]
-          paths = {
-              'source': pathlib.Path('static/offline-data/chapters/kinh-dai-bat-niet-ban.json'),
-              'nativePublic': pathlib.Path('ios/App/App/public/offline-data/chapters/kinh-dai-bat-niet-ban.json'),
-              'app': pathlib.Path('build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app/public/offline-data/chapters/kinh-dai-bat-niet-ban.json'),
-          }
-          copies = {}
-          for label, path in paths.items():
-              assert path.is_file(), 'Missing latest-book copy: ' + label
-              data = path.read_bytes()
-              assert len(data) == expected_bytes, 'Latest-book byte-count mismatch: ' + label
-              assert hashlib.sha256(data).hexdigest() == expected_sha, 'Latest-book SHA256 mismatch: ' + label
-              rows = json.loads(data)
-              assert isinstance(rows, list) and len(rows) == 40, 'Latest-book chapter-count mismatch: ' + label
-              assert all(isinstance(row, dict) for row in rows), 'Invalid latest-book chapter record: ' + label
-              ids = [row.get('id') for row in rows]
-              assert ids == expected_ids and len(set(ids)) == 40, 'Latest-book chapter ID/order mismatch: ' + label
-              assert [row.get('so_thu_tu') for row in rows] == list(range(40)), 'Latest-book chapter sequence mismatch: ' + label
-              assert all(isinstance(row.get('noi_dung'), str) and row['noi_dung'].strip() for row in rows), 'Empty latest-book chapter body: ' + label
-              copies[label] = data
-          assert copies['source'] == copies['nativePublic'] == copies['app'], 'Latest-book copies differ'
-          proof = {
-              'schemaVersion': 1, 'head': os.environ['GITHUB_SHA'], 'book': 'kinh-dai-bat-niet-ban',
-              'expectedSHA256': expected_sha, 'bytes': expected_bytes, 'chapterCount': 40,
-              'chapterIds': expected_ids, 'chapterOrder': list(range(40)), 'nonemptyBodyCount': 40,
-              'sourcePath': paths['source'].as_posix(), 'sourceSHA256': hashlib.sha256(copies['source']).hexdigest(),
-              'nativePublicPath': paths['nativePublic'].as_posix(), 'nativePublicSHA256': hashlib.sha256(copies['nativePublic']).hexdigest(),
-              'appPath': paths['app'].as_posix(), 'appSHA256': hashlib.sha256(copies['app']).hexdigest(),
-              'allCopiesByteIdentical': True, 'scope': 'File hashes, sizes and chapter metadata only; no chapter text.',
-          }
-          out = pathlib.Path('build/release-evidence')
-          out.mkdir(parents=True, exist_ok=True)
-          (out / 'ios-latest-book-bundle-proof.json').write_text(json.dumps(proof, indent=2) + '\n', encoding='utf-8')
-          PY
-      - name: Verify the packaged Phap thoai media fixture
-        if: env.IOS_TEST_SUITE == 'audio' || env.IOS_TEST_SUITE == 'audit'
-        run: |
-          set -euo pipefail
-          cd build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app/public
-          node -e "const album=require('./offline-data/talks.json').find(row=>row.id==='pt_drive_9332ba09c8672ac69faf1ed7fca0a8b9'); require('node:assert/strict').equal(album.tracks[0].url,'/assets/audio/nhac-thien-01.m4a')"
-          afinfo assets/audio/nhac-thien-01.m4a
-      - name: Warm the simulator WebView before starting the audio test
-        if: env.IOS_TEST_SUITE == 'audio' || env.IOS_TEST_SUITE == 'audit'
-        run: |
-          set -euo pipefail
-          app=build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app
-          id=vn.quangtu.tutam
           xcrun simctl install "$TUTAM_QA_SIMULATOR" "$app"
-          xcrun simctl launch "$TUTAM_QA_SIMULATOR" "$id" -tutam-qa-events 1
-          data="$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" "$id" data)"
-          trace="$data/Library/Caches/tutam-qa-events.jsonl"
-          for attempt in {1..120}; do
-            if grep -q '"type":"installed"' "$trace" 2>/dev/null && grep -q '"phase":"didFinish"' "$trace"; then
-              echo "WKWebView completed navigation after ${attempt}s."
-              break
-            fi
-            sleep 1
-          done
-          if [ -f "$trace" ]; then cp "$trace" build/release-evidence/audio-prewarm-events.jsonl; fi
-          xcrun simctl terminate "$TUTAM_QA_SIMULATOR" "$id"
-      - name: Verify packaged Google privacy manifests
-        run: |
-          app='build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app'
-          for bundle in GoogleSignIn.bundle GTMAppAuth_Privacy.bundle GTMSessionFetcher_Core_Privacy.bundle AppAuthCore_Privacy.bundle; do
-            manifest="$(find "$app" -path "*/$bundle/PrivacyInfo.xcprivacy" -print -quit)"
-            test -n "$manifest" || { echo "::error::Missing privacy manifest for $bundle"; exit 1; }
-          done
-          while IFS= read -r manifest; do
-            plutil -lint "$manifest"
-          done < <(find "$app" -name PrivacyInfo.xcprivacy -print)
-          find "$app" -name PrivacyInfo.xcprivacy -print | sed "s|$app/||" > build/release-evidence/privacy-manifests.txt
-          grep -q 'GoogleSignIn (7.1.0)' ios/App/Podfile.lock
-          cp ios/App/Podfile.lock build/release-evidence/Podfile.lock
-      - name: Log release verification evidence
-        run: |
-          cat build/release-evidence/privacy-manifests.txt
-          cat build/release-evidence/Podfile.lock
-      - name: Run native iOS Simulator UI tests
-        timeout-minutes: 45
-        run: |
-          set -euo pipefail
-          test "$TUTAM_QA_HOSTS_ISOLATED" = 1
-          testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests)
-          if [ "$IOS_TEST_SUITE" = "audio" ]; then
-            testing_args=(-only-testing:AppUITests/NativeTalkPlayerTests)
-          elif [ "$IOS_TEST_SUITE" = "typing" ]; then
-            testing_args=(-only-testing:AppUITests/NativeNotificationTypingTests)
-          elif [ "$IOS_TEST_SUITE" = "home" ]; then
-            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testHomePersonalAnniversariesLunarSolarCancelSaveDeleteAndPersistence)
-          elif [ "$IOS_TEST_SUITE" = "crud" ]; then
-            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalLunarSolarCrudInvalidDateCancelAndPersistence)
-          elif [ "$IOS_TEST_SUITE" = "quote" ]; then
-            testing_args=(-only-testing:AppUITests/NativeGuestSmokeTests/testQuoteImageUsesNativeSavePickerAndCancelKeepsDialogUsable)
-          elif [ "$IOS_TEST_SUITE" = "dream" ]; then
-            testing_args=(-only-testing:AppUITests/NativeDreamV3Tests/testDreamV3SearchReadingSizeRotationAndBack)
-          elif [ "$IOS_TEST_SUITE" = "biorhythm" ]; then
-            testing_args=(-only-testing:AppUITests/NativeBiorhythmTests/testBiorhythmBirthEntryResultsGuideRotationAndSingleBack)
-          elif [ "$IOS_TEST_SUITE" = "copying" ]; then
-            testing_args=(-only-testing:AppUITests/NativeCopyingReferenceTests)
-          elif [ "$IOS_TEST_SUITE" = "copying-paragraphs" ]; then
-            testing_args=(-only-testing:AppUITests/NativeCopyingParagraphTests)
-          elif [ "$IOS_TEST_SUITE" = "share" ]; then
-            testing_args=(-only-testing:AppUITests/NativeQuoteShareTests/testQuoteShareDoubleTapCancelThenSaveImageToPhotosWithPermissionAndContent)
-          elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
-            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests/testPersonalNearFutureReminderDeliversToSystemAndCanBeDeleted)
-          elif [ "$IOS_TEST_SUITE" = "extended" ]; then
-            testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests)
-          elif [ "$IOS_TEST_SUITE" = "personal" ]; then
-            testing_args=(-only-testing:AppUITests/NativePersonalReminderTests)
-          elif [ "$IOS_TEST_SUITE" = "snapshot" ]; then
-            testing_args=(-only-testing:AppUITests/NativeSimulatorSnapshotTests)
-          elif [ "$IOS_TEST_SUITE" = "full" ] || [ "$IOS_TEST_SUITE" = "audit" ]; then
+          command_status=$?
+          if [ "$command_status" -ne 0 ]; then setup_status=$command_status; fi
+          testing_args=(-only-testing:AppUITests/NativeCopyingParagraphTests/testNativeCopyingPreservesEmptyParagraphsInDurableDraft)
+          if [ "$suite" = copying ]; then
             testing_args=(
-              -only-testing:AppUITests/NativeGuestSmokeTests
-              -only-testing:AppUITests/NativeExtendedGuestTests
-              -only-testing:AppUITests/NativePersonalReminderTests
-              -only-testing:AppUITests/NativeSimulatorSnapshotTests
+              -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingDiaTangReferenceTOCAndTypedGhost
+              -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingPhapHoaReferenceTOCAndTypedGhost
+              -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingLangNghiemReferenceTOCAndTypedGhost
+              -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingDuocSuReferenceFormattingAndTypedGhost
             )
-            if [ "$IOS_TEST_SUITE" = "audit" ]; then
-              testing_args+=(
-                -only-testing:AppUITests/NativeTalkPlayerTests
-                -only-testing:AppUITests/NativeNotificationTypingTests
-              )
-            fi
+          elif [ "$suite" = copying-smoke ]; then
+            testing_args=(-only-testing:AppUITests/NativeExtendedGuestTests/testNativeScriptureCopyingReferenceAndGhost)
           fi
-          # Standalone recording preserves short-lived feedback even when an XCUI tap waits for idleness.
-          # Apple simctl command: https://developer.apple.com/videos/play/wwdc2020/10647/
-          quote_video_pid=''
-          stop_quote_video() {
-            if [ -n "$quote_video_pid" ]; then
-              kill -INT "$quote_video_pid" 2>/dev/null || true
-              wait "$quote_video_pid" || true
-              quote_video_pid=''
-            fi
-          }
-          if [ "$IOS_TEST_SUITE" = "quote" ]; then
-            xcrun simctl io "$TUTAM_QA_SIMULATOR" recordVideo --codec h264 \
-              build/release-evidence/quote-feedback-recording.mp4 \
-              > build/release-evidence/quote-feedback-recording.log 2>&1 &
-            quote_video_pid=$!
-            printf 'Recording requested at %s; pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$quote_video_pid" \
-              > build/release-evidence/quote-feedback-recording-clock.txt
-            trap stop_quote_video EXIT
-          fi
-          xcodebuild \
-            -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
+          result="build/release-evidence/$suite.xcresult"
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
             -sdk iphonesimulator -destination "platform=iOS Simulator,id=$TUTAM_QA_SIMULATOR" \
-            -derivedDataPath build/ios-simulator \
-            -resultBundlePath build/release-evidence/NativeGuestSmoke.xcresult \
-            "${testing_args[@]}" \
-            -parallel-testing-enabled NO \
-            -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 600 \
-            -maximum-test-execution-time-allowance 600 \
-            CODE_SIGNING_ALLOWED=NO test-without-building 2>&1 | tee build/release-evidence/native-ui-test.log
-      - name: Require executed native UI tests with no failures or skips
-        if: always()
-        run: |
-          set -euo pipefail
-          result=build/release-evidence/NativeGuestSmoke.xcresult
-          test -d "$result"
-          xcrun xcresulttool get test-results summary --path "$result" > build/release-evidence/native-ui-summary.json
-          python3 - <<'PY'
-          import json, os
-          data=json.load(open('build/release-evidence/native-ui-summary.json'))
-          suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1, 'crud': 1, 'quote': 1, 'navigation': 1, 'dream': 1, 'biorhythm': 1, 'share': 1, 'copying': 4, 'copying-paragraphs': 1}[suite]
-          assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
-          assert data['failedTests'] == 0, 'Native UI test failures'
-          assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'
-          print(f'Verified native UI test execution ({suite}):',data['passedTests'],'passed, 0 failed, 0 skipped')
-          if suite in {'quote', 'navigation'}:
-              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
-                  summary.write(f'Native iOS trace diagnostic ({suite}): {data["passedTests"]} passed, 0 failed, 0 skipped. The full 18-test audit remains required.\n')
-          if suite == 'dream':
-              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
-                  summary.write(f'Native iOS Dream V3 QA: {data["passedTests"]} passed, 0 failed, 0 skipped. This separate content/reading check does not replace the required 18-test audit.\n')
-          if suite == 'biorhythm':
-              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
-                  summary.write(f'Native iOS Biorhythm UI-14 QA: {data["passedTests"]} passed, 0 failed, 0 skipped. This separate layout/interaction check does not replace the required 18-test audit.\n')
-          PY
-      - name: Verify exact native copying paragraph fixture
-        if: always() && matrix.suite == 'copying-paragraphs'
-        run: |
-          set -euo pipefail
-          test "${GITHUB_ACTIONS:-}" = true
-          test "${RUNNER_OS:-}" = macOS
-          test "${IOS_TEST_SUITE:-}" = copying-paragraphs
-          test -n "${TUTAM_QA_SIMULATOR:-}"
-          test -f build/release-evidence/production-host-isolation.json
-          qa_app_data="$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam data)"
-          python3 .github/scripts/verify-ios-copying-paragraphs.py "$qa_app_data" build/release-evidence/copying-paragraphs-persistence.json
-      - name: Verify existing audio cache backup exclusion
-        if: always() && (matrix.suite == 'share' || matrix.suite == 'audio')
-        timeout-minutes: 2
-        run: |
-          set -euo pipefail
-          mkdir -p build/release-evidence
-          test -n "${TUTAM_QA_SIMULATOR:-}"
-          qa_app_data="$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam data)"
-          # Read the directory created by the actual plugin; never create it or set its flag here.
-          xcrun swift - "$qa_app_data" > build/release-evidence/ios08-audio-backup-exclusion.json <<'SWIFT'
-          import Foundation
-          import Darwin
-          let container = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
-          let relative = "Library/Application Support/DharmaAudio"
-          let target = container.appendingPathComponent(relative, isDirectory: true)
-          var isDirectory = ObjCBool(false)
-          let exists = FileManager.default.fileExists(atPath: target.path, isDirectory: &isDirectory)
-          var result: [String: Any] = ["relativePath": relative, "exists": exists,
-                                     "isDirectory": isDirectory.boolValue, "pass": false]
-          do {
-              if exists && isDirectory.boolValue {
-                  let values = try target.resourceValues(forKeys: [.isExcludedFromBackupKey])
-                  result["isExcludedFromBackup"] = values.isExcludedFromBackup.map { $0 as Any } ?? NSNull()
-                  result["pass"] = values.isExcludedFromBackup == true
-              }
-          } catch { result["error"] = String(describing: error) }
-          let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
-          FileHandle.standardOutput.write(data)
-          FileHandle.standardOutput.write(Data([10]))
-          exit((result["pass"] as? Bool) == true ? 0 : 1)
-          SWIFT
-      - name: Capture native simulator evidence
-        if: always()
-        run: |
-          mkdir -p build/release-evidence
-          if [ -n "${TUTAM_QA_SIMULATOR:-}" ]; then
-            xcrun simctl io "$TUTAM_QA_SIMULATOR" screenshot build/release-evidence/native-ui-final.png
-            if qa_app_data="$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam data 2>build/release-evidence/native-qa-cache-export.log)"; then
-              qa_events_file="$qa_app_data/Library/Caches/tutam-qa-events.jsonl"
-              if [ -f "$qa_events_file" ]; then
-                cp "$qa_events_file" build/release-evidence/native-qa-events.jsonl
-                qa_events_bytes="$(wc -c < "$qa_events_file")"
-                printf 'Exported existing QA event cache: %s bytes; writer cap is 262144 bytes.\n' "$qa_events_bytes" >> build/release-evidence/native-qa-cache-export.log
-              else
-                printf 'The existing QA event cache was not created.\n' >> build/release-evidence/native-qa-cache-export.log
-              fi
-            fi
-            # NSLog vẫn ghi sau khi tệp JSONL đạt giới hạn kích thước.
-            if ! xcrun simctl spawn "$TUTAM_QA_SIMULATOR" log show --style json --info --debug --last 2h \
-              --predicate 'eventMessage CONTAINS "[TutamQA]"' \
-              > build/release-evidence/native-qa-unified-log.json 2>build/release-evidence/native-qa-unified-log-export.log; then
-              printf 'Filtered simulator unified-log export failed; see the preceding error.\n' >> build/release-evidence/native-qa-unified-log-export.log
-            fi
-            # Chỉ lấy dịch vụ chọn tệp gần ca kiểm thử; không thu toàn bộ nhật ký hệ thống.
-            if ! xcrun simctl spawn "$TUTAM_QA_SIMULATOR" log show --style json --info --debug --last 20m \
-              --predicate 'subsystem CONTAINS[c] "DocumentManager" OR subsystem CONTAINS[c] "FileProvider" OR process CONTAINS[c] "DocumentManager" OR process CONTAINS[c] "FileProvider"' \
-              > build/release-evidence/native-file-services-unified-log.json 2>build/release-evidence/native-file-services-unified-log-export.log; then
-              printf 'Filtered file-services unified-log export failed; see the preceding error.\n' >> build/release-evidence/native-file-services-unified-log-export.log
-            fi
-          fi
-          result=build/release-evidence/NativeGuestSmoke.xcresult
+            -derivedDataPath build/ios-simulator -resultBundlePath "$result" \
+            "${testing_args[@]}" -parallel-testing-enabled NO -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 600 -maximum-test-execution-time-allowance 600 \
+            CODE_SIGNING_ALLOWED=NO test-without-building 2>&1 | tee "build/release-evidence/$suite.log"
+          test_status=${PIPESTATUS[0]}
+          summary_status=125
           if [ -d "$result" ]; then
-            xcrun xcresulttool export attachments --path "$result" --output-path build/release-evidence/native-ui-attachments
+            xcrun xcresulttool get test-results summary --path "$result" > "build/release-evidence/$suite-summary.json"
+            summary_status=$?
           fi
-      - name: Verify registered native history removal with owned simulator fixtures
-        if: always() && matrix.suite == 'audio'
-        timeout-minutes: 2
-        run: |
-          set -euo pipefail
-          test "${GITHUB_ACTIONS:-}" = true
-          test "${RUNNER_OS:-}" = macOS
-          test "${IOS_TEST_SUITE:-}" = audio
-          test -n "${TUTAM_QA_SIMULATOR:-}"
-          test -f build/release-evidence/production-host-isolation.json
-          test -d build/release-evidence
-          bundle=vn.quangtu.tutam
-          qa_data="$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" "$bundle" data)"
-          nonce="$(python3 -c 'import uuid; print(uuid.uuid4())')"
-          basename="native-r02-divination-remove-$nonce.json"
-          source="$qa_data/Library/Caches/$basename"
-          target="build/release-evidence/$basename"
-          test ! -e "$source"
-          test ! -e "$target"
-          # Public simctl launch flag; terminates only this already installed CI app after its UI evidence capture.
-          xcrun simctl launch --terminate-running-process "$TUTAM_QA_SIMULATOR" "$bundle" \
-            -tutam-qa-events 1 -tutam-qa-r02-remove "$nonce"
-          ready=0
-          for attempt in {1..20}; do
-            if python3 - "$source" "$nonce" <<'PY'
-          import json, pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          if not p.is_file(): raise SystemExit(1)
-          try: data = json.loads(p.read_text())
-          except (OSError, ValueError): raise SystemExit(1)
-          raise SystemExit(0 if data.get('nonce') == sys.argv[2] and data.get('probe') == 'R02-native-remove' else 1)
-          PY
-            then ready=1; break; fi
-            sleep 1
-          done
-          test "$ready" = 1
-          cp -n "$source" "$target"
-          python3 - "$target" "$nonce" <<'PY'
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          assert d['nonce'] == sys.argv[2] and d['registeredPlugin'] and d['sdkSerialQueue']
-          assert d['actualAnonymousAccessed'] is False and d['actualAccountAccessed'] is False
-          assert d['networkCallsByProbe'] == 0 and d['pass'] is True
-          assert len(d['cleanup']) == 9 and all(x['absent'] for x in d['cleanup'])
-          assert len(d['calls']) == 24 and all(x['callbackCount'] == 1 for x in d['calls'])
-          print('R02 registered-plugin native removal/identity/idempotence/invalid-key and exact fixture cleanup: PASS')
-          PY
-      - name: Shut down the CI simulator before restoring network resolution
-        if: always()
-        run: |
-          set -euo pipefail
-          if [ -n "${TUTAM_QA_SIMULATOR:-}" ]; then
-            xcrun simctl shutdown "$TUTAM_QA_SIMULATOR"
+          persistence_status=0
+          if [ "$suite" = copying-paragraphs ]; then
+            qa_app_data="$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam data)"
+            container_status=$?
+            if [ "$container_status" -eq 0 ]; then
+              python3 - "$qa_app_data" build/release-evidence/copying-paragraphs-persistence.json <<'PY'
+        #!/usr/bin/env python3
+        """Read only the owned guest fixture's two native draft slots; never seed or alter app data."""
+        import hashlib
+        import json
+        import os
+        from pathlib import Path
+        import sys
+        import time
+        
+        KEY = 'tt_copy_v1:guest:duoc-su:nfc-v1-7626225a5614e1f72158:1'
+        VERSION = 'nfc-v1-7626225a5614e1f72158'
+        EXPECTED = 'Nam\n\nmo Phat\n\n'
+        KEY_HASH = hashlib.sha256(KEY.encode('utf-8')).hexdigest()
+        EXPECTED_HASH = hashlib.sha256(EXPECTED.encode('utf-8')).hexdigest()
+        
+        def inspect(container):
+            base = container / 'Documents' / 'scripture-copying'
+            slots = []
+            for slot in (0, 1):
+                file = base / (KEY_HASH + '.' + str(slot) + '.json')
+                if not file.is_file():
+                    return None, 'missing_slot'
+                raw = file.read_bytes()
+                if len(raw) > 2_000_000:
+                    return None, 'fixture_size'
+                envelope = json.loads(raw.decode('utf-8'))
+                sequence, payload = envelope.get('sequence'), envelope.get('payload')
+                if type(sequence) is not int or not 0 <= sequence <= 9007199254740991 or sequence % 2 != slot or not isinstance(payload, str):
+                    return None, 'envelope_schema'
+                checksum = hashlib.sha256(payload.encode('utf-8')).hexdigest()
+                if envelope.get('checksum') != checksum:
+                    return None, 'checksum'
+                draft = json.loads(payload)
+                texts = draft.get('texts')
+                if (draft.get('sutraId') != 'duoc-su' or draft.get('chapter') != 1 or draft.get('sourceVersion') != VERSION
+                        or not isinstance(draft.get('runId'), str) or not isinstance(texts, list) or len(texts) != 28
+                        or not all(isinstance(text, str) for text in texts)):
+                    return None, 'draft_schema'
+                slots.append((sequence, slot, draft, checksum, hashlib.sha256(raw).hexdigest()))
+            slots.sort(key=lambda value: value[0], reverse=True)
+            if slots[0][0] == slots[1][0]:
+                return None, 'sequence_tie'
+            sequence, slot, draft, checksum, file_hash = slots[0]
+            texts = draft['texts']
+            result = {
+                'fixture': 'copying-paragraphs-guest-duoc-su', 'keySha256': KEY_HASH,
+                'expectedTextSha256': EXPECTED_HASH, 'textSha256': hashlib.sha256(texts[0].encode('utf-8')).hexdigest(),
+                'textCount': len(texts), 'firstTextCharacters': len(texts[0]), 'firstTextNewlines': texts[0].count('\n'),
+                'otherNonemptyTexts': sum(text != '' for text in texts[1:]),
+                'highestSequence': sequence, 'highestSlot': slot, 'sourceVersionMatches': draft['sourceVersion'] == VERSION,
+                'slotProofs': [{'slot': value[1], 'sequence': value[0], 'checksumVerified': True, 'fileSha256': value[4]} for value in slots],
+                'pass': texts[0] == EXPECTED and all(text == '' for text in texts[1:]) and draft.get('block') == 0,
+            }
+            return result, None if result['pass'] else 'raw_fixture_mismatch'
+        
+        def main():
+            assert os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('RUNNER_OS') == 'macOS', 'owned CI only'
+            assert os.environ.get('IOS_TEST_SUITE') == 'copying-paragraphs', 'exact profile only'
+            assert len(sys.argv) == 3, 'container and evidence path required'
+            container, output = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
+            assert container.is_dir() and output.parent.name == 'release-evidence' and output.name == 'copying-paragraphs-persistence.json', 'owned paths required'
+            deadline, attempts = time.monotonic() + 10.0, 0
+            result, reason = None, 'not_ready'
+            while True:
+                attempts += 1
+                try:
+                    result, reason = inspect(container)
+                except (OSError, ValueError, TypeError, AttributeError):
+                    result, reason = None, 'incomplete_or_invalid_slot'
+                if result and result['pass']:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(0.1, remaining))
+            proof = result or {'fixture': 'copying-paragraphs-guest-duoc-su', 'keySha256': KEY_HASH,
+                               'expectedTextSha256': EXPECTED_HASH, 'pass': False}
+            proof.update(attempts=attempts, durableWaitLimitSeconds=10, reason=reason)
+            output.write_text(json.dumps(proof, indent=2) + '\n', encoding='utf-8')
+            print(json.dumps({'fixture': proof['fixture'], 'pass': proof['pass'], 'textCount': proof.get('textCount'),
+                              'firstTextNewlines': proof.get('firstTextNewlines'), 'reason': reason}))
+            return 0 if proof['pass'] else 1
+        
+        if __name__ == '__main__':
+            raise SystemExit(main())
+        PY
+              persistence_status=$?
+            else
+              persistence_status=$container_status
+            fi
           fi
-      - name: Restore ephemeral runner hosts
-        if: always()
-        run: |
-          set -euo pipefail
-          backup="$RUNNER_TEMP/tutam-native-qa-hosts.backup"
-          if [ -f "$backup" ]; then
-            sudo cp "$backup" /etc/hosts
-            sudo dscacheutil -flushcache
-            cmp "$backup" /etc/hosts
+          python3 - "$setup_status" "$test_status" "$summary_status" "$persistence_status" <<'PY'
+        import json,os,pathlib,sys
+        suite=os.environ['IOS_TEST_SUITE']
+        row=dict(suite=suite,setupExitCode=int(sys.argv[1]),testExitCode=int(sys.argv[2]),summaryExitCode=int(sys.argv[3]),persistenceExitCode=int(sys.argv[4]))
+        pathlib.Path('build/release-evidence/'+suite+'-execution.json').write_text(json.dumps(row,indent=2))
+        print(json.dumps(row))
+        PY
+        done
+        python3 - <<'PY'
+        import json,os,pathlib
+        out=pathlib.Path('build/release-evidence'); expected={'copying':4,'copying-paragraphs':1,'copying-smoke':1}
+        errors=[]; results={}; passed=failed=skipped=0
+        for suite,count in expected.items():
+            entry={}; results[suite]=entry
+            try:
+                execution=json.loads((out/(suite+'-execution.json')).read_text());entry['execution']=execution
+                for key in ['setupExitCode','testExitCode','summaryExitCode','persistenceExitCode']:
+                    if execution.get(key)!=0: errors.append(suite+': '+key+'='+str(execution.get(key)))
+            except Exception as error: errors.append(suite+': execution receipt missing/invalid: '+type(error).__name__)
+            try:
+                summary=json.loads((out/(suite+'-summary.json')).read_text()); entry['summary']=summary
+                passed+=summary['passedTests']; failed+=summary['failedTests']; skipped+=summary['skippedTests']
+                if summary['passedTests']!=count or summary['failedTests']!=0 or summary['skippedTests']!=0:
+                    errors.append(suite+': expected '+str(count)+' pass, 0 fail, 0 skip')
+            except Exception as error: errors.append(suite+': native summary missing/invalid: '+type(error).__name__)
+        try:
+            persistence=json.loads((out/'copying-paragraphs-persistence.json').read_text())
+            if persistence.get('pass') is not True: errors.append('Durable paragraph fixture failed')
+        except Exception as error: errors.append('Durable paragraph evidence missing/invalid: '+type(error).__name__)
+        proof=dict(pass_=not errors,passedTests=passed,failedTests=failed,skippedTests=skipped,commit=os.environ['GITHUB_SHA'],classes=results,errors=errors,realDevice=False)
+        proof['pass']=proof.pop('pass_')
+        (out/'native-copying-gate.json').write_text(json.dumps(proof,indent=2))
+        print(json.dumps({'pass':proof['pass'],'passedTests':passed,'failedTests':failed,'skippedTests':skipped,'errors':errors}))
+        raise SystemExit(0 if proof['pass'] else 1)
+        PY
+        aggregate_status=$?
+        exit "$aggregate_status"
+    - name: Capture native copying simulator evidence
+      if: always()
+      run: |
+        mkdir -p build/release-evidence
+        if [ -n "${TUTAM_QA_SIMULATOR:-}" ]; then
+          xcrun simctl io "$TUTAM_QA_SIMULATOR" screenshot build/release-evidence/native-copying-final.png || true
+        fi
+        for result in build/release-evidence/*.xcresult; do
+          if [ -d "$result" ]; then
+            xcrun xcresulttool export attachments --path "$result" --output-path "${result%.xcresult}-attachments" || true
           fi
-      - name: Upload native simulator evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-native-guest-smoke-${{ github.run_number }}-${{ matrix.suite }}
-          path: build/release-evidence/
-          if-no-files-found: error
-      - name: Upload native UI count evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-native-count-${{ github.run_number }}-${{ matrix.suite }}
-          path: build/release-evidence/native-ui-summary.json
-          if-no-files-found: error
-
-  audit-result:
-    name: Require all 18 isolated native audit tests
-    if: always() && inputs.test_suite == 'audit'
-    needs: ios
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: ios-native-count-${{ github.run_number }}-*
-          path: qa-counts
-      - name: Require every class with no native failures or skips
-        env:
-          MATRIX_RESULT: ${{ needs.ios.result }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          expected={'smoke':4,'extended':6,'personal':4,'snapshot':2,'audio':1,'typing':1}
-          prefix=f'ios-native-count-{os.environ["GITHUB_RUN_NUMBER"]}-'
-          seen={}
-          for path in Path('qa-counts').glob('*/native-ui-summary.json'):
-              suite=path.parent.name.removeprefix(prefix)
-              assert suite in expected and suite not in seen, f'Unexpected/duplicate suite: {suite}'
-              data=json.loads(path.read_text())
-              assert data['failedTests']==0 and data['skippedTests']==0, f'Failures/skips in {suite}'
-              assert data['passedTests']>=expected[suite], f'Incomplete native execution in {suite}'
-              seen[suite]=data['passedTests']
-          assert set(seen)==set(expected), f'Missing native classes: {set(expected)-set(seen)}'
-          assert os.environ['MATRIX_RESULT']=='success', 'At least one native runner failed'
-          assert sum(seen.values())>=18, 'Incomplete audit execution'
-          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
-              summary.write(f'Native iOS audit: {sum(seen.values())} passed, 0 failed, 0 skipped.\n\n')
-              summary.write('\n'.join(f'- {suite}: {count} passed' for suite,count in seen.items()))
-          PY
+        done
+    - name: Restore ephemeral runner hosts
+      if: always()
+      run: |
+        set -euo pipefail
+        backup="$RUNNER_TEMP/tutam-native-qa-hosts.backup"
+        if [ -f "$backup" ]; then
+          sudo cp "$backup" /etc/hosts
+          sudo dscacheutil -flushcache
+          cmp "$backup" /etc/hosts
+        fi
+    - name: Upload native copying gate evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-copying-audit-${{ github.run_id }}
+        path: build/release-evidence/
+        retention-days: 3
+        if-no-files-found: error
