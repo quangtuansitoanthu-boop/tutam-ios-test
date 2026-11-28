@@ -639,8 +639,35 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
     }
 
     @MainActor
-    private func waitForNativePickerSave(_ app: XCUIApplication) -> NativePickerSaveAction? {
-        let deadline = ProcessInfo.processInfo.systemUptime + 20
+    private func waitForNativePickerSave(_ app: XCUIApplication, functionalTimeout: TimeInterval = 90) -> NativePickerSaveAction? {
+        let started = ProcessInfo.processInfo.systemUptime
+        let deadline = started + functionalTimeout
+        let legacyPerformanceBudget: TimeInterval = 20
+        var readinessObservedAt: TimeInterval? = nil
+        var readinessOutcome = "functional_timeout"
+        defer {
+            let ended = ProcessInfo.processInfo.systemUptime
+            let elapsed = (readinessObservedAt ?? ended) - started
+            let readyWithin20Seconds: Bool
+            if let readyAt = readinessObservedAt {
+                readyWithin20Seconds = readyAt - started <= legacyPerformanceBudget
+            } else {
+                readyWithin20Seconds = false
+            }
+            let lines = [
+                "helperStartedUptime=\(started)",
+                "functionalTimeoutSeconds=\(functionalTimeout)",
+                "legacyPerformanceBudgetSeconds=\(legacyPerformanceBudget)",
+                "firstReadyObservedElapsedSeconds=\(readinessObservedAt == nil ? -1 : elapsed)",
+                "helperWallElapsedSeconds=\(ended - started)",
+                "outcome=\(readinessOutcome)",
+                "readyWithin20Seconds=\(readyWithin20Seconds)"
+            ]
+            let timing = XCTAttachment(string: lines.joined(separator: "\n"))
+            timing.name = "quote-native-picker-readiness"
+            timing.lifetime = .keepAlways
+            add(timing)
+        }
         let sheet = app.otherElements["Browse View (Picker)"].firstMatch
         let navigation = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].firstMatch
         let save = navigation.buttons.matching(NSPredicate(format: "label IN %@", ["Lưu", "Save"] as NSArray)).firstMatch
@@ -653,6 +680,10 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
                 let sheetFrame = sheet.frame
                 let header = screen.intersection(sheetFrame).intersection(navigation.frame)
                 if save.exists && save.isHittable && header.contains(save.frame) {
+                    let observedAt = ProcessInfo.processInfo.systemUptime
+                    guard observedAt < deadline else { break }
+                    readinessObservedAt = observedAt
+                    readinessOutcome = "accessibility"
                     return .accessibility(save)
                 }
                 screenshot = XCUIScreen.main.screenshot()
@@ -679,6 +710,10 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
                         ["luu", "save"].contains($0.label) && header.contains($0.frame)
                     }.map { $0.frame }
                     if candidates.count == 1, let frame = candidates.first {
+                        let observedAt = ProcessInfo.processInfo.systemUptime
+                        guard observedAt < deadline else { break }
+                        readinessObservedAt = observedAt
+                        readinessOutcome = "recognized_text"
                         let image = XCTAttachment(screenshot: screenshot)
                         image.name = "quote-native-picker-visible-save-screen"
                         image.lifetime = .keepAlways
@@ -3277,23 +3312,106 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     }
 
     @MainActor
-    private func hasReadyPhotosAsset(_ photos: XCUIApplication) -> Bool {
-        let libraries = photos.scrollViews.matching(identifier: "content_scroll_view").allElementsBoundByIndex
-        guard libraries.count == 1 else { return false }
-        let first = libraries[0].images.matching(identifier: "PXGGridLayout-Info").firstMatch
+    private func photosLibraryOwnerReady(_ photos: XCUIApplication) -> Bool {
         let viewport = photos.frame
-        return insideViewport(first, viewport: viewport)
+        let tabs = photos.tabBars.buttons.matching(NSPredicate(format: "identifier == %@", "LibraryTab"))
+            .allElementsBoundByIndex
+        return photos.state == .runningForeground && tabs.count == 1 && tabs[0].isSelected &&
+            tabs[0].isEnabled && insideViewport(tabs[0], viewport: viewport) &&
+            visibleButtons(photos, labels: ["Select"]).count == 1 &&
+            visibleButtons(photos, labels: ["Edit", "Sửa", "Chỉnh sửa"]).isEmpty &&
+            photos.alerts.count == 0 && photos.sheets.count == 0 &&
+            XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.count == 0 &&
+            photos.staticTexts.matching(NSPredicate(format: "label == %@", "What’s New in Photos")).count == 0
+    }
+
+    @MainActor
+    private func fullyVisiblePhoto(_ image: XCUIElement, viewport: CGRect) -> Bool {
+        guard image.exists, let snapshot = try? image.snapshot(), snapshot.elementType == .image,
+              snapshot.identifier == "PXGGridLayout-Info", !snapshot.label.isEmpty else { return false }
+        let frame = image.frame
+        return frame.minX.isFinite && frame.minY.isFinite && frame.width.isFinite && frame.height.isFinite &&
+            frame.width >= 44 && frame.height >= 44 && viewport.contains(frame)
+    }
+
+    @MainActor
+    private func hasReadyPhotosAsset(_ photos: XCUIApplication) -> Bool {
+        guard photosLibraryOwnerReady(photos) else { return false }
+        let libraries = photos.scrollViews.matching(NSPredicate(format: "identifier == %@", "content_scroll_view"))
+            .allElementsBoundByIndex
+        guard libraries.count == 1 else { return false }
+        let first = libraries[0].images.matching(NSPredicate(format: "identifier == %@", "PXGGridLayout-Info")).firstMatch
+        // Đây chỉ là inventory đọc được; hành động mở ảnh phải có witness riêng bên dưới.
+        return fullyVisiblePhoto(first, viewport: photos.frame)
     }
 
     @MainActor
     private func photosAssets(_ photos: XCUIApplication) -> [XCUIElement] {
-        // AX Photos 26.2: ảnh thật là Image trong scroll view Library, không phải collection cell.
-        let libraries = photos.scrollViews.matching(identifier: "content_scroll_view").allElementsBoundByIndex
+        let libraries = photos.scrollViews.matching(NSPredicate(format: "identifier == %@", "content_scroll_view"))
+            .allElementsBoundByIndex
         guard libraries.count == 1 else { return [] }
         let viewport = photos.frame
-        return libraries[0].images.matching(identifier: "PXGGridLayout-Info").allElementsBoundByIndex.filter {
-            self.insideViewport($0, viewport: viewport)
+        return libraries[0].images.matching(NSPredicate(format: "identifier == %@", "PXGGridLayout-Info"))
+            .allElementsBoundByIndex.filter { self.fullyVisiblePhoto($0, viewport: viewport) }
+    }
+
+    @MainActor
+    private func closePhotoFrames(_ first: CGRect, _ second: CGRect) -> Bool {
+        // Chỉ dung sai stability; containment viewport bên trên vẫn tuyệt đối.
+        let tolerance = 0.5 / UIScreen.main.scale
+        return abs(first.minX - second.minX) <= tolerance && abs(first.minY - second.minY) <= tolerance &&
+            abs(first.width - second.width) <= tolerance && abs(first.height - second.height) <= tolerance
+    }
+
+    @MainActor
+    private func identifiedPhotoFrame(_ photos: XCUIApplication, key: String) -> (frame: CGRect, viewport: CGRect)? {
+        guard photosLibraryOwnerReady(photos) else { return nil }
+        let identity = key.components(separatedBy: "\u{001F}")
+        guard identity.count == 2, identity[0] == "PXGGridLayout-Info", !identity[1].isEmpty else { return nil }
+        let viewport = photos.frame
+        let libraries = photos.scrollViews.matching(NSPredicate(format: "identifier == %@", "content_scroll_view"))
+            .allElementsBoundByIndex
+        guard libraries.count == 1 else { return nil }
+        let grids = libraries[0].descendants(matching: .other)
+            .matching(NSPredicate(format: "identifier == %@", "PXGGridLayout-Group")).allElementsBoundByIndex
+        guard grids.count == 1 else { return nil }
+        let matches = grids[0].images.matching(NSPredicate(format: "identifier == %@ AND label == %@", identity[0], identity[1]))
+            .allElementsBoundByIndex
+        guard matches.count == 1, let snapshot = try? matches[0].snapshot(),
+              snapshot.elementType == .image, snapshot.identifier == "PXGGridLayout-Info",
+              snapshot.identifier + "\u{001F}" + snapshot.label == key,
+              fullyVisiblePhoto(matches[0], viewport: viewport) else { return nil }
+        let frame = matches[0].frame
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        guard closePhotoFrames(snapshot.frame, frame), viewport.contains(snapshot.frame),
+              snapshot.frame.contains(center), libraries[0].frame.contains(center), grids[0].frame.contains(center) else { return nil }
+        return (frame, viewport)
+    }
+
+    @MainActor
+    @discardableResult
+    private func tapIdentifiedPhoto(key: String, app photos: XCUIApplication, phase: String) -> Bool {
+        guard let first = identifiedPhotoFrame(photos, key: key),
+              let second = identifiedPhotoFrame(photos, key: key), closePhotoFrames(first.frame, second.frame),
+              closePhotoFrames(first.viewport, second.viewport) else {
+            evidence(phase + "-unstable-or-ambiguous-target", app: photos)
+            XCTFail("Chưa xác minh được đúng key ảnh và hai khung ổn định trong Library native; không chạm thử")
+            return false
         }
+        evidence(phase + "-before-real-hit", app: photos)
+        guard let live = identifiedPhotoFrame(photos, key: key), closePhotoFrames(second.frame, live.frame),
+              closePhotoFrames(second.viewport, live.viewport) else {
+            evidence(phase + "-target-changed", app: photos)
+            XCTFail("Target/Library đã đổi sau bằng chứng trước thao tác; không chạm tọa độ cũ")
+            return false
+        }
+        let viewport = live.viewport
+        note(phase + "-real-hit", "key=\(key)\nfirst=\(first)\nsecond=\(second)\nlive=\(live)\nviewport=\(viewport)\n" +
+             "halfPhysicalPixelPoints=\(0.5 / UIScreen.main.scale)\npoint=\(live.frame.midX),\(live.frame.midY)\ntapCount=1\n" +
+             "Image inventory không phải bằng chứng hittable; cần viewer/metadata hoặc full OCR sau thao tác.")
+        photos.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: live.frame.midX - viewport.minX, dy: live.frame.midY - viewport.minY)).tap()
+        return true
     }
 
     @MainActor
@@ -3440,9 +3558,9 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         XCTAssertEqual(added.count, 1, "Nếu AX tái chế/ẩn ô hoặc key trùng thì cần oracle host; không đoán ảnh mới nhất")
         let matches = photosAssets(photos).filter { added.contains(assetKey($0)) }
         XCTAssertEqual(matches.count, 1, "Chỉ mở ô ảnh mới đã phân biệt với baseline")
-        guard matches.count == 1 else { return }
+        guard matches.count == 1, added.count == 1, let addedKey = added.first else { return }
         evidence("share-photos-new-cell-before-open", app: photos)
-        matches[0].tap()
+        guard tapIdentifiedPhoto(key: addedKey, app: photos, phase: "share-photos-new-image") else { return }
         waitUntil("Ảnh mới phải mở trong trình xem Photos native") {
             photos.state == .runningForeground && self.visibleButtons(photos, labels: ["Edit", "Sửa", "Chỉnh sửa"]).count == 1
         }
