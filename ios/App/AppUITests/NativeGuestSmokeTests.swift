@@ -3202,9 +3202,13 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         // Chỉ hai query presence trong waiter 15s; nativeAction vẫn xác minh đầy đủ trước thao tác.
         let sheets = app.descendants(matching: .other)
             .matching(NSPredicate(format: "identifier == %@", "ActivityListView")).allElementsBoundByIndex
+        // Chỉ ghi số đã có; không thêm query AX hoặc bằng chứng chặn vào waiter.
+        NSLog("%@", "[TuTapShareReadiness] uptime=\(ProcessInfo.processInfo.systemUptime) sheetCount=\(sheets.count) saveCellCount=notQueried")
         guard sheets.count == 1 else { return false }
-        return sheets[0].cells.matching(NSPredicate(format: "identifier == %@ AND label IN %@",
-            "actionGroupCell", saveLabels as NSArray)).allElementsBoundByIndex.count == 1
+        let saveCellCount = sheets[0].cells.matching(NSPredicate(format: "identifier == %@ AND label IN %@",
+            "actionGroupCell", saveLabels as NSArray)).allElementsBoundByIndex.count
+        NSLog("%@", "[TuTapShareReadiness] uptime=\(ProcessInfo.processInfo.systemUptime) sheetCount=\(sheets.count) saveCellCount=\(saveCellCount)")
+        return saveCellCount == 1
     }
 
     @MainActor
