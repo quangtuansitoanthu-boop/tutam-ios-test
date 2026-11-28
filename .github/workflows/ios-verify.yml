@@ -102,19 +102,13 @@ jobs:
         import json, os
         data=json.load(open('build/release-evidence/simulator-devices.json'))
         sdk=os.environ['TUTAM_QA_SIMULATOR_SDK_VERSION']
-        expected=tuple(int(part) for part in sdk.split('.'))
-        for runtime, devices in sorted(data['devices'].items(), reverse=True):
-            if '.iOS-' not in runtime:
-                continue
-            version=tuple(int(part) for part in runtime.rsplit('.iOS-',1)[1].split('-'))
-            if version != expected:
-                continue
-            for device in devices:
-                if device.get('isAvailable') and device['name'].startswith('iPhone'):
-                    with open('build/release-evidence/simulator-selection.json','w') as evidence:
-                        json.dump({'sdkVersion':sdk,'runtime':runtime,'device':device['name'],'udid':device['udid']},evidence)
-                    print(device['udid'])
-                    raise SystemExit(0)
+        runtime='com.apple.CoreSimulator.SimRuntime.iOS-'+sdk.replace('.', '-')
+        for device in data['devices'].get(runtime, []):
+            if device.get('isAvailable') and device['name'].startswith('iPhone'):
+                with open('build/release-evidence/simulator-selection.json','w') as evidence:
+                    json.dump({'sdkVersion':sdk,'runtime':runtime,'device':device['name'],'udid':device['udid']},evidence)
+                print(device['udid'])
+                raise SystemExit(0)
         raise SystemExit(f'No available iPhone simulator matching the selected SDK {sdk}')
         PY
         )
