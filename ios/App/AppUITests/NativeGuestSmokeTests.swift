@@ -3078,6 +3078,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     private let libraryLabels = ["Library", "Thư viện", "Photos", "Ảnh"]
     private let emptyLabels = ["No Photos or Videos", "No Photos", "Không có ảnh hoặc video", "Không có ảnh hay video", "Không có ảnh"]
     private var continuedPhotosWelcome = false
+    private var verifiedPhotosWelcomeAbsent = false
     private var declinedPhotosNotifications = false
     private var previousPhotosDenyState: String?
     private var photosDenyReadinessTrace: [[String: Any]] = []
@@ -3414,13 +3415,35 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     }
 
     @MainActor
+    private func photosWelcomeAbsentContext(_ photos: XCUIApplication) -> Bool {
+        guard photos.state == .runningForeground else { return false }
+        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let appAlerts = photos.alerts.allElementsBoundByIndex.filter { $0.exists }
+        let systemAlerts = system.alerts.allElementsBoundByIndex.filter { $0.exists }
+        let alerts = appAlerts + systemAlerts
+        if !alerts.isEmpty {
+            let expected = "photos would like to send you notifications"
+            guard appAlerts.count <= 1, systemAlerts.count <= 1, alerts.allSatisfy({ alert in
+                self.normalized(alert.label) == expected || alert.staticTexts.allElementsBoundByIndex
+                    .contains { self.normalized($0.label) == expected }
+            }) else { return false }
+            // Hai owner có thể phản chiếu cùng một native alert, không chấp nhận hai prompt khác nhau.
+            return appAlerts.isEmpty || systemAlerts.isEmpty || appAlerts[0].frame == systemAlerts[0].frame
+        }
+        return photosLibraryOwnerReady(photos) && photos.sheets.count == 0 &&
+            photos.descendants(matching: .popover).count == 0 &&
+            photos.scrollViews.matching(NSPredicate(format: "identifier == %@", "content_scroll_view"))
+                .allElementsBoundByIndex.count == 1
+    }
+
+    @MainActor
     private func preparePhotosFirstRun(_ photos: XCUIApplication, phase: String) -> Bool {
         // Setup OS có hai ngân sách riêng; không lấy thời gian từ Library20 hay oracle Share/TCC.
-        if !continuedPhotosWelcome || !declinedPhotosNotifications {
+        if (!continuedPhotosWelcome && !verifiedPhotosWelcomeAbsent) || !declinedPhotosNotifications {
             note(phase + "-setup-budget", "Photos welcome:20s; Photos notification:20s; Library readiness:20s. Test total remains600s.")
         }
         let welcome = photos.staticTexts.matching(NSPredicate(format: "label == %@", "What’s New in Photos"))
-        if !continuedPhotosWelcome {
+        if !continuedPhotosWelcome && !verifiedPhotosWelcomeAbsent {
             var closed = false
             waitUntil("Photos first-run welcome phải đóng sau một lần Continue thực", timeout: 20) {
                 if self.continuedPhotosWelcome {
@@ -3428,6 +3451,12 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
                     return closed
                 }
                 let titles = welcome.allElementsBoundByIndex
+                if titles.isEmpty && self.photosWelcomeAbsentContext(photos) {
+                    self.verifiedPhotosWelcomeAbsent = true
+                    closed = true
+                    self.note(phase + "-welcome-not-presented", "verifiedAbsent=true\ncontinueTapCount=0")
+                    return true
+                }
                 guard titles.count == 1, self.insideViewport(titles[0], app: photos) else { return false }
                 let controls = self.visibleButtons(photos, labels: ["Continue"])
                 guard controls.count == 1 else { return false }
@@ -3437,8 +3466,8 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
                 controls[0].tap()
                 return false
             }
-            XCTAssertTrue(continuedPhotosWelcome && closed, "Photos welcome setup phải hoàn tất qua UI thật")
-            guard continuedPhotosWelcome && closed else {
+            XCTAssertTrue((continuedPhotosWelcome || verifiedPhotosWelcomeAbsent) && closed, "Photos welcome phải được đóng qua UI thật hoặc vắng mặt trong context OS đã xác minh")
+            guard (continuedPhotosWelcome || verifiedPhotosWelcomeAbsent) && closed else {
                 observePhotosReadinessFailure(photos, phase: phase + "-welcome-setup")
                 return false
             }
