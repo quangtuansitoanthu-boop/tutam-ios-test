@@ -167,7 +167,7 @@ jobs:
               output.write('TUTAM_QA_HOSTS_ISOLATED=1\n')
           PY
       - name: Prepare installed simulator dyld shared caches for tools QA
-        if: inputs.test_suite == 'closing' || inputs.test_suite == 'tools' || inputs.test_suite == 'audit' || inputs.test_suite == 'followup' || env.IOS_TEST_SUITE == 'share'
+        if: inputs.test_suite == 'closing' || inputs.test_suite == 'tools' || inputs.test_suite == 'audit' || inputs.test_suite == 'followup' || env.IOS_TEST_SUITE == 'share' || env.IOS_TEST_SUITE == 'typing'
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -383,6 +383,109 @@ jobs:
               > build/release-evidence/quote-feedback-recording-clock.txt
             trap stop_quote_video EXIT
           fi
+          # Typing-only observer: raw engine logs stay private until EXIT sanitization.
+          # Narrow debug streaming adds CPU/I/O; parsing happens after UI, not during cold startup.
+          typing_observer_pid=''
+          stop_typing_observer() {
+            typing_test_status=$?
+            trap - EXIT
+            set +e
+            python3 - "$typing_observer_pid" "$$" <<'PY'
+          import datetime, json, os, pathlib, re, signal, subprocess, sys, time
+          root = pathlib.Path(os.environ['TUTAM_TYPING_LOG_DIR'])
+          assert root.resolve().parent == pathlib.Path(os.environ['RUNNER_TEMP']).resolve()
+          assert root.name.startswith('tutam-typing-webkit-' + os.environ['GITHUB_RUN_ID'] + '-')
+          owner = json.loads((root / 'owner.json').read_text())
+          assert owner['run'] == os.environ['GITHUB_RUN_ID'] and owner['attempt'] == os.environ['GITHUB_RUN_ATTEMPT']
+          assert owner['head'] == os.environ['GITHUB_SHA'] and owner['simulator'] == os.environ['TUTAM_QA_SIMULATOR']
+          assert owner['parent'] == int(sys.argv[2]) and owner['uid'] == os.getuid()
+          assert owner['nonce'] == os.environ['TUTAM_TYPING_LOG_NONCE']
+          pid = int(sys.argv[1] or '0')
+          def identity():
+              if pid <= 1: return None
+              result = subprocess.run(['ps', '-p', str(pid), '-o', 'ppid=', '-o', 'state=', '-o', 'command='], capture_output=True, text=True)
+              if result.returncode not in [0, 1]: return False
+              row = result.stdout.strip().split(None, 2)
+              if not row or (len(row) == 3 and 'Z' in row[1]): return None
+              return len(row) == 3 and int(row[0]) == owner['parent'] and ('simctl spawn ' + owner['simulator'] + ' log stream') in row[2]
+          signals = []
+          for sig in [signal.SIGINT, signal.SIGTERM, signal.SIGKILL]:
+              if identity() is not True: break
+              try: os.kill(pid, sig); signals.append(sig.name)
+              except ProcessLookupError: break
+              for _ in range(10):
+                  if identity() is not True: break
+                  time.sleep(0.05)
+          stopped = identity() is None
+          raw, stderr = root / 'stream.json', root / 'stderr.txt'
+          raw_size = raw.stat().st_size if raw.is_file() else 0
+          stderr_size = stderr.stat().st_size if stderr.is_file() else 0
+          text = raw.read_text(errors='replace') if raw.is_file() else ''
+          decoder, at, rows, discarded = json.JSONDecoder(), 0, [], 0
+          while at < len(text):
+              if text[at].isspace() or text[at] in '[],': at += 1; continue
+              try: row, end = decoder.raw_decode(text, at); at = end
+              except json.JSONDecodeError:
+                  discarded += 1; end = text.find('\n', at); at = len(text) if end < 0 else end + 1; continue
+              if isinstance(row, dict): rows.append(row)
+          secret = re.compile(r'authorization|cookie|bearer|credential|password|token|secret|username', re.I)
+          url = re.compile(r'\b(?:https?|capacitor|file)://[^\s<>"\x27]+', re.I)
+          query = re.compile(r'[?&][^\s<>"\x27]+')
+          sanitized = []
+          for row in rows[:10000]:
+              message = str(row.get('eventMessage', ''))
+              message = '[sensitive-record-redacted]' if secret.search(message) else query.sub('[query-redacted]', url.sub('[url-redacted]', message))
+              sanitized.append({key: row.get(key) for key in ['timestamp', 'processID', 'subsystem', 'category', 'messageType']} |
+                               {'process': pathlib.Path(str(row.get('processImagePath', ''))).name, 'eventMessage': message[:1000]})
+          out = pathlib.Path('build/release-evidence'); out.mkdir(parents=True, exist_ok=True)
+          (out / 'typing-webkit-sanitized.jsonl').write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in sanitized))
+          cleaned = False
+          if stopped:
+              for name in ['stream.json', 'stderr.txt', 'owner.json']:
+                  item = root / name
+                  assert item.resolve().parent == root.resolve() and not item.is_symlink()
+                  item.unlink(missing_ok=True)
+              root.rmdir(); cleaned = True
+          report = dict(owner, finishedUTC=datetime.datetime.now(datetime.timezone.utc).isoformat(), observerPid=pid,
+                        signals=signals, observerStopped=stopped, privateDirectoryCleaned=cleaned,
+                        rawBytes=raw_size, stderrBytes=stderr_size, decodedRecords=len(rows), hasDecodedRecords=bool(rows), uploadedRecords=len(sanitized),
+                        discardedFragments=discarded, uploadRecordLimit=10000, rawOutsideReleaseEvidence=True,
+                        observerEffect='Narrow debug streaming adds CPU/I/O; parsing and sanitization happen after UI test exit.')
+          (out / 'typing-webkit-observer.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
+            typing_cleanup_status=$?
+            if [ "$typing_cleanup_status" -ne 0 ]; then
+              printf '::warning::Typing observer cleanup/sanitization failed (%s); private raw logs were never upload inputs.\n' "$typing_cleanup_status"
+            fi
+            exit "$typing_test_status"
+          }
+          if [ "$IOS_TEST_SUITE" = typing ]; then
+            test "$GITHUB_ACTIONS" = true
+            test "$RUNNER_OS" = macOS
+            test -n "$TUTAM_QA_SIMULATOR"
+            export TUTAM_TYPING_LOG_DIR TUTAM_TYPING_LOG_NONCE
+            TUTAM_TYPING_LOG_DIR=$(mktemp -d "$RUNNER_TEMP/tutam-typing-webkit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.XXXXXX")
+            TUTAM_TYPING_LOG_NONCE=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
+            python3 - "$$" <<'PY'
+          import datetime, json, os, pathlib, subprocess, sys
+          expected = {"ios/App/App/TuTapBridgeViewController.swift":"74d885b06f5aab04318b7008922b47bf04101b3f","ios/App/AppUITests/NativeGuestSmokeTests.swift":"4d7048c042e30bdbde98a7b1f11974f7370f69f0","src/lib/styles/ui-refresh.css":"ca764b12ac2e3c60537ec43b60992ca1cdf16f52","package.json":"a1e99a3924cd4fb27abb48e261df143ec47f1955","package-lock.json":"ad9436d6a9e85ec283e9b000adb614afc122c33d"}
+          for name, blob in expected.items():
+              assert subprocess.check_output(['git', 'rev-parse', 'HEAD:' + name], text=True).strip() == blob, 'Diagnostic source drift: ' + name
+          root = pathlib.Path(os.environ['TUTAM_TYPING_LOG_DIR'])
+          assert root.resolve().parent == pathlib.Path(os.environ['RUNNER_TEMP']).resolve()
+          owner = {'baseSource': '13fe09f45a2f455fff89e0295b826026d86bc98c', 'run': os.environ['GITHUB_RUN_ID'],
+                   'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'head': os.environ['GITHUB_SHA'],
+                   'simulator': os.environ['TUTAM_QA_SIMULATOR'], 'parent': int(sys.argv[1]), 'uid': os.getuid(),
+                   'nonce': os.environ['TUTAM_TYPING_LOG_NONCE'], 'startedUTC': datetime.datetime.now(datetime.timezone.utc).isoformat()}
+          (root / 'owner.json').write_text(json.dumps(owner))
+          PY
+            # Quote's original trap above is unchanged; Quote and Typing are mutually exclusive.
+            trap stop_typing_observer EXIT
+            xcrun simctl spawn "$TUTAM_QA_SIMULATOR" log stream --level debug --style json \
+              --predicate 'subsystem BEGINSWITH[c] "com.apple.WebKit" OR process == "WebContent" OR process == "Networking" OR process == "com.apple.WebKit.WebContent" OR process == "com.apple.WebKit.Networking"' \
+              > "$TUTAM_TYPING_LOG_DIR/stream.json" 2> "$TUTAM_TYPING_LOG_DIR/stderr.txt" &
+            typing_observer_pid=$!
+          fi
           xcodebuild \
             -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
             -sdk iphonesimulator -destination "platform=iOS Simulator,id=$TUTAM_QA_SIMULATOR" \
@@ -484,6 +587,33 @@ jobs:
           if [ -d "$result" ]; then
             xcrun xcresulttool export attachments --path "$result" --output-path build/release-evidence/native-ui-attachments
           fi
+      - name: Capture packaged startup entry after Typing
+        if: always() && matrix.suite == 'typing'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_OS" = macOS
+          python3 - <<'PY'
+          import datetime, hashlib, json, pathlib, re, urllib.parse
+          public = pathlib.Path('build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app/public').resolve()
+          entry = public / 'index.html'
+          result = {'captureStepAfterUITest': True, 'uiSummaryPresent': pathlib.Path('build/release-evidence/native-ui-summary.json').is_file(), 'capturedUTC': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    'entry': 'public/index.html', 'exists': entry.is_file(), 'bytes': entry.stat().st_size if entry.is_file() else 0,
+                    'scope': 'File metadata only; no HTML, JS, app-data contents or external requests are exported.', 'linkedLocalFiles': []}
+          if entry.is_file():
+              data = entry.read_bytes(); result['sha256'] = hashlib.sha256(data).hexdigest()
+              refs = re.findall(r"(?:import\(\s*|(?:src|href)=\s*)[\"']([^\"']+)", data.decode(errors='replace'))
+              for ref in sorted(set(refs))[:32]:
+                  parts = urllib.parse.urlsplit(ref)
+                  if parts.scheme or parts.netloc: continue
+                  linked = (public / parts.path.lstrip('/')).resolve()
+                  try: relative = linked.relative_to(public)
+                  except ValueError: continue
+                  result['linkedLocalFiles'].append({'path': relative.as_posix(), 'exists': linked.is_file(),
+                                                     'bytes': linked.stat().st_size if linked.is_file() else 0})
+          out = pathlib.Path('build/release-evidence'); out.mkdir(parents=True, exist_ok=True)
+          (out / 'typing-packaged-startup-entry.json').write_text(json.dumps(result, indent=2) + '\n')
+          PY
       - name: Verify registered native history removal with owned simulator fixtures
         if: always() && matrix.suite == 'audio'
         timeout-minutes: 2
