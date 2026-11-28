@@ -167,7 +167,7 @@ jobs:
               output.write('TUTAM_QA_HOSTS_ISOLATED=1\n')
           PY
       - name: Prepare installed simulator dyld shared caches for tools QA
-        if: inputs.test_suite == 'closing' || inputs.test_suite == 'tools' || inputs.test_suite == 'audit' || inputs.test_suite == 'followup' || env.IOS_TEST_SUITE == 'share'
+        if: inputs.test_suite == 'closing' || inputs.test_suite == 'tools' || inputs.test_suite == 'audit' || inputs.test_suite == 'followup' || env.IOS_TEST_SUITE == 'share' || env.IOS_TEST_SUITE == 'smoke'
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -277,6 +277,47 @@ jobs:
             -derivedDataPath build/ios-simulator \
             "${testing_args[@]}" \
             CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: Verify latest book in the built iOS app
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          expected_sha = 'a2e14e4a5132285d3a56d94102b7dc5a0e265e0a56d656d530edf0d56d9d9d9b'
+          expected_bytes = 2225196
+          expected_ids = [str(value) for value in range(14533, 14573)]
+          paths = {
+              'source': pathlib.Path('static/offline-data/chapters/kinh-dai-bat-niet-ban.json'),
+              'nativePublic': pathlib.Path('ios/App/App/public/offline-data/chapters/kinh-dai-bat-niet-ban.json'),
+              'app': pathlib.Path('build/ios-simulator/Build/Products/Debug-iphonesimulator/App.app/public/offline-data/chapters/kinh-dai-bat-niet-ban.json'),
+          }
+          copies = {}
+          for label, path in paths.items():
+              assert path.is_file(), 'Missing latest-book copy: ' + label
+              data = path.read_bytes()
+              assert len(data) == expected_bytes, 'Latest-book byte-count mismatch: ' + label
+              assert hashlib.sha256(data).hexdigest() == expected_sha, 'Latest-book SHA256 mismatch: ' + label
+              rows = json.loads(data)
+              assert isinstance(rows, list) and len(rows) == 40, 'Latest-book chapter-count mismatch: ' + label
+              assert all(isinstance(row, dict) for row in rows), 'Invalid latest-book chapter record: ' + label
+              ids = [row.get('id') for row in rows]
+              assert ids == expected_ids and len(set(ids)) == 40, 'Latest-book chapter ID/order mismatch: ' + label
+              assert [row.get('so_thu_tu') for row in rows] == list(range(40)), 'Latest-book chapter sequence mismatch: ' + label
+              assert all(isinstance(row.get('noi_dung'), str) and row['noi_dung'].strip() for row in rows), 'Empty latest-book chapter body: ' + label
+              copies[label] = data
+          assert copies['source'] == copies['nativePublic'] == copies['app'], 'Latest-book copies differ'
+          proof = {
+              'schemaVersion': 1, 'head': os.environ['GITHUB_SHA'], 'book': 'kinh-dai-bat-niet-ban',
+              'expectedSHA256': expected_sha, 'bytes': expected_bytes, 'chapterCount': 40,
+              'chapterIds': expected_ids, 'chapterOrder': list(range(40)), 'nonemptyBodyCount': 40,
+              'sourcePath': paths['source'].as_posix(), 'sourceSHA256': hashlib.sha256(copies['source']).hexdigest(),
+              'nativePublicPath': paths['nativePublic'].as_posix(), 'nativePublicSHA256': hashlib.sha256(copies['nativePublic']).hexdigest(),
+              'appPath': paths['app'].as_posix(), 'appSHA256': hashlib.sha256(copies['app']).hexdigest(),
+              'allCopiesByteIdentical': True, 'scope': 'File hashes, sizes and chapter metadata only; no chapter text.',
+          }
+          out = pathlib.Path('build/release-evidence')
+          out.mkdir(parents=True, exist_ok=True)
+          (out / 'ios-latest-book-bundle-proof.json').write_text(json.dumps(proof, indent=2) + '\n', encoding='utf-8')
+          PY
       - name: Verify the packaged Phap thoai media fixture
         if: env.IOS_TEST_SUITE == 'audio' || env.IOS_TEST_SUITE == 'audit'
         run: |
