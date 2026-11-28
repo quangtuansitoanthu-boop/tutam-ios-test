@@ -9,7 +9,7 @@ concurrency:
 jobs:
   ios:
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 80
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
       TUTAM_QA_SIMULATOR_SDK_VERSION: '27.2'
@@ -93,7 +93,7 @@ jobs:
         with open(os.environ['GITHUB_ENV'],'a') as output:
             output.write('TUTAM_QA_HOSTS_ISOLATED=1\n')
         PY
-    - name: Select and boot an available iPhone simulator
+    - name: Select an available iPhone simulator
       run: |
         set -euo pipefail
         test "$TUTAM_QA_HOSTS_ISOLATED" = 1
@@ -134,12 +134,8 @@ jobs:
         with open('build/release-evidence/simulator-keyboard-preferences.json','w') as evidence:
             json.dump({'selectedDevicePrevious':previous,'globalHardwareKeyboard':False,'selectedDeviceHardwareKeyboard':False},evidence)
         PY
-        if ! xcrun simctl list devices booted | grep -Fq "$simulator_id"; then
-          xcrun simctl boot "$simulator_id"
-        fi
-        xcrun simctl bootstatus "$simulator_id" -b
     - name: Build native copying UI tests against frozen release assets
-      timeout-minutes: 12
+      timeout-minutes: 25
       run: |
         set -euo pipefail
         node --input-type=module <<'JS'
@@ -147,7 +143,10 @@ jobs:
         const sha=b=>createHash('sha256').update(b).digest('hex');
         if(sha(fs.readFileSync('ios/App/AppUITests/NativeGuestSmokeTests.swift'))!=='a6f3688253b72349c65176ce118d99c57b85b4ea5f660b80f326b129be2cb61d')throw Error('UI test source changed');
         JS
-        xcodebuild -quiet -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
+        # Compile before starting Simulator so its first boot cannot compete with the cold build.
+        sysctl hw.ncpu hw.memsize
+        vm_stat > build/release-evidence/memory-before-native-build.txt
+        /usr/bin/time -l xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug \
           -sdk iphonesimulator -destination "platform=iOS Simulator,id=$TUTAM_QA_SIMULATOR" \
           -derivedDataPath build/ios-simulator \
           -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingDiaTangReferenceTOCAndTypedGhost \
@@ -156,7 +155,7 @@ jobs:
           -only-testing:AppUITests/NativeCopyingReferenceTests/testCopyingDuocSuReferenceFormattingAndTypedGhost \
           -only-testing:AppUITests/NativeExtendedGuestTests/testNativeScriptureCopyingReferenceAndGhost \
           -only-testing:AppUITests/NativeCopyingParagraphTests/testNativeCopyingPreservesEmptyParagraphsInDurableDraft \
-          CODE_SIGNING_ALLOWED=NO build-for-testing
+          CODE_SIGNING_ALLOWED=NO build-for-testing 2>&1 | tee build/release-evidence/native-build.log
         node --input-type=module <<'JS'
         import fs from 'node:fs'; import path from 'node:path'; import {createHash} from 'node:crypto';
         const sha=b=>createHash('sha256').update(b).digest('hex');
@@ -166,6 +165,14 @@ jobs:
         for(const file of JSON.parse(raw).files){const data=fs.readFileSync(path.join(root,file.path));if(data.length!==file.bytes||sha(data)!==file.sha256)throw Error(file.path);}
         fs.writeFileSync('build/release-evidence/simulator-assets-proof.json',JSON.stringify({manifestSHA256:sha(raw),assets:JSON.parse(raw).files.length,commit:process.env.GITHUB_SHA,pass:true},null,2));
         JS
+    - name: Boot the selected iPhone after native build
+      timeout-minutes: 8
+      run: |
+        set -euo pipefail
+        if ! xcrun simctl list devices booted | grep -Fq "$TUTAM_QA_SIMULATOR"; then
+          xcrun simctl boot "$TUTAM_QA_SIMULATOR"
+        fi
+        xcrun simctl bootstatus "$TUTAM_QA_SIMULATOR" -b
     - name: Require all six targeted native copying tests
       timeout-minutes: 40
       run: |
