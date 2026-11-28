@@ -13,6 +13,7 @@ function appendInkText(target: HTMLElement, text: string, noteMask: string): voi
     const right = left + note[0].length;
     if (left > start) target.append(text.slice(start, left));
     const emphasis = document.createElement('em');
+    emphasis.style.textTransform = 'none';
     emphasis.textContent = text.slice(left, right);
     target.append(emphasis);
     start = right;
@@ -35,6 +36,7 @@ export function renderCopyRuns(target: HTMLElement, runs: TypedRun[], start = 0,
       group.style.textAlign = run.align; fragment.append(group); previousLine = run.line;
     }
     const span = document.createElement(run.bold ? 'strong' : 'span');
+    if (run.uppercase) span.style.textTransform = 'uppercase';
     appendInkText(span, text, noteMask.slice(left, right));
     group.append(span);
   }
@@ -66,6 +68,7 @@ function renderReferenceRuns(target: HTMLElement, runs: TypedRun[], typedLength:
       && manuscript.endsWith('\n') && !group.hasChildNodes();
     if (length || (ink && offset === 0) || nextParagraph) {
       const typed = document.createElement(run.bold ? 'strong' : 'span');
+      if (run.uppercase) typed.style.textTransform = 'uppercase';
       const text = run.text.slice(0, length);
       appendInkText(typed, text, noteMask.slice(offset, offset + length));
       if (!ink) typed.style.visibility = 'hidden';
@@ -75,6 +78,7 @@ function renderReferenceRuns(target: HTMLElement, runs: TypedRun[], typedLength:
     }
     if (length < run.text.length) {
       const future = document.createElement(run.bold ? 'strong' : 'span');
+      if (run.uppercase) future.style.textTransform = 'uppercase';
       if (ink) {
         future.dataset.copyFuture = run.text.slice(length);
         future.setAttribute('contenteditable', 'false'); future.setAttribute('aria-hidden', 'true');

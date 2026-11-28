@@ -6,7 +6,7 @@ import phapHoa from '../../src/lib/data/scripture-copying/phap-hoa.json' with { 
 import langNghiem from '../../src/lib/data/scripture-copying/lang-nghiem.json' with { type: 'json' };
 import duocSu from '../../src/lib/data/scripture-copying/duoc-su.json' with { type: 'json' };
 import { copySourceText } from '../../src/lib/domain/practice/copying-formatting';
-import { deferStartupNotification } from './runtime-helpers';
+import { chooseCopyReference, deferStartupNotification, openCopyReferenceToc } from './runtime-helpers';
 
 interface ReaderChapter { so_thu_tu: number; tieu_de: string; noi_dung: string }
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -37,8 +37,10 @@ for (const [book, count] of [[diaTang, 15], [phapHoa, 28], [langNghiem, 10], [du
     await page.locator('.books button').filter({ hasText: new RegExp(book.title, 'i') }).click();
     await expect(page.getByTestId('copying-preparation')).toBeVisible();
     await page.getByTestId('confirm-copying-guide').click();
-    const reference = page.locator('#copy-block');
-    await expect(reference.locator('option')).toHaveCount(count);
+    const toc = await openCopyReferenceToc(page);
+    await expect(toc.getByRole('navigation', { name: 'Mục lục kinh mẫu', exact: true }).getByRole('button')).toHaveCount(count);
+    await toc.getByRole('button', { name: 'Đóng', exact: true }).click();
+    await expect(toc).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Chữ mờ', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Lưu lên máy chủ', exact: true })).toBeVisible();
@@ -57,8 +59,10 @@ for (const [book, count] of [[diaTang, 15], [phapHoa, 28], [langNghiem, 10], [du
       .sort((left, right) => left.so_thu_tu - right.so_thu_tu);
     expect(chapters).toHaveLength(count);
     for (const [index, chapter] of chapters.entries()) {
-      await reference.selectOption(String(index));
-      await expect(reference.locator('option:checked')).toContainText(chapter.tieu_de);
+      const contents = await openCopyReferenceToc(page);
+      const entry = contents.getByRole('navigation', { name: 'Mục lục kinh mẫu', exact: true }).getByRole('button').nth(index);
+      await expect(entry.locator('span')).toContainText(`${index + 1}. ${chapter.tieu_de}`);
+      await chooseCopyReference(page, index);
       const comparison = await page.evaluate(html => {
         const document = new DOMParser().parseFromString(html, 'text/html');
         const parts: string[] = [];
@@ -84,6 +88,12 @@ for (const [book, count] of [[diaTang, 15], [phapHoa, 28], [langNghiem, 10], [du
       expect({ section: chapter.tieu_de, words: sha(comparison.actual) })
         .toEqual({ section: chapter.tieu_de, words: sha(comparison.expected) });
     }
+    const selectedToc = await openCopyReferenceToc(page);
+    const selectedEntry = selectedToc.getByRole('navigation', { name: 'Mục lục kinh mẫu', exact: true }).getByRole('button').nth(count - 1);
+    await expect(selectedEntry).toHaveAttribute('aria-current', 'true');
+    await expect(selectedEntry.locator('small')).toHaveText('Đang xem');
+    await selectedToc.getByRole('button', { name: 'Đóng', exact: true }).click();
+    await expect(selectedToc).toHaveCount(0);
     expect(await drafts(page)).toBe(before);
     expect(requests).toEqual([]);
     await page.getByRole('button', { name: 'Chữ mờ', exact: true }).click();
@@ -92,7 +102,7 @@ for (const [book, count] of [[diaTang, 15], [phapHoa, 28], [langNghiem, 10], [du
     // Browsing the reference itself must remain read-only in either mode.
     const afterGhost = await drafts(page);
     for (const index of [0, count - 1]) {
-      await reference.selectOption(String(index));
+      await chooseCopyReference(page, index);
       expect(await drafts(page)).toBe(afterGhost);
     }
     expect(requests).toEqual([]);

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { copySourceText } from '../../src/lib/domain/practice/copying-formatting';
 import { normalizeCopyText } from '../../src/lib/domain/practice/scripture-copying';
 import { copyingBlockCompleted, copyingTextCompletion } from '../../src/lib/domain/practice/copying-completion-progress';
-import { beginScriptureCopying, deferStartupNotification, loginAsAdmin } from './runtime-helpers';
+import { beginScriptureCopying, chooseCopyReference, deferStartupNotification, loginAsAdmin, openCopyReferenceToc } from './runtime-helpers';
 const book = JSON.parse(readFileSync(new URL('../../src/lib/data/scripture-copying/dia-tang.json', import.meta.url), 'utf8'));
 
 const editorFor = (page: Page) => page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true });
@@ -92,7 +92,7 @@ test('native iOS keeps the copying workspace inside the safe area without WebKit
   await expect(page.getByRole('dialog', { name: 'Rà soát đoạn này', exact: true })).toBeVisible();
 });
 
-test('fullscreen and compact mobile settings preserve the draft and default to pages', async ({ page }) => {
+test('fullscreen and compact mobile settings preserve the draft and default to continuous scrolling', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/tu-tap/chep-kinh');
   await beginScriptureCopying(page);
@@ -110,7 +110,10 @@ test('fullscreen and compact mobile settings preserve the draft and default to p
   await expect(page.locator('#copy-editor-tools')).toBeHidden();
   await editorOptions.click();
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
-  await expect(page.getByRole('button', { name: 'Cuộn liên tục', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  const continuousMode = page.locator('.editor-scroll-mode-toggle');
+  await expect(continuousMode).toHaveAttribute('aria-pressed', 'true');
+  await expect(continuousMode).toBeHidden();
+  await expect(page.locator('.editor-pages')).toHaveCount(0);
   await editorFor(page).pressSequentially('Nam mô Địa Tạng Bồ Tát');
   await page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true }).click();
   await page.locator('#mobile-copy-font').selectOption('mali');
@@ -265,9 +268,14 @@ test('a locally saved copy can leave through every main navigation tab after con
 });
 
 test('reference follows a long imperfect copy, returns with the caret, and review stays advisory', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await open(page);
+  const scrollMode = page.getByRole('button', { name: 'Cuộn liên tục', exact: true });
+  await expect(scrollMode).toBeVisible();
+  await scrollMode.click();
+  await expect(scrollMode).toHaveAttribute('aria-pressed', 'false');
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#copy-source-text').evaluate(node => {
     const target = node as HTMLElement & { scrollCalls: number };
     target.scrollCalls = 0;
@@ -300,8 +308,13 @@ test('reference follows a long imperfect copy, returns with the caret, and revie
 
 test('writing pages reflow across fonts, viewport changes and reload without rewriting text', async ({ page }) => {
   test.setTimeout(60_000);
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await open(page);
+  const scrollMode = page.getByRole('button', { name: 'Cuộn liên tục', exact: true });
+  await expect(scrollMode).toBeVisible();
+  await scrollMode.click();
+  await expect(scrollMode).toHaveAttribute('aria-pressed', 'false');
+  await page.setViewportSize({ width: 390, height: 844 });
   const typed = longImperfectDraft();
   await editorFor(page).pressSequentially(typed);
   await expect.poll(() => localText(page)).toBe(typed);
@@ -321,10 +334,20 @@ test('writing pages reflow across fonts, viewport changes and reload without rew
     await expect(page.getByRole('button', { name: 'Rà soát đoạn này', exact: true })).toBeInViewport();
     expect(await localText(page)).toBe(typed);
   }
+  // Re-entering defaults to continuous; explicitly select the PC page mode again.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await beginScriptureCopying(page);
+  // Leave browser fullscreen through the real desktop control before resizing.
+  await page.getByRole('button', { name: 'Thoát toàn màn hình', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+  await expect(scrollMode).toHaveAttribute('aria-pressed', 'true');
+  await scrollMode.click();
+  await expect(scrollMode).toHaveAttribute('aria-pressed', 'false');
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('.editor-tools-trigger').click();
-  await expect(page.getByRole('button', { name: 'Cuộn liên tục', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.editor-scroll-mode-toggle')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.editor-scroll-mode-toggle')).toBeHidden();
   await expect.poll(async () => Number((await page.locator('.editor-pages output').textContent())!.split('/')[1])).toBeGreaterThan(1);
   await expect.poll(async () => editorFor(page).evaluate(node => node.scrollHeight - node.clientHeight)).toBeLessThanOrEqual(1);
   expect(await localText(page)).toBe(typed);
@@ -643,4 +666,177 @@ test('reference highlights and scrolls along typed IME words after switching fro
   const lastWord = words.at(-1)!;
   await expect(source.locator('.source-word--current')).toContainText(new RegExp(lastWord, 'i'));
   await expect.poll(() => source.evaluate(node => node.scrollTop)).toBeGreaterThan(20);
+});
+
+// Real app shell/CSS regression; native flags model layout only, not native plugins.
+test.describe('copying chooser header spacing', () => {
+  const shells = [
+    { name: 'web', native: false, safeTop: 0 },
+    { name: 'native Android CSS', native: true, safeTop: 48 },
+    { name: 'native iOS CSS', native: true, safeTop: 59 },
+  ] as const;
+  for (const width of [375, 390]) for (const shell of shells) for (const theme of ['light', 'dark'] as const) {
+    test('chooser follows the actual header at ' + width + 'px / ' + shell.name + ' / ' + theme, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto('/tu-tap/chep-kinh', { waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('start-copying')).toBeEnabled();
+      await page.evaluate(async ({ native, safeTop, theme }) => {
+        const root = document.documentElement;
+        root.dataset.nativeApp = String(native);
+        root.style.setProperty('--app-safe-top', String(safeTop) + 'px');
+        root.dataset.theme = theme;
+        await document.fonts.ready;
+        window.scrollTo(0, 0);
+      }, { native: shell.native, safeTop: shell.safeTop, theme });
+      const header = page.locator('.qts-shell > .qts-nav');
+      await expect(header).toBeVisible();
+      await expect(page.locator('.tt-topbar')).toHaveCount(0);
+      await expect(page.locator('.copy-page:not(.copy-writing) .choose-header')).toBeVisible();
+      await expect(page.locator('.books')).toBeVisible();
+      const geometry = await page.evaluate(() => {
+        const header = document.querySelector<HTMLElement>('.qts-shell > .qts-nav')!;
+        const chooser = document.querySelector<HTMLElement>('.copy-page:not(.copy-writing) .choose-header')!;
+        const eyebrow = chooser.querySelector<HTMLElement>('.eyebrow')!;
+        const headerRect = header.getBoundingClientRect();
+        const chooserRect = chooser.getBoundingClientRect();
+        const eyebrowRect = eyebrow.getBoundingClientRect();
+        return {
+          headerPosition: getComputedStyle(header).position,
+          headerBottom: headerRect.bottom,
+          chooserTop: chooserRect.top,
+          eyebrowTop: eyebrowRect.top,
+          contentGap: chooserRect.top - headerRect.bottom,
+          eyebrowGap: eyebrowRect.top - headerRect.bottom,
+          inlineLeading: eyebrowRect.top - chooserRect.top,
+          lineHeight: Number.parseFloat(getComputedStyle(chooser).lineHeight),
+          pageSpace: Number.parseFloat(getComputedStyle(chooser).getPropertyValue('--space-page')),
+          scrollY: window.scrollY,
+        };
+      });
+      expect(['static', 'relative', 'sticky']).toContain(geometry.headerPosition);
+      expect(geometry.scrollY).toBe(0);
+      expect(geometry.pageSpace).toBeGreaterThan(0);
+      expect(geometry.contentGap).toBeGreaterThanOrEqual(-1);
+      expect(geometry.contentGap).toBeLessThanOrEqual(geometry.pageSpace + 1);
+      // Inline text ink may begin below its block line box; no second header may be reserved.
+      expect(geometry.inlineLeading).toBeGreaterThanOrEqual(-1);
+      expect(geometry.inlineLeading).toBeLessThanOrEqual(geometry.lineHeight);
+      expect(geometry.eyebrowGap).toBeLessThanOrEqual(geometry.pageSpace + Math.max(0, geometry.inlineLeading) + 1);
+    });
+  }
+});
+
+
+test('reference contents keeps fifteen sections, current status and modal dismissal read-only', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const requests: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/practice/copying') requests.push(request.method()); });
+  await open(page);
+  const editor = editorFor(page);
+  const typed = 'Nam mô Phật';
+  await editor.pressSequentially(typed);
+  await expect.poll(() => localText(page)).toBe(typed);
+  const originalBlock = await localBlock(page);
+  const source = page.locator('#copy-source-text');
+  const originalReference = await source.textContent();
+  const counter = page.locator('output.reference-counter');
+  const trigger = page.getByRole('button', { name: 'Mục lục', exact: true });
+  await expect(counter).toHaveText('Phẩm 1/15');
+  await expect(page.locator('.source-heading select')).toHaveCount(0);
+  await trigger.focus();
+  let toc = await openCopyReferenceToc(page);
+  const rows = () => toc.getByRole('navigation', { name: 'Mục lục kinh mẫu', exact: true }).getByRole('button');
+  await expect(rows()).toHaveCount(15);
+  await expect(rows().first()).toHaveAttribute('aria-current', 'true');
+  await expect(toc.getByText('Đang xem', { exact: true })).toHaveCount(1);
+  expect(await toc.evaluate(node => (node as HTMLDialogElement).open && node.matches(':modal'))).toBe(true);
+  await toc.getByRole('button', { name: 'Đóng', exact: true }).click();
+  await expect(toc).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await expect(counter).toHaveText('Phẩm 1/15');
+  toc = await openCopyReferenceToc(page);
+  await toc.press('Escape');
+  await expect(toc).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await expect(page.locator('.copy-writing')).toBeVisible();
+  await expect(counter).toHaveText('Phẩm 1/15');
+  await chooseCopyReference(page, 14);
+  await expect(counter).toHaveText('Phẩm 15/15');
+  await expect.poll(() => source.textContent()).not.toBe(originalReference);
+  toc = await openCopyReferenceToc(page);
+  await expect(rows()).toHaveCount(15);
+  await expect(rows().last()).toHaveAttribute('aria-current', 'true');
+  await expect(toc.locator('nav button[aria-current="true"]')).toHaveCount(1);
+  await expect(toc.getByText('Đang xem', { exact: true })).toHaveCount(1);
+  await toc.getByRole('button', { name: 'Đóng', exact: true }).click();
+  await expect(toc).toHaveCount(0);
+  await expect(editor).toHaveText(typed);
+  expect(await localText(page)).toBe(typed);
+  expect(await localBlock(page)).toBe(originalBlock);
+  expect(requests).toEqual([]);
+});
+
+for (const profile of [
+  { name: '375px web portrait', width: 375, height: 812, native: false, safeTop: 0 },
+  { name: '390px web portrait', width: 390, height: 844, native: false, safeTop: 0 },
+  { name: 'native CSS landscape', width: 844, height: 390, native: true, safeTop: 24 },
+]) {
+  test('continuous mobile writing keeps the full 20 control visible: ' + profile.name, async ({ page }) => {
+    await page.setViewportSize({ width: profile.width, height: profile.height });
+    await open(page);
+    // CSS native scope only; no plugin bridge or remote backend is introduced.
+    await page.evaluate(({ native, safeTop }) => {
+      document.documentElement.dataset.nativeApp = String(native);
+      document.documentElement.style.setProperty('--app-safe-top', String(safeTop) + 'px');
+    }, profile);
+    const tools = page.locator('.editor-tools-trigger');
+    if (await tools.isVisible()) await tools.click();
+    const mode = page.locator('.editor-scroll-mode-toggle');
+    await expect(mode).toHaveAttribute('aria-pressed', 'true');
+    await expect(mode).toBeHidden();
+    await expect(page.locator('.editor-pages')).toHaveCount(0);
+    const size = page.locator('.compact-editor-display .size-select-btn');
+    await expect(size).toHaveAccessibleName('Cỡ chữ bản chép: 20px');
+    await expect(size.locator('.btn-text')).toHaveText('20');
+    await expect(size).toBeInViewport();
+    const geometry = await size.evaluate(button => {
+      const label = button.querySelector<HTMLElement>('.btn-text')!;
+      const arrow = button.querySelector('svg')!;
+      const control = button.getBoundingClientRect(), digits = label.getBoundingClientRect(), icon = arrow.getBoundingClientRect();
+      return { width: control.width, height: control.height, textWidth: label.clientWidth, textScrollWidth: label.scrollWidth,
+        left: control.left, right: control.right, digitsLeft: digits.left, digitsRight: digits.right, arrowLeft: icon.left };
+    });
+    expect(geometry.width).toBeGreaterThanOrEqual(64);
+    expect(geometry.height).toBeGreaterThanOrEqual(44);
+    expect(geometry.textScrollWidth - geometry.textWidth).toBeLessThanOrEqual(1);
+    expect(geometry.digitsLeft).toBeGreaterThanOrEqual(geometry.left);
+    expect(geometry.digitsRight).toBeLessThanOrEqual(geometry.right);
+    expect(geometry.digitsRight).toBeLessThanOrEqual(geometry.arrowLeft + 1);
+    const typed = longImperfectDraft();
+    await editorFor(page).fill(typed);
+    await expect.poll(() => localText(page)).toBe(typed);
+    await expect(mode).toHaveAttribute('aria-pressed', 'true');
+    await expect(mode).toBeHidden();
+    await expect(page.locator('.editor-pages')).toHaveCount(0);
+  });
+}
+
+test('PC writing can switch between pages and continuous mode without changing the draft', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page);
+  const mode = page.getByRole('button', { name: 'Cuộn liên tục', exact: true });
+  await expect(mode).toBeVisible();
+  await expect(mode).toHaveAttribute('aria-pressed', 'true');
+  const typed = 'Nam mô Địa Tạng Bồ Tát';
+  await editorFor(page).pressSequentially(typed);
+  await expect.poll(() => localText(page)).toBe(typed);
+  await mode.click();
+  await expect(mode).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.editor-pages')).toBeVisible();
+  await expect(page.locator('.editor-pages output')).toHaveText(/^\d+\/\d+$/);
+  expect(await localText(page)).toBe(typed);
+  await mode.click();
+  await expect(mode).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.editor-pages')).toHaveCount(0);
+  expect(await localText(page)).toBe(typed);
 });

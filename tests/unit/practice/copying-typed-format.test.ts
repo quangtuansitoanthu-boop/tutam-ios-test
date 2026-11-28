@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { copyingSentences, activeCopyWord } from '../../../src/lib/domain/practice/copying-follow';
-import { formatTypedCopy } from '../../../src/lib/domain/practice/copying-typed-format';
+import { copyingUppercaseParagraphs, formatTypedCopy } from '../../../src/lib/domain/practice/copying-typed-format';
 import diaTang from '../../../src/lib/data/scripture-copying/dia-tang-legacy.json';
+import currentDiaTang from '../../../src/lib/data/scripture-copying/dia-tang.json';
 import layouts from '../../../src/lib/data/scripture-copying/layouts.json';
-import { copySourceLayoutLines } from '../../../src/lib/domain/practice/copying-formatting';
+import { copySourceLayoutLines, type CopySourceLine } from '../../../src/lib/domain/practice/copying-formatting';
 import { normalizeCopyText } from '../../../src/lib/domain/practice/scripture-copying';
 
 describe('formatting the typed copy', () => {
@@ -89,5 +90,60 @@ describe('formatting the typed copy', () => {
     const source = copyingSentences(['Sám hối (Thanh tịnh. Xin chú ý.) Nam mô Phật. Câu sau.'], 0);
     expect(source).toHaveLength(2);
     expect(activeCopyWord(source, 'sám hối nam mô')).toBe(3);
+  });
+});
+
+describe('source paragraph casing', () => {
+  it.each(['NFC', 'NFD'] as const)('marks the current second Địa Tạng heading without rewriting partial %s input', normalization => {
+    const blocks = currentDiaTang.chapters[0].blocks;
+    const source = copyingSentences(blocks, 0, copySourceLayoutLines(blocks[0], currentDiaTang.layouts[0][0]));
+    const original = JSON.stringify(source);
+    const prefix = 'TỊNH KHẨU NGHIỆP CHƠN NGÔN Tu rị tu rị, ma ha tu rị tu tu rị, ta bà ha. TỊNH ';
+    for (const suffix of ['t', 'ta', 'tam', 'TAm']) {
+      const typed = (prefix + suffix).normalize(normalization);
+      const runs = formatTypedCopy(source, typed);
+      expect(runs.map(run => run.text).join('')).toBe(typed);
+      expect(runs.at(-1)).toMatchObject({ line: 2, bold: true, align: 'center', uppercase: true });
+      expect(runs.filter(run => run.line === 1).every(run => !Object.hasOwn(run, 'uppercase'))).toBe(true);
+    }
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it.each(['ta ', 'ta.', 'ta phạ'])('retains the existing ahead-word match when a short word is committed: %j', suffix => {
+    const blocks = currentDiaTang.chapters[0].blocks;
+    const source = copyingSentences(blocks, 0, copySourceLayoutLines(blocks[0], currentDiaTang.layouts[0][0]));
+    const typed = 'TỊNH KHẨU NGHIỆP CHƠN NGÔN Tu rị tu rị, ma ha tu rị tu tu rị, ta bà ha. TỊNH ' + suffix;
+    const runs = formatTypedCopy(source, typed);
+    expect(runs.map(run => run.text).join('')).toBe(typed);
+    expect(runs.at(-1)).toMatchObject({ line: 3, bold: true, align: 'center' });
+    expect(Object.hasOwn(runs.at(-1)!, 'uppercase')).toBe(false);
+  });
+
+  it('classifies whole source paragraphs, masking nested notes across parts and sentences', () => {
+    const source: CopySourceLine[] = [
+      { align: 'center', paragraph: 7, parts: [{ text: 'A DI ĐÀ.', bold: true }] },
+      { align: 'center', paragraph: 7, parts: [{ text: ' Lời nguyện tiếp theo.', bold: true }] },
+      { align: 'center', paragraph: 11, parts: [{ text: 'TỊNH (đọc ', bold: true }, { text: 'chậm (3 ', bold: false }] },
+      { align: 'center', paragraph: 11, parts: [{ text: 'lần)) TAM', bold: true }] },
+      { align: 'justify', paragraph: 12, parts: [{ text: '123 ---', bold: true }] },
+      { align: 'center', paragraph: 13, parts: [{ text: '(3 lần)', bold: true }] },
+    ];
+    const original = JSON.stringify(source);
+    expect(copyingUppercaseParagraphs(source)).toEqual(new Set([11]));
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it('keeps note depth across source paragraphs and falls back to their original indices', () => {
+    const source: CopySourceLine[] = ['TỊNH （đọc ', 'chậm） KHẨU', 'NGHIỆP (hướng ', 'dẫn) CHƠN NGÔN']
+      .map(text => ({ align: 'center', parts: [{ text, bold: false }] }));
+    expect(copyingUppercaseParagraphs(source)).toEqual(new Set([0, 1, 2, 3]));
+  });
+
+  it.each(['123 ---', '(3 lần)', '（đọc chậm）', 'A DI ĐÀ. Lời nguyện tiếp theo.'])('leaves uncased or mixed paragraphs unflagged: %s', text => {
+    const source = copyingSentences([text], 0);
+    expect(copyingUppercaseParagraphs(source)).toEqual(new Set());
+    const runs = formatTypedCopy(source, text);
+    expect(runs.map(run => run.text).join('')).toBe(text);
+    expect(runs.every(run => !Object.hasOwn(run, 'uppercase'))).toBe(true);
   });
 });

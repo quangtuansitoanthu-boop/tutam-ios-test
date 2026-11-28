@@ -878,3 +878,156 @@ it('traces Space and non-composing keys immediately after compositionend and kee
     .filter(el => el.style.visibility !== 'hidden').map(el => el.textContent).join('');
   expect(visibleGhostTail).toBe(' CHƠN NGÔN');
 });
+
+
+it.each(['div', 'p'])('native empty paragraphs: preserve a middle blank line and its caret (%s)', tag => {
+  const view = setup();
+  view.editor.innerHTML = `<${tag}>Nam</${tag}><${tag}><br></${tag}><${tag}>mô</${tag}>`;
+  const end = view.editor.lastElementChild!.firstChild!;
+  const range = document.createRange(); range.setStart(end, end.textContent!.length); range.collapse(true);
+  const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+  expect(richCopyText(view.editor)).toBe('Nam\n\nmô');
+  expect(richCopySelection(view.editor)).toEqual([7, 7]);
+});
+
+it.each([['div', 'NFC'], ['p', 'NFD']] as const)('native empty paragraphs: survive non-cancelable input commit (%s, %s)', (tag, normalization) => {
+  const view = setup({ initial: 'Nam' });
+  const tail = 'mô'.normalize(normalization), expected = 'Nam\n\n' + tail;
+  const before = new InputEvent('beforeinput', { inputType: 'insertReplacementText', data: tail, bubbles: true, cancelable: false });
+  view.editor.dispatchEvent(before);
+  expect(before.defaultPrevented).toBe(false);
+  // Model the native DOM mutation explicitly; jsdom has no contenteditable default action.
+  view.editor.innerHTML = `<${tag}>Nam</${tag}><${tag}><br></${tag}><${tag}>${tail}</${tag}>`;
+  const end = view.editor.lastElementChild!.firstChild!;
+  const range = document.createRange(); range.setStart(end, tail.length); range.collapse(true);
+  const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+  view.editor.dispatchEvent(new InputEvent('input', { inputType: 'insertReplacementText', data: tail, bubbles: true }));
+  flushSync();
+  expect(view.text()).toBe(expected);
+  expect(richCopyText(view.editor)).toBe(expected);
+  expect(richCopySelection(view.editor)).toEqual([expected.length, expected.length]);
+});
+
+it.each([
+  ['leading', '<div><br></div><div>mô</div>', '\nmô'],
+  ['trailing', '<div>Nam</div><div><br></div><div><br></div>', 'Nam\n\n'],
+])('native empty paragraphs: retain the %s edge', (_edge, html, expected) => {
+  const view = setup();
+  view.editor.innerHTML = html;
+  expect(richCopyText(view.editor)).toBe(expected);
+});
+
+it('native empty paragraphs: exclude structural placeholders and visual line wrappers', () => {
+  const view = setup();
+  view.editor.innerHTML = '<br data-copy-placeholder>';
+  expect(richCopyText(view.editor)).toBe('');
+  view.editor.innerHTML = '<div data-copy-line="0"><span>Nam</span></div><div data-copy-line="1"><br data-copy-placeholder></div><div data-copy-line="2"><span> mô</span></div>';
+  expect(richCopyText(view.editor)).toBe('Nam mô');
+});
+
+
+it.each([false, true])('keeps raw NFD selection edits, caret and one undo beneath source heading casing (ghost %s)', async showGhost => {
+  const { default: Editor } = await import('../../../src/lib/components/RichCopyEditor.svelte');
+  const { fromStore, writable } = await import('svelte/store');
+  const { copyingSentences } = await import('../../../src/lib/domain/practice/copying-follow');
+  const { formatTypedCopy } = await import('../../../src/lib/domain/practice/copying-typed-format');
+  const { formatGhostRuns, alignGhostRuns } = await import('../../../src/lib/domain/practice/copying-ghost-format');
+  const source = copyingSentences(['{align:center|**TỊNH TÂM** (3 lần)}\n{align:center|**Tu rị ta bà ha.**}'], 0);
+  const reference = formatGhostRuns(source);
+  const initial = 'TỊNH TAM (3 lần)\nTu rị ta bà ha.';
+  const draft = fromStore(writable(initial));
+  const component = mount(Editor, {
+    target: document.body,
+    props: {
+      get value() { return draft.current; },
+      get runs() { return formatTypedCopy(source, draft.current); },
+      get ghostRuns() { return alignGhostRuns(reference, draft.current) ?? reference; },
+      canonicalGhostRuns: reference, showGhost,
+      label: 'Bản chép đúng định dạng', placeholder: '', invalid: false, maxlength: 1000, font: 'serif',
+      onvalue: next => { draft.current = next; },
+      onbeforeinput: () => {}, ondisallow: () => {}, oncaret: () => {}, oncomposing: () => {},
+    },
+  });
+  try {
+    flushSync();
+    const editor = document.getElementById('copy-text')!;
+    editor.focus();
+    const start = initial.indexOf('TAM'), end = start + 3;
+    setRichCopySelection(editor, start, end);
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    const committed = 'tâm'.normalize('NFD');
+    const expected = initial.slice(0, start) + committed + initial.slice(end);
+    const selection = window.getSelection()!, range = selection.getRangeAt(0);
+    range.deleteContents();
+    const inserted = document.createTextNode(committed); range.insertNode(inserted);
+    range.setStart(inserted, inserted.length); range.collapse(true);
+    selection.removeAllRanges(); selection.addRange(range);
+    editor.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: committed, isComposing: true, bubbles: true }));
+    flushSync();
+    expect(draft.current).toBe(expected);
+    expect(richCopyText(editor)).toBe(expected);
+    expect(richCopySelection(editor)).toEqual([start + committed.length, start + committed.length]);
+    const assertPresentation = () => {
+      expect(getComputedStyle(editor.querySelector('[data-copy-line="0"] strong')!).textTransform).toBe('uppercase');
+      const note = editor.querySelector('em')!;
+      expect(note.textContent).toBe('(3 lần)');
+      expect(getComputedStyle(note).textTransform).toBe('none');
+      const verse = editor.querySelector('[data-copy-line="1"] strong')!;
+      expect(verse.textContent?.trim()).toBe('Tu rị ta bà ha.');
+      expect(getComputedStyle(verse).textTransform).not.toBe('uppercase');
+    };
+    assertPresentation();
+    editor.dispatchEvent(new CompositionEvent('compositionend', { data: committed, bubbles: true }));
+    editor.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: committed, bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+    expect(draft.current).toBe(expected);
+    expect(editor.textContent).toBe(expected);
+    expect(richCopySelection(editor)).toEqual([start + committed.length, start + committed.length]);
+    assertPresentation();
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })); flushSync();
+    expect(draft.current).toBe(initial);
+    expect(richCopyText(editor)).toBe(initial);
+    expect(richCopySelection(editor)).toEqual([start, end]);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true, cancelable: true })); flushSync();
+    expect(draft.current).toBe(expected);
+    expect(richCopyText(editor)).toBe(expected);
+    expect(richCopySelection(editor)).toEqual([start + committed.length, start + committed.length]);
+    assertPresentation();
+  } finally { await unmount(component); }
+});
+
+it('shares uppercase glyph styling across plain ink, traced ink and ghost without transforming notes or saved text', async () => {
+  const { renderCopyRuns, renderTracedCopyRuns, renderGhostRuns } = await import('../../../src/lib/browser/copying-layout');
+  const raw = 'tịnh tâm (3 lần (đọc chậm))'.normalize('NFD'), tail = ' NGHIỆP';
+  const runs = [
+    { text: raw + tail, bold: true, align: 'center' as const, line: 0, uppercase: true as const },
+    { text: '\nTu rị ta bà ha.', bold: true, align: 'center' as const, line: 1 },
+  ];
+  const ink = document.createElement('div'), ghost = document.createElement('div');
+  document.body.append(ink, ghost);
+  const assertInk = () => {
+    expect(richCopyText(ink)).toBe(raw);
+    const typed = ink.querySelector('strong')!, note = typed.querySelector('em')!;
+    expect(getComputedStyle(typed).textTransform).toBe('uppercase');
+    expect(note.textContent).toBe('(3 lần (đọc chậm))'.normalize('NFD'));
+    expect(getComputedStyle(note).textTransform).toBe('none');
+  };
+  renderCopyRuns(ink, runs, 0, raw.length);
+  assertInk();
+  renderTracedCopyRuns(ink, runs, raw.length);
+  assertInk();
+  const future = ink.querySelector<HTMLElement>('[data-copy-future]')!;
+  expect(future.dataset.copyFuture).toBe(tail);
+  expect(future.textContent).toBe('');
+  expect(getComputedStyle(future).textTransform).toBe('uppercase');
+  expect(future.getAttribute('contenteditable')).toBe('false');
+  renderGhostRuns(ghost, runs, raw.length);
+  const hidden = ghost.querySelector<HTMLElement>('strong')!, visible = hidden.nextElementSibling!;
+  expect(hidden.textContent).toBe(raw);
+  expect(getComputedStyle(hidden).visibility).toBe('hidden');
+  expect(getComputedStyle(hidden).textTransform).toBe('uppercase');
+  expect(getComputedStyle(hidden.querySelector('em')!).textTransform).toBe('none');
+  expect(visible.textContent).toBe(tail);
+  expect(getComputedStyle(visible).textTransform).toBe('uppercase');
+  expect(getComputedStyle(ghost.querySelector('[data-copy-line="1"] strong')!).textTransform).not.toBe('uppercase');
+});

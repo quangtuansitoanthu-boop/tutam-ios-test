@@ -1,4 +1,4 @@
-import { expect, type Page, type Route } from '@playwright/test';
+import { expect, type Locator, type Page, type Route } from '@playwright/test';
 
 const baseUrl = process.env.SVELTEKIT_BASE_URL || 'http://localhost:8787';
 export const TEST_MEMBER_ID = 'e2e-member';
@@ -63,6 +63,32 @@ export async function beginScriptureCopying(page: Page): Promise<void> {
   await expect(page.getByTestId('copying-preparation')).toBeVisible();
   await expect(page.locator('#copy-text')).toHaveCount(0);
   await page.getByTestId('confirm-copying-guide').click();
+}
+
+export async function openCopyReferenceToc(page: Page): Promise<Locator> {
+  const dialog = page.getByRole('dialog', { name: /^(Mục lục kinh mẫu|Reference contents)$/ });
+  if (!await dialog.isVisible()) {
+    const trigger = page.getByRole('button', { name: /^(Mục lục|Contents)$/ });
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toBeEnabled();
+    await trigger.click();
+  }
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+export async function chooseCopyReference(page: Page, index: number): Promise<void> {
+  expect(Number.isSafeInteger(index) && index >= 0).toBe(true);
+  const dialog = await openCopyReferenceToc(page);
+  const rows = dialog.getByRole('navigation', { name: /^(Mục lục kinh mẫu|Reference contents)$/ }).getByRole('button');
+  const count = await rows.count();
+  expect(index).toBeLessThan(count);
+  const row = rows.nth(index);
+  await expect(row).toBeEnabled();
+  await row.scrollIntoViewIfNeeded();
+  await row.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.reference-counter')).toHaveText(new RegExp(`^(?:Phẩm|Quyển|Chapter|Volume) ${index + 1}/${count}$`));
 }
 
 export async function loginAsMember(page: Page, rawToken = 'e2e-member-session-token'): Promise<void> {

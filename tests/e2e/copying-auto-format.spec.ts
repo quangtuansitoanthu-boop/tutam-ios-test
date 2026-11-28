@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { beginScriptureCopying, deferStartupNotification } from './runtime-helpers';
+import { beginScriptureCopying, chooseCopyReference, deferStartupNotification, openCopyReferenceToc } from './runtime-helpers';
 
 type BookId = 'dia-tang' | 'duoc-su';
 type Draft = { block: number; texts: string[]; [key: string]: unknown };
@@ -20,6 +20,8 @@ async function openBook(page: Page, id: BookId = 'dia-tang') {
     await page.getByTestId('confirm-copying-guide').click();
   } else await beginScriptureCopying(page);
   await expect(editorFor(page)).toBeVisible();
+  await expect(page.locator('.editor-scroll-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.editor-pages')).toHaveCount(0);
 }
 
 async function withOptions(page: Page, action: (options: Locator) => Promise<void>) {
@@ -48,6 +50,12 @@ async function selectPassage(page: Page, block: number) {
 }
 
 async function continuousWriting(page: Page) {
+  if ((page.viewportSize()?.width ?? 1440) <= 700) {
+    await expect(page.locator('.editor-scroll-mode-toggle')).toBeHidden();
+    await expect(page.locator('.editor-scroll-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.editor-pages')).toHaveCount(0);
+    return;
+  }
   const tools = page.locator('.editor-tools-trigger');
   if (await tools.isVisible() && await tools.getAttribute('aria-expanded') !== 'true') await tools.click();
   const continuous = page.getByRole('button', { name: 'Cuộn liên tục', exact: true });
@@ -204,11 +212,13 @@ test('the existing mixed opening and chapter block retains centered titles and j
   await expectLine(page, 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN', 'center', true);
   // This immutable Word edition also marks this prose bold; changing reference sections must preserve that source styling.
   await expectLine(page, 'Ta nghe như thế này:', 'justify', true);
-  await expect(page.locator('#copy-block')).toHaveValue('1');
+  await expect(page.locator('.reference-counter')).toHaveText('Phẩm 2/15');
+  const toc = await openCopyReferenceToc(page);
+  await expect(toc.getByRole('navigation', { name: 'Mục lục kinh mẫu', exact: true }).getByRole('button').nth(1)).toHaveAttribute('aria-current', 'true');
   await expect(page.locator('#copy-source-text')).toContainText('Ta nghe như thế này:');
   const before = await draft(page, 'dia-tang');
-  for (const entry of ['0', '1']) {
-    await page.locator('#copy-block').selectOption(entry);
+  for (const entry of [0, 1]) {
+    await chooseCopyReference(page, entry);
     await expectRaw(page, 'dia-tang', 19, persisted);
     expect(await draft(page, 'dia-tang')).toEqual(before);
     await expectLine(page, 'Ta nghe như thế này:', 'justify', true);
@@ -232,9 +242,10 @@ test('ghost, scaled font reflow and fifteen-entry browsing preserve typed text, 
   const caret = await selectionOffsets(editor);
   expect(caret).toEqual([2, 2]);
   const before = await draft(page, 'dia-tang');
-  await expect(page.locator('#copy-block option')).toHaveCount(15);
-  for (const entry of ['14', '0']) {
-    await page.locator('#copy-block').selectOption(entry);
+  const toc = await openCopyReferenceToc(page);
+  await expect(toc.getByRole('navigation', { name: 'Mục lục kinh mẫu', exact: true }).getByRole('button')).toHaveCount(15);
+  for (const entry of [14, 0]) {
+    await chooseCopyReference(page, entry);
     await editor.focus();
     expect(await selectionOffsets(editor)).toEqual(caret);
     await expectRaw(page, 'dia-tang', 0, typed);
@@ -255,6 +266,7 @@ test('ghost, scaled font reflow and fifteen-entry browsing preserve typed text, 
     await expect.poll(() => editor.evaluate(node => Number.parseFloat(getComputedStyle(node).fontSize))).toBeCloseTo(font.pixels, 1);
     for (const width of [375, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
+      await continuousWriting(page);
       await editor.focus();
       expect(await selectionOffsets(editor)).toEqual(caret);
       await expectRaw(page, 'dia-tang', 0, typed);
@@ -267,5 +279,150 @@ test('ghost, scaled font reflow and fifteen-entry browsing preserve typed text, 
   await expect(editor).toBeFocused();
   await expectRaw(page, 'dia-tang', 0, typed);
   await expectLine(page, typed, 'center', true);
+  expect(requests).toEqual([]);
+});
+
+for (const [tag, form] of [['div', 'NFC'], ['p', 'NFD']] as const) test(`native paragraph fallback preserves blank lines, formatting and local draft (${tag}, ${form})`, async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/practice/copying') requests.push(request.method()); });
+  await page.goto('/tu-tap/chep-kinh', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('start-copying')).toBeEnabled({ timeout: 15_000 });
+  await beginScriptureCopying(page);
+  await expect(editorFor(page)).toBeVisible();
+  await continuousWriting(page);
+  const editor = editorFor(page), ghost = page.getByRole('button', { name: 'Chữ mờ', exact: true });
+  if (await ghost.getAttribute('aria-pressed') === 'true') await ghost.click();
+  await expect(ghost).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'Cuộn liên tục', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const title = 'TỊNH KHẨU NGHIỆP CHƠN NGÔN'.normalize(form);
+  const verse = 'Tu rị tu rị, ma ha tu rị tu tu rị, ta bà ha (3 lần).'.normalize(form);
+  const note = '(3 lần)'.normalize(form), raw = title + '\n\n' + verse;
+  await editor.pressSequentially(title);
+  await expectRaw(page, 'dia-tang', 0, title);
+  await editor.focus();
+  // Fixture DOM mô phỏng nhánh native không thể hủy; không phải kiểm thử bàn phím hay IME thật.
+  const event = await editor.evaluate((node, { tag, title, verse }) => {
+    const before = new InputEvent('beforeinput', { inputType: 'insertReplacementText', data: verse, bubbles: true, cancelable: false });
+    node.dispatchEvent(before);
+    const heading = document.createElement(tag), blank = document.createElement(tag), body = document.createElement(tag);
+    heading.textContent = title; blank.append(document.createElement('br')); body.textContent = verse;
+    node.replaceChildren(heading, blank, body);
+    const end = body.firstChild;
+    if (!end) throw new Error('Missing native paragraph fixture text');
+    const range = document.createRange(); range.setStart(end, verse.length); range.collapse(true);
+    const selection = window.getSelection();
+    if (!selection) throw new Error('Missing native paragraph fixture selection');
+    selection.removeAllRanges(); selection.addRange(range);
+    node.dispatchEvent(new InputEvent('input', { inputType: 'insertReplacementText', data: verse, bubbles: true }));
+    return { cancelable: before.cancelable, prevented: before.defaultPrevented };
+  }, { tag, title, verse });
+  expect(event).toEqual({ cancelable: false, prevented: false });
+  const expectPreserved = async () => {
+    await expectRaw(page, 'dia-tang', 0, raw);
+    // textContent giữ nguyên NL/NFD; không dùng innerText hoặc chuẩn hóa khoảng trắng làm oracle.
+    await expect.poll(() => editor.textContent()).toBe(raw);
+    await expectLine(page, title, 'center', true);
+    await expectLine(page, verse, 'center', true);
+    await expectItalicNote(page, note);
+  };
+  await expectPreserved();
+  await expect(editor).toBeFocused();
+  await expect.poll(() => selectionOffsets(editor)).toEqual([raw.length, raw.length]);
+  await page.getByRole('button', { name: 'Đổi kinh hoặc phẩm', exact: true }).click();
+  const leave = page.getByRole('dialog', { name: 'Lưu bản chép trước khi rời?', exact: true });
+  await expect(leave).toBeVisible();
+  await leave.getByRole('button', { name: 'Rời không lưu', exact: true }).click();
+  await expect(page.getByTestId('start-copying')).toBeVisible();
+  await beginScriptureCopying(page);
+  await continuousWriting(page);
+  await expectPreserved();
+  await page.reload();
+  await beginScriptureCopying(page);
+  await continuousWriting(page);
+  await expectPreserved();
+  expect(requests).toEqual([]);
+});
+
+for (const enabled of [false, true]) test(`canonical heading casing keeps raw composition and body text (ghost ${enabled ? 'on' : 'off'})`, async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/practice/copying') requests.push(request.method()); });
+  await page.goto('/tu-tap/chep-kinh', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('start-copying')).toBeEnabled({ timeout: 15_000 });
+  await beginScriptureCopying(page);
+  const editor = editorFor(page), ghost = page.getByRole('button', { name: 'Chữ mờ', exact: true });
+  await expect(editor).toBeVisible();
+  await continuousWriting(page);
+  if (await ghost.getAttribute('aria-pressed') !== String(enabled)) await ghost.click();
+  await expect(ghost).toHaveAttribute('aria-pressed', String(enabled));
+  const title = 'TỊNH KHẨU NGHIỆP CHƠN NGÔN';
+  const verse = 'Tu rị tu rị, ma ha tu rị tu tu rị, ta bà ha.';
+  // Bỏ hướng dẫn tùy chọn (3 lần) như luồng người dùng; chữ mờ giữ dấu xuống dòng nguồn.
+  const prefix = enabled ? `${title}\n ${verse}\n TỊNH ` : `${title} ${verse} TỊNH `;
+  const original = prefix + 'TAM';
+  await editor.pressSequentially(`${title} ${verse} TỊNH TAM`);
+  await expectRaw(page, 'dia-tang', 0, original);
+  await editor.press('Shift+ArrowLeft');
+  await editor.press('Shift+ArrowLeft');
+  await editor.press('Shift+ArrowLeft');
+  await expect.poll(() => selectionOffsets(editor)).toEqual([original.length - 3, original.length]);
+  // Fixture composition thay từ đã chọn trong editor thật; không giả nhận đây là IME thiết bị.
+  await editor.evaluate(node => {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !node.contains(selection.anchorNode)) throw new Error('Composition selection is outside the editor');
+    node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    const range = selection.getRangeAt(0); range.deleteContents();
+    const inserted = document.createTextNode('ta'); range.insertNode(inserted);
+    range.setStart(inserted, inserted.length); range.collapse(true);
+    selection.removeAllRanges(); selection.addRange(range);
+    node.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'ta', bubbles: true }));
+    node.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'ta', isComposing: true, bubbles: true }));
+  });
+  const partial = prefix + 'ta';
+  await expectRaw(page, 'dia-tang', 0, partial);
+  await expect.poll(() => editor.textContent()).toBe(partial);
+  await expect.poll(() => selectionOffsets(editor)).toEqual([partial.length, partial.length]);
+  const heading = editor.locator(':scope > [data-copy-line="2"]');
+  await expect(heading).toHaveCSS('text-align', 'center');
+  await expect.poll(async () => (await heading.innerText()).trim()).toBe('TỊNH TA');
+  await editor.evaluate(node => {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !node.contains(selection.anchorNode)) throw new Error('Composition caret is outside the editor');
+    const range = selection.getRangeAt(0), text = range.startContainer;
+    if (text.nodeType !== Node.TEXT_NODE || range.startOffset < 2) throw new Error('Missing partial composition text');
+    range.setStart(text, range.startOffset - 2); range.deleteContents();
+    const inserted = document.createTextNode('tam'); range.insertNode(inserted);
+    range.setStart(inserted, inserted.length); range.collapse(true);
+    selection.removeAllRanges(); selection.addRange(range);
+    node.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'tam', bubbles: true }));
+    node.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'tam', isComposing: true, bubbles: true }));
+    node.dispatchEvent(new CompositionEvent('compositionend', { data: 'tam', bubbles: true }));
+    node.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: 'tam', bubbles: true }));
+  });
+  const committed = prefix + 'tam';
+  await expectRaw(page, 'dia-tang', 0, committed);
+  await expect.poll(() => editor.textContent()).toBe(committed);
+  await expect.poll(() => selectionOffsets(editor)).toEqual([committed.length, committed.length]);
+  await expect.poll(async () => (await heading.innerText()).trim()).toBe('TỊNH TAM');
+  // Tắt chữ mờ trước khi gõ tiếp để kiểm tra riêng trình bày, không yêu cầu đổi contract canonical của phím kế tiếp.
+  if (enabled) await ghost.click();
+  await expect(ghost).toHaveAttribute('aria-pressed', 'false');
+  const body = 'Án ta phạ bà phạ, truật đà ta phạ, đạt mạ ta phạ, bà phạ truật độ hám (3 lần).';
+  const continuation = ' NGHIỆP CHÂN NGÔN ' + body;
+  await editor.pressSequentially(continuation);
+  const full = committed + continuation;
+  await expectRaw(page, 'dia-tang', 0, full);
+  await expect.poll(() => editor.textContent()).toBe(full);
+  await expect.poll(async () => (await heading.innerText()).trim()).toBe('TỊNH TAM NGHIỆP CHÂN NGÔN');
+  await expectLine(page, body, 'center', true);
+  await expect.poll(async () => (await editor.locator(':scope > [data-copy-line="3"]').innerText()).trim()).toBe(body);
+  await expectItalicNote(page, '(3 lần)');
+  await selectPassage(page, 20);
+  const prose = 'Lúc đó, bất khả thuyết bất khả thuyết tất cả chư Phật và đại Bồ Tát';
+  await editor.pressSequentially(prose);
+  await expectRaw(page, 'dia-tang', 20, prose);
+  await expectLine(page, prose, 'justify', true);
+  await expect.poll(async () => (await editor.innerText()).trim()).toBe(prose);
+  await selectPassage(page, 0);
+  await expectRaw(page, 'dia-tang', 0, full);
   expect(requests).toEqual([]);
 });

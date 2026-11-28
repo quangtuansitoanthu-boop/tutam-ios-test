@@ -3,9 +3,16 @@ export function richCopyText(root: Node): string {
   if (root.nodeType === 3) return root.textContent ?? '';
   if (root instanceof HTMLBRElement) return root.hasAttribute('data-copy-placeholder') || root.parentNode?.childNodes.length === 1 ? '' : '\n';
   let text = '';
+  let previousNativeParagraph = false, previousEmptyParagraph = false;
   for (const child of root.childNodes) {
-    if (child instanceof HTMLElement && /^(DIV|P)$/.test(child.tagName) && !child.hasAttribute('data-copy-line') && text && !text.endsWith('\n')) text += '\n';
-    text += richCopyText(child);
+    const nativeParagraph = child instanceof HTMLElement && /^(DIV|P)$/.test(child.tagName) && !child.hasAttribute('data-copy-line');
+    // An empty native paragraph still occupies a line. Its separator must not
+    // absorb the next paragraph, including a leading or trailing blank line.
+    if (nativeParagraph && (text || previousNativeParagraph) && (!text.endsWith('\n') || previousEmptyParagraph)) text += '\n';
+    const childText = richCopyText(child);
+    text += childText;
+    previousNativeParagraph = nativeParagraph;
+    previousEmptyParagraph = nativeParagraph && childText === '';
   }
   return text;
 }

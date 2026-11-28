@@ -1,10 +1,12 @@
-import { beginScriptureCopying, deferStartupNotification } from './runtime-helpers';
+import { beginScriptureCopying, chooseCopyReference, deferStartupNotification, openCopyReferenceToc } from './runtime-helpers';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import book from '../../src/lib/data/scripture-copying/dia-tang.json' with { type: 'json' };
 import { normalizeCopyText } from '../../src/lib/domain/practice/scripture-copying';
 import { copySourceLayoutLines, copySourceText } from '../../src/lib/domain/practice/copying-formatting';
 import { copyingSentences } from '../../src/lib/domain/practice/copying-follow';
 import { cleanVietnameseTextForSpeech } from '../../src/lib/components/reader/vietnamese-speech-normalizer';
+import type { CopyDraft } from '../../src/lib/browser/scripture-copying-workspace';
+import type { CopyBookRunManifest } from '../../src/lib/browser/scripture-copying-book-runs';
 test.beforeEach(async ({ page }) => {
   await deferStartupNotification(page);
   page.on('dialog', dialog => dialog.accept());
@@ -44,6 +46,52 @@ async function storedCopyDraft(page: Page, chapter = 1) {
       transaction.onerror = () => { reject(transaction.error); db.close(); };
     };
   }), { id: book.id, version: book.version, chapter });
+}
+
+type StoredCopyBookRun = { manifest: CopyBookRunManifest; drafts: CopyDraft[]; archives: CopyDraft[] };
+async function storedCopyBookRun(page: Page, scope = 'guest') {
+  return page.evaluate(({ id, version, chapters, scope }) => new Promise<StoredCopyBookRun>((resolve, reject) => {
+    const request = indexedDB.open('tutam-scripture-copying-v1');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result, transaction = db.transaction('drafts');
+      const store = transaction.objectStore('drafts'), keys = store.getAllKeys(), records = store.getAll();
+      transaction.oncomplete = () => {
+        db.close();
+        const values = new Map(keys.result.map((key, index) => [String(key), records.result[index]]));
+        const owner = encodeURIComponent(scope);
+        // Existing owners: copyBookRunKey and copyDraftKey; this transaction only reads their persisted records.
+        const manifest = values.get(`tt_copy_book_v1:${owner}:${id}:${version}`) as CopyBookRunManifest | undefined;
+        if (!manifest) { reject(new Error('copy_book_manifest_missing')); return; }
+        const chapterKeys = chapters.map(number => `tt_copy_v1:${owner}:${id}:${version}:${number}`);
+        const drafts = chapterKeys.map(key => values.get(key) as CopyDraft | undefined);
+        const previous = manifest.previousRuns[0];
+        const archives = previous ? chapterKeys.map((key, index) => values.get(`${key}:run:${previous.chapterRunIds[index]}`) as CopyDraft | undefined) : [];
+        if (drafts.some(value => !value) || archives.some(value => !value)) {
+          reject(new Error('copy_book_records_missing')); return;
+        }
+        resolve({ manifest, drafts: drafts as CopyDraft[], archives: archives as CopyDraft[] });
+      };
+      transaction.onerror = () => { reject(transaction.error); db.close(); };
+    };
+  }), { id: book.id, version: book.version, chapters: book.chapters.map(chapter => chapter.number), scope });
+}
+
+async function expectSecondCopyBookRun(page: Page, first: StoredCopyBookRun, scope = 'guest') {
+  await expect.poll(async () => (await storedCopyBookRun(page, scope)).manifest.runId).not.toBe(first.manifest.runId);
+  const second = await storedCopyBookRun(page, scope);
+  expect(first.manifest.previousRuns).toHaveLength(0);
+  expect(second.manifest.previousRuns).toEqual([{ runId: first.manifest.runId, chapterRunIds: first.drafts.map(draft => draft.runId) }]);
+  expect(second.drafts).toHaveLength(book.chapters.length);
+  second.drafts.forEach((draft, index) => {
+    expect(draft).toMatchObject({ runId: second.manifest.runId, bookRunId: second.manifest.runId,
+      practiceRunId: second.manifest.runId, sutraId: book.id, sourceVersion: book.version,
+      chapter: book.chapters[index].number, texts: book.chapters[index].blocks.map(() => ''),
+      savedTexts: book.chapters[index].blocks.map(() => ''), revision: 0, savedAt: null, pending: null, block: 0 });
+    expect(draft.previousRuns).toContain(first.drafts[index].runId);
+  });
+  expect(second.archives).toEqual(first.drafts);
+  return second;
 }
 
 async function withPassageSelector(page: Page, action: (select: Locator) => Promise<void>) {
@@ -134,24 +182,29 @@ test('the fifteen reference entries browse complete sections without changing th
   await editor.pressSequentially(typed);
   await expect.poll(() => storedCopyText(page, 0)).toBe(typed);
   const before = await storedCopyDraft(page);
-  const reference = page.locator('#copy-block');
+  const reference = page.locator('.reference-counter');
   const source = page.locator('#copy-source-text');
-  await expect(reference.locator('option')).toHaveCount(15);
-  await reference.selectOption('1');
-  await expect(reference.locator('option:checked')).toContainText('2 / 15');
+  const toc = await openCopyReferenceToc(page);
+  const entries = toc.getByRole('navigation', { name: 'Mục lục kinh mẫu', exact: true }).getByRole('button');
+  await expect(entries).toHaveCount(15);
+  await expect(entries.nth(1).locator('span')).toContainText(`2. ${book.chapters[0].title}`);
+  await chooseCopyReference(page, 1);
+  await expect(reference).toHaveText('Phẩm 2/15');
   await expect(source).toContainText('Còn Thánh nữ Bà La Môn đó, nay là Địa Tạng Bồ Tát vậy');
   expect(await storedCopyDraft(page)).toEqual(before);
-  await reference.selectOption('14');
-  await expect(reference.locator('option:checked')).toContainText('PHÁT NGUYỆN & HỒI HƯỚNG');
+  const closingToc = await openCopyReferenceToc(page);
+  await expect(closingToc.getByRole('navigation').getByRole('button').nth(14).locator('span'))
+    .toHaveText('15. PHÁT NGUYỆN & HỒI HƯỚNG');
+  await chooseCopyReference(page, 14);
   await expect(source).toContainText('Liên Trì Hải Hội Phật');
   await page.getByRole('button', { name: 'Đoạn trước', exact: true }).click();
-  await expect(reference).toHaveValue('13');
+  await expect(reference).toHaveText('Phẩm 14/15');
   await page.getByRole('button', { name: 'Đoạn sau', exact: true }).click();
-  await expect(reference).toHaveValue('14');
+  await expect(reference).toHaveText('Phẩm 15/15');
   expect(await storedCopyDraft(page)).toEqual(before);
   await expect(editor).toHaveText(typed);
   await expect(page.locator('.copy-chapter-location')).toHaveText(book.chapters[0].title);
-  await reference.selectOption('0');
+  await chooseCopyReference(page, 0);
   await expect(source).toContainText('TỊNH KHẨU NGHIỆP CHƠN NGÔN');
   expect(await storedCopyDraft(page)).toEqual(before);
   expect(requests).toEqual([]);
@@ -211,9 +264,9 @@ test('English copying controls retain Vietnamese speech for the canonical sutra'
   await mockCopyingSpeech(page, 'en');
   await page.goto('/tu-tap/chep-kinh');
   await beginScriptureCopying(page);
-  await page.locator('#copy-block').selectOption('14');
+  await chooseCopyReference(page, 14);
   await page.locator('.sample-speech').click();
-  await expect(page.locator('#copy-block')).toHaveValue('0');
+  await expect(page.locator('.reference-counter')).toHaveText('Chapter 1/15');
   await expect.poll(() => page.evaluate(() => window.__copyingSpoken.filter(utterance => utterance.text).map(utterance => utterance.lang))).toEqual(['vi-VN']);
   await expect(page.locator('#copy-source-text')).toHaveAttribute('lang', 'vi');
   await page.locator('.sample-speech').click();
@@ -326,8 +379,9 @@ test('an archived cloud chapter is shown without relabelling it as the new book 
   await prepareBookDraft(page, book.chapters.length, true, 'account:e2e-google-admin');
   await finishLastPassage(page, book.chapters.length);
   await expect(page.getByRole('button', { name: 'Bắt đầu lượt 2', exact: true })).toBeEnabled();
+  const first = await storedCopyBookRun(page, 'account:e2e-google-admin');
   await page.getByRole('button', { name: 'Bắt đầu lượt 2', exact: true }).click();
-  await expect(page.locator('.book-run-progress')).toContainText('Lượt 2');
+  const second = await expectSecondCopyBookRun(page, first, 'account:e2e-google-admin');
   const oldRun = await page.evaluate(({ id, version }) => new Promise<string>((resolve, reject) => {
     const request = indexedDB.open('tutam-scripture-copying-v1', 1);
     request.onsuccess = () => {
@@ -347,6 +401,7 @@ test('an archived cloud chapter is shown without relabelling it as the new book 
   await expect(page.locator('.archive-preview')).not.toBeEmpty();
   await page.getByRole('button', { name: 'Đóng tùy chọn', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true })).toHaveText('');
+  expect(await storedCopyBookRun(page, 'account:e2e-google-admin')).toEqual(second);
 });
 
 test('one full book earns one completion and a new run preserves every old chapter', async ({ page }) => {
@@ -368,10 +423,11 @@ test('one full book earns one completion and a new run preserves every old chapt
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await page.screenshot({ path: `test-results/copying-book-complete-${width}-${theme}.png`, fullPage: true });
   }
+  const first = await storedCopyBookRun(page);
   await page.getByRole('button', { name: 'Bắt đầu lượt 2', exact: true }).click();
   await expect(page.locator('.copy-chapter-location')).toHaveText(book.chapters[0].title);
   await expect(page.getByRole('textbox', { name: 'Tự gõ bản chép của bạn', exact: true })).toHaveText('');
-  await expect(page.locator('.book-run-progress')).toContainText('Lượt 2');
+  const second = await expectSecondCopyBookRun(page, first);
   expect(await copyLogs()).toBe(1);
   const archives = await page.evaluate(() => new Promise<number>((resolve, reject) => {
     const request = indexedDB.open('tutam-scripture-copying-v1', 1);
@@ -384,7 +440,8 @@ test('one full book earns one completion and a new run preserves every old chapt
   expect(archives).toBe(book.chapters.length);
   await page.reload();
   await beginScriptureCopying(page);
-  await expect(page.locator('.book-run-progress')).toContainText('Lượt 2');
+  const reopened = await expectSecondCopyBookRun(page, first);
+  expect(reopened).toEqual(second);
   expect(await copyLogs()).toBe(1);
   await page.getByRole('button', { name: 'Tùy chọn và bản đã lưu', exact: true }).click();
   await page.getByRole('button', { name: 'Xem lượt chép 1', exact: true }).click();
@@ -458,10 +515,8 @@ test('finishing a passage with Enter advances once and preserves the completed d
   await expect.poll(() => storedCopyText(page, 0)).toContain(completed);
   if ((page.viewportSize()?.width ?? 1440) > 700) await expect(input).toContainText(completed);
   else {
-    // Phones resume a single writing page, while the durable draft contains the whole passage.
-    const visiblePage = (await input.textContent())?.trim() ?? '';
-    expect(visiblePage.length).toBeGreaterThan(0);
-    expect(completed).toContain(visiblePage);
+    // The approved phone default is continuous writing, so the complete stored passage remains visible.
+    await expect(input).toHaveText(completed);
   }
   expect(requests).toEqual([]);
 });
@@ -636,6 +691,7 @@ test('login keeps the guest draft separate until the user explicitly adopts and 
 
 test('speech follows the chapter heading inside a shared block and a manual reference choice stays stopped', async ({ page }) => {
   const block = 19, heading = 'KINH ĐỊA TẠNG BỒ TÁT BỔN NGUYỆN';
+  const spokenHeading = `${heading}.`;
   const source = copySourceText(book.chapters[0].blocks[block]);
   const sentences = copyingSentences(book.chapters[0].blocks, block,
     copySourceLayoutLines(book.chapters[0].blocks[block], book.layouts[0][block]));
@@ -651,7 +707,7 @@ test('speech follows the chapter heading inside a shared block and a manual refe
   const target = chunks.findIndex(chunk => chunk.sourceIndex === headingSentence);
   expect(target).toBeGreaterThan(0);
   expect(target).toBeLessThan(chunks.length - 1);
-  expect(chunks[target].text).toBe(heading);
+  expect(chunks[target].text).toBe(spokenHeading);
 
   await mockCopyingSpeech(page);
   await page.goto('/tu-tap/chep-kinh');
@@ -661,8 +717,8 @@ test('speech follows the chapter heading inside a shared block and a manual refe
   await editor.pressSequentially(typed);
   await expect.poll(() => storedCopyText(page, block)).toBe(typed);
   const before = await storedCopyDraft(page);
-  const reference = page.locator('#copy-block'), speech = page.locator('.sample-speech');
-  await expect(reference).toHaveValue('0');
+  const reference = page.locator('.reference-counter'), speech = page.locator('.sample-speech');
+  await expect(reference).toHaveText('Phẩm 1/15');
   await speech.click();
   // Walk the complete mixed source, not the currently selected opening's DOM word count.
   for (let index = 0; index < target; index++) {
@@ -671,9 +727,9 @@ test('speech follows the chapter heading inside a shared block and a manual refe
     await page.evaluate(i => window.__copyingSpoken[i].onend?.(new Event('end') as SpeechSynthesisEvent), index);
   }
   await expect.poll(() => page.evaluate(() => window.__copyingSpoken.length)).toBe(target + 1);
-  expect(await page.evaluate(i => window.__copyingSpoken[i].text, target)).toBe(heading);
+  expect(await page.evaluate(i => window.__copyingSpoken[i].text, target)).toBe(spokenHeading);
   await page.evaluate(i => window.__copyingSpoken[i].onboundary?.({ charIndex: 0, charLength: 4, name: 'word' } as SpeechSynthesisEvent), target);
-  await expect(reference).toHaveValue('1');
+  await expect(reference).toHaveText('Phẩm 2/15');
   await expect(speech).toHaveAttribute('aria-pressed', 'true');
   const reading = page.locator(`#copy-source-text .source-line--reading[data-copy-sentence="${headingSentence}"]`);
   await expect(reading).toContainText(heading);
@@ -681,7 +737,7 @@ test('speech follows the chapter heading inside a shared block and a manual refe
   await expect(reading.locator('.source-word--reading')).toBeVisible();
   expect(await storedCopyDraft(page)).toEqual(before);
 
-  await reference.selectOption('0');
+  await chooseCopyReference(page, 0);
   await expect(speech).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('#copy-source-text .source-word--reading')).toHaveCount(0);
   // A late callback from the canceled utterance must neither restart speech nor override the manual entry.
@@ -691,7 +747,7 @@ test('speech follows the chapter heading inside a shared block and a manual refe
     utterance.onend?.(new Event('end') as SpeechSynthesisEvent);
   }, target);
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-  await expect(reference).toHaveValue('0');
+  await expect(reference).toHaveText('Phẩm 1/15');
   await expect(speech).toHaveAttribute('aria-pressed', 'false');
   expect(await page.evaluate(() => window.__copyingSpoken.length)).toBe(target + 1);
   await expect(editor).toHaveText(typed);

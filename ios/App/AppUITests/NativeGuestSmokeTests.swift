@@ -64,6 +64,62 @@ class NativeGuestUITestCase: XCTestCase {
     }
 
     @MainActor
+    func assertNativeCopyingContinuousDefault(_ app: XCUIApplication, phase: String, closeTools: Bool = false) -> Bool {
+        let keyboardClosedAtStart = !app.keyboards.firstMatch.exists
+        XCTAssertTrue(keyboardClosedAtStart)
+        let web = app.webViews.firstMatch
+        let tools = web.buttons.matching(NSPredicate(format: "label == %@", "Tùy chọn"))
+        guard tools.count == 1, tools.element.isEnabled, tools.element.isHittable else {
+            evidence(phase + "-missing-editor-tools", app: app)
+            XCTFail("Phải mở được tùy chọn editor thực trước khi kiểm tra control bị ẩn trên mobile")
+            return false
+        }
+        tools.element.tap()
+        guard let snapshot = try? web.snapshot() else {
+            XCTFail("Không đọc được snapshot giao diện chép kinh")
+            return false
+        }
+        let viewport = app.frame
+        var pending = snapshot.children
+        var editors: [XCUIElementSnapshot] = []
+        var fonts: [XCUIElementSnapshot] = []
+        var sizes: [XCUIElementSnapshot] = []
+        var obsolete: [String] = []
+        while let node = pending.popLast() {
+            if node.elementType == .textView && node.label == "Tự gõ bản chép của bạn" { editors.append(node) }
+            if node.elementType == .button && node.label.hasPrefix("Phông chữ: ") { fonts.append(node) }
+            if node.elementType == .button && node.label.hasPrefix("Cỡ chữ bản chép: ") { sizes.append(node) }
+            if node.label == "Cuộn liên tục" || ["Trang gõ", "Trang gõ trước", "Trang gõ sau"].contains(node.label) {
+                obsolete.append(node.label)
+            }
+            pending.append(contentsOf: node.children)
+        }
+        let editorVisible = editors.count == 1 && editors[0].frame.width > 0 && editors[0].frame.height > 0 &&
+            viewport.intersects(editors[0].frame)
+        let toolsVisible = fonts.count == 1 && sizes.count == 1 &&
+            viewport.contains(fonts[0].frame) && viewport.contains(sizes[0].frame)
+        XCTAssertTrue(editorVisible, "Editor cuộn mặc định phải có vùng hiển thị thực")
+        XCTAssertTrue(toolsVisible, "Phải thấy công cụ font/cỡ chữ thật; không suy nút mode vắng chỉ vì bảng công cụ đang đóng")
+        XCTAssertTrue(obsolete.isEmpty, "Mobile mặc định cuộn liên tục và không có nút mode/pager")
+        let note = XCTAttachment(string: "default=continuous\neditorVisible=\(editorVisible)\ntoolsVisible=\(toolsVisible)\nmodeOrPager=\(obsolete)\nKhông đọc state ẩn hoặc chạm control ẩn.")
+        note.name = phase + "-continuous-default-ui"
+        note.lifetime = .keepAlways
+        add(note)
+        if closeTools {
+            let close = web.buttons.matching(NSPredicate(format: "label == %@", "Thu gọn"))
+            guard close.count == 1, close.element.isEnabled, close.element.isHittable else {
+                XCTFail("Phải đóng được công cụ editor bằng nút hiện có")
+                return false
+            }
+            close.element.tap()
+        }
+        let keyboardClosedAtEnd = !app.keyboards.firstMatch.exists
+        XCTAssertTrue(keyboardClosedAtEnd)
+        return keyboardClosedAtStart && editorVisible && toolsVisible && obsolete.isEmpty && keyboardClosedAtEnd
+    }
+
+
+    @MainActor
     func waitUntil(_ message: String, timeout: TimeInterval = 15, _ condition: @escaping () -> Bool) {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: NSObject())
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: timeout), .completed, message)
@@ -1403,30 +1459,16 @@ final class NativeExtendedGuestTests: NativeGuestUITestCase {
         plainEditor.name = "copy-typed-text-after-disabling-ghost"
         plainEditor.lifetime = .keepAlways
         add(plainEditor)
-        // Phân trang native chỉ đưa phần chữ trang hiện tại vào TextView.
-        // Sau khi kiểm tra chế độ mặc định, dùng UI cuộn liên tục để kiểm tra cả đầu/cuối bản chép.
-        tap(app.buttons["Tùy chọn"].firstMatch, app: app)
-        let continuous = app.switches["Cuộn liên tục"].firstMatch
-        XCTAssertTrue(continuous.waitForExistence(timeout: 10))
-        XCTAssertEqual(continuous.value as? String, "0", "Native copying must initially keep its paged mode")
-        tap(continuous, app: app)
-        XCTAssertEqual(continuous.value as? String, "1")
+        // Mobile mặc định cuộn liên tục; không chạm nút mode đã ẩn theo UI mới.
+        guard assertNativeCopyingContinuousDefault(app, phase: "copy-ghost") else { return }
         waitUntil("The editor must retain the corrected Vietnamese heading and follow the reference across lines", timeout: 20) {
-            // TextView đã cache có thể trỏ vào AX của bàn phím vừa đóng.
-            // Đọc snapshot app mới và giữ nguyên các điều kiện về nội dung thực trong editor.
-            guard let snapshot = try? app.snapshot() else { return false }
-            var pending = snapshot.children
-            while let node = pending.popLast() {
-                if node.elementType == .textView && node.label == "Tự gõ bản chép của bạn" {
-                    guard let text = node.value as? String else { return false }
-                    let words = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-                    return words.contains("TỊNH KHẨU NGHIỆP CHƠN NGÔN")
-                        && words.contains("GIỚI")
-                        && !words.contains("(3 lần)")
-                }
-                pending.append(contentsOf: node.children)
-            }
-            return false
+            // Default continuous cho phép đọc đúng editor bằng một snapshot scope hẹp.
+            guard let snapshot = try? editor.snapshot(), snapshot.elementType == .textView,
+                  snapshot.label == "Tự gõ bản chép của bạn", let text = snapshot.value as? String else { return false }
+            let words = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            return words.contains("TỊNH KHẨU NGHIỆP CHƠN NGÔN")
+                && words.contains("GIỚI")
+                && !words.contains("(3 lần)")
         }
         evidence("copy-ghost-text-retained-after-keyboard", app: app)
     }
@@ -4069,22 +4111,49 @@ final class NativeCopyingReferenceTests: NativeGuestUITestCase {
         return matches[0]
     }
 
+    private struct TOCRow {
+        let identity: String
+        let label: String
+        let frame: CGRect
+        let enabled: Bool
+        let current: Bool
+    }
+
+    @MainActor
+    private func tapVisible(_ element: XCUIElement, app: XCUIApplication) {
+        guard element.isEnabled && element.isHittable else {
+            evidence("copying-control-not-actionable", app: app)
+            XCTFail("Control hiện tại phải enabled và có hit point thực; không chạm cứu hộ")
+            return
+        }
+        element.tap()
+    }
+
     @MainActor
     private func reference(_ app: XCUIApplication) -> XCUIElement? {
-        unique(app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Nội dung kinh mẫu")),
-               "reference-document", app: app)
+        let query = app.webViews.firstMatch.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Nội dung kinh mẫu"))
+        guard query.count == 1 else {
+            XCTFail("Phải có đúng một tài liệu kinh mẫu trong WebView hiện tại")
+            return nil
+        }
+        return query.element
     }
 
-    @MainActor
     private func option(_ index: Int, fixture: Fixture) -> String {
-        "\(index + 1) / \(fixture.titles.count) · \(words(fixture.titles[index]))"
+        "\(index + 1). \(words(fixture.titles[index]))"
+    }
+
+    private func counter(_ index: Int, fixture: Fixture) -> String {
+        let unit = ["lang-nghiem", "duoc-su"].contains(fixture.id) ? "Quyển" : "Phẩm"
+        return "\(unit) \(index + 1)/\(fixture.titles.count)"
     }
 
     @MainActor
-    private func referenceChoice(_ index: Int, fixture: Fixture, app: XCUIApplication) -> XCUIElement? {
-        // Other có value là role HTML select đã thấy ở AX native cũ; không đoán picker wheel.
-        unique(app.otherElements.matching(NSPredicate(format: "value == %@", option(index, fixture: fixture))),
-               fixture.id + "-reference-choice-\(index)", app: app)
+    private func counterMatches(_ index: Int, fixture: Fixture, app: XCUIApplication) -> Bool {
+        let expected = counter(index, fixture: fixture)
+        // output có thể có cả node cha/value và StaticText con. Chỉ đọc chuỗi chính xác, không dùng làm target chạm.
+        return app.webViews.firstMatch.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@ OR value == %@", expected, expected)).count > 0
     }
 
     @MainActor
@@ -4104,189 +4173,180 @@ final class NativeCopyingReferenceTests: NativeGuestUITestCase {
     }
 
     @MainActor
-    private func assertTyped(_ expected: String, app: XCUIApplication) {
+    private func assertTyped(_ expected: String, editor: XCUIElement) {
         waitUntil("Bản chép phải giữ nguyên prefix thực sau thao tác TOC/ghost") {
-            guard let snapshot = try? app.snapshot() else { return false }
-            var pending = snapshot.children
-            var values: [String] = []
-            while let node = pending.popLast() {
-                if node.elementType == .textView && node.label == "Tự gõ bản chép của bạn" {
-                    guard let value = node.value as? String else { return false }
-                    values.append(self.words(value))
-                }
-                pending.append(contentsOf: node.children)
-            }
-            return values == [self.words(expected)]
+            guard let snapshot = try? editor.snapshot(), snapshot.elementType == .textView,
+                  snapshot.label == "Tự gõ bản chép của bạn", let value = snapshot.value as? String else { return false }
+            return self.words(value) == self.words(expected)
         }
+    }
+
+    @MainActor
+    private func openTOC(_ fixture: Fixture, current: Int, app: XCUIApplication) -> (dialog: XCUIElement, snapshot: XCUIElementSnapshot, rows: [TOCRow], header: CGRect)? {
+        let trigger = app.webViews.firstMatch.buttons.matching(NSPredicate(format: "label == %@", "Mục lục"))
+        guard trigger.count == 1 else { XCTFail("Phải có đúng một nút Mục lục"); return nil }
+        tapVisible(trigger.element, app: app)
+        let candidates = app.webViews.firstMatch.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Mục lục kinh mẫu"))
+        waitUntil("Nút Mục lục phải mở vùng TOC HTML của kinh mẫu") { candidates.count > 0 }
+        let viewport = app.frame
+        var dialogs: [(dialog: XCUIElement, snapshot: XCUIElementSnapshot, rows: [TOCRow], header: CGRect)] = []
+        for candidate in candidates.allElementsBoundByIndex {
+            guard let snapshot = try? candidate.snapshot(), snapshot.elementType == .other,
+                  let structure = tocStructure(snapshot, current: current, fixture: fixture, viewport: viewport) else { continue }
+            dialogs.append((candidate, snapshot, structure.rows, structure.header))
+        }
+        guard dialogs.count == 1 else {
+            evidence("copying-" + fixture.id + "-toc-dialog-structure", app: app)
+            XCTFail("Phải có đúng một vùng TOC chứa Đóng, tiêu đề và toàn bộ Button mục tham chiếu")
+            return nil
+        }
+        return dialogs[0]
+    }
+
+    @MainActor
+    private func tocStructure(_ snapshot: XCUIElementSnapshot, current: Int, fixture: Fixture, viewport: CGRect) -> (rows: [TOCRow], header: CGRect)? {
+        let expected = Set(fixture.titles.indices.map { option($0, fixture: fixture) })
+        var pending = snapshot.children
+        var rows: [TOCRow] = []
+        var closes: [CGRect] = []
+        var headings: [CGRect] = []
+        while let node = pending.popLast() {
+            if node.elementType == .button {
+                let label = words(node.label)
+                if label == "Đóng" { closes.append(node.frame) }
+                else {
+                    let suffix = " Đang xem"
+                    let suffixPresent = label.hasSuffix(suffix)
+                    let identity = suffixPresent ? String(label.dropLast(suffix.count)) : label
+                    let marker = suffixPresent || snapshotTexts(node).contains { words($0) == "Đang xem" }
+                    rows.append(TOCRow(identity: identity, label: node.label, frame: node.frame, enabled: node.isEnabled, current: marker))
+                }
+            }
+            if node.elementType == .staticText && words(node.label) == "Mục lục kinh mẫu" { headings.append(node.frame) }
+            pending.append(contentsOf: node.children)
+        }
+        let marked = rows.filter { $0.current }
+        let bounds = snapshot.frame.intersection(viewport)
+        guard closes.count == 1, headings.count == 1,
+              closes[0].width >= 44, closes[0].height >= 44, bounds.contains(closes[0]),
+              headings[0].width > 0, headings[0].height > 0, bounds.contains(headings[0]),
+              rows.count == fixture.titles.count,
+              Set(rows.map { $0.identity }) == expected,
+              Set(rows.map { $0.label }).count == rows.count,
+              marked.count == 1, marked[0].identity == option(current, fixture: fixture) else { return nil }
+        return (rows, closes[0].union(headings[0]))
+    }
+
+    @MainActor
+    private func recordTOC(_ rows: [TOCRow], fixture: Fixture) {
+        let tree = XCTAttachment(string: rows.map { "button=\($0.label); frame=\($0.frame); enabled=\($0.enabled); current=\($0.current)" }.joined(separator: "\n"))
+        tree.name = "copying-" + fixture.id + "-actual-html-toc-AX"
+        tree.lifetime = .keepAlways
+        add(tree)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "copying-" + fixture.id + "-actual-html-toc"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     @MainActor
     private func inspectTOC(_ fixture: Fixture, app: XCUIApplication) {
-        guard let control = referenceChoice(0, fixture: fixture, app: app) else { return }
-        tap(control, app: app)
-        // NativeSelectPicker ưu tiên select.title: tên dialog là tên mục hiện tại, không phải "Đoạn".
-        let names = [fixture.titles[0] + ", hộp thoại web", fixture.titles[0] + ", web dialog"]
-        let query = app.otherElements.matching(NSPredicate(format: "label IN %@", names as NSArray))
-        waitUntil("TOC phải mở dialog đúng tên mục đang chọn") { query.count == 1 }
-        guard let dialog = unique(query, fixture.id + "-toc-dialog", app: app) else { return }
-        guard let snapshot = try? dialog.snapshot() else {
-            evidence("copying-" + fixture.id + "-toc-snapshot-failed", app: app)
-            XCTFail("Không đọc được snapshot option TOC thực")
+        guard let opened = openTOC(fixture, current: 0, app: app) else {
+            XCTFail("Không đọc được snapshot dialog TOC HTML")
             return
         }
-        evidence("copying-" + fixture.id + "-actual-toc", app: app)
-        var pending = snapshot.children
-        var labels: [String] = []
-        while let node = pending.popLast() {
-            // RosarySelect dùng aria-pressed; cùng picker đã được AX native xác minh là Switch.
-            if node.elementType == .switch { labels.append(node.label) }
-            pending.append(contentsOf: node.children)
+        let dialog = opened.dialog
+        recordTOC(opened.rows, fixture: fixture)
+        tapVisible(dialog.buttons.matching(NSPredicate(format: "label == %@", "Đóng")).element, app: app)
+        waitUntil("Đóng TOC phải trả tương tác và giữ counter mục đầu") {
+            !dialog.exists && self.counterMatches(0, fixture: fixture, app: app)
         }
-        let expected = fixture.titles.indices.map { option($0, fixture: fixture) }
-        XCTAssertEqual(labels.count, expected.count, "Đếm toàn bộ option thực, không đếm block nội bộ")
-        XCTAssertEqual(Set(labels), Set(expected), "Tên và số thứ tự TOC phải khớp bộ kinh đã chọn")
-        guard let close = unique(dialog.buttons.matching(NSPredicate(format: "label == %@", "Đóng bảng chọn")),
-                                 fixture.id + "-toc-close", app: app) else { return }
-        tap(close, app: app)
-        waitUntil("Đóng TOC phải trả tương tác về màn chép") { !dialog.exists }
     }
 
     @MainActor
     private func selectReference(_ index: Int, from current: Int, fixture: Fixture, app: XCUIApplication) -> Bool {
-        guard let control = referenceChoice(current, fixture: fixture, app: app) else { return false }
-        tap(control, app: app)
-        let title = words(fixture.titles[current])
-        let names = [title + ", hộp thoại web", title + ", web dialog"]
-        let dialogs = app.otherElements.matching(NSPredicate(format: "label IN %@", names as NSArray))
-        waitUntil("Picker tham chiếu phải mở đúng tên mục hiện tại") { dialogs.count == 1 }
-        guard let dialog = unique(dialogs, fixture.id + "-reference-picker", app: app) else { return false }
+        guard let opened = openTOC(fixture, current: current, app: app) else { return false }
+        let dialog = opened.dialog
         let wanted = option(index, fixture: fixture)
-        let expected = Set(fixture.titles.indices.map { option($0, fixture: fixture) })
+        var previousVisible: [TOCRow]?
         var gestures: [String] = []
-        var previousVisible: [(label: String, frame: CGRect)]?
         defer {
             if !gestures.isEmpty {
                 let trace = XCTAttachment(string: gestures.joined(separator: "\n"))
-                trace.name = "copying-" + fixture.id + "-bounded-picker-gestures"
+                trace.name = "copying-" + fixture.id + "-bounded-html-toc-gestures"
                 trace.lifetime = .keepAlways
                 add(trace)
             }
         }
-        // Cùng giới hạn 14 của picker baseline; không lặp tap hay thay timeout.
         for attempt in 0..<14 {
-            guard let snapshot = try? dialog.snapshot() else {
-                XCTFail("Không đọc được snapshot picker thực")
+            let viewport = app.frame
+            guard let snapshot = attempt == 0 ? opened.snapshot : (try? dialog.snapshot()),
+                  let structure = tocStructure(snapshot, current: current, fixture: fixture, viewport: viewport) else {
+                evidence("copying-" + fixture.id + "-toc-structure", app: app)
+                XCTFail("Không đọc được cấu trúc TOC HTML thực")
                 return false
             }
-            let viewport = app.frame
             let bounds = snapshot.frame.intersection(viewport)
-            var pending = snapshot.children
-            var headers: [CGRect] = []
-            var rows: [(label: String, frame: CGRect)] = []
-            while let node = pending.popLast() {
-                if node.elementType == .other && ["biểu ngữ", "banner"].contains(node.label) { headers.append(node.frame) }
-                if node.elementType == .switch { rows.append((node.label, node.frame)) }
-                pending.append(contentsOf: node.children)
-            }
-            guard headers.count == 1, bounds.contains(headers[0]), headers[0].height >= 44,
-                  rows.count == fixture.titles.count, Set(rows.map { $0.label }) == expected,
-                  let target = rows.first(where: { $0.label == wanted }) else {
-                evidence("copying-" + fixture.id + "-unknown-picker-structure", app: app)
-                XCTFail("Picker phải giữ đúng header, role Switch và toàn bộ nhãn TOC duy nhất")
+            let rows = structure.rows
+            let header = structure.header
+            guard bounds.contains(header), let target = rows.first(where: { $0.identity == wanted }) else {
+                evidence("copying-" + fixture.id + "-toc-header-or-target", app: app)
+                XCTFail("Phải nhận diện được header và đúng Button mục tham chiếu")
                 return false
             }
             let visible = rows.filter { row in
-                row.frame.width >= 44 && row.frame.height >= 44 &&
-                row.frame.minY >= headers[0].maxY && bounds.contains(row.frame)
+                row.enabled && row.frame.width >= 44 && row.frame.height >= 44 &&
+                row.frame.minY >= header.maxY && bounds.contains(row.frame)
             }.sorted { $0.frame.minY < $1.frame.minY }
-            let progressTolerance = 0.5 / UIScreen.main.scale
+            let tolerance = 0.5 / UIScreen.main.scale
             if let previous = previousVisible, previous.count == visible.count,
                previous.allSatisfy({ old in visible.contains(where: { row in
-                   row.label == old.label &&
-                   abs(row.frame.minX - old.frame.minX) <= progressTolerance &&
-                   abs(row.frame.minY - old.frame.minY) <= progressTolerance &&
-                   abs(row.frame.width - old.frame.width) <= progressTolerance &&
-                   abs(row.frame.height - old.frame.height) <= progressTolerance
+                   row.identity == old.identity && abs(row.frame.minX - old.frame.minX) <= tolerance &&
+                   abs(row.frame.minY - old.frame.minY) <= tolerance &&
+                   abs(row.frame.width - old.frame.width) <= tolerance &&
+                   abs(row.frame.height - old.frame.height) <= tolerance
                }) }) {
-                evidence("copying-" + fixture.id + "-picker-scroll-no-progress", app: app)
-                XCTFail("Gesture chưa làm picker tiến triển; không kéo lặp trên cùng các hàng")
+                evidence("copying-" + fixture.id + "-toc-no-progress", app: app)
+                XCTFail("Gesture không làm TOC tiến triển; không kéo lặp")
                 return false
             }
-            @MainActor
-            func liveRow(_ row: (label: String, frame: CGRect)) -> XCUIElement? {
-                let query = dialog.switches.matching(NSPredicate(format: "label == %@", row.label))
-                guard query.count == 1 else { return nil }
-                let element = query.element
-                let frame = element.frame
-                let tolerance = 0.5 / UIScreen.main.scale
-                guard bounds.contains(frame), frame.minY >= headers[0].maxY,
-                      frame.width >= 44, frame.height >= 44,
-                      abs(frame.minX - row.frame.minX) <= tolerance, abs(frame.minY - row.frame.minY) <= tolerance,
-                      abs(frame.width - row.frame.width) <= tolerance, abs(frame.height - row.frame.height) <= tolerance,
-                      element.isEnabled, element.isHittable else { return nil }
-                return element
-            }
-            if visible.contains(where: { $0.label == wanted }), let choice = liveRow(target) {
+            if visible.contains(where: { $0.identity == wanted }) {
+                let choice = dialog.buttons.matching(NSPredicate(format: "label == %@", target.label)).element
+                guard choice.isEnabled && choice.isHittable else { XCTFail("Mục TOC hiện tại phải có hit point thực"); return false }
                 choice.tap()
-                waitUntil("Chọn option thực phải đóng picker và giữ đúng giá trị tham chiếu") {
-                    !dialog.exists && app.otherElements.matching(NSPredicate(format: "value == %@", wanted)).count == 1
+                waitUntil("Chọn mục TOC phải đóng dialog và đổi đúng counter") {
+                    !dialog.exists && self.counterMatches(index, fixture: fixture, app: app)
                 }
                 return true
             }
             guard visible.count >= 2, let first = visible.first, let last = visible.last,
-                  liveRow(first) != nil, liveRow(last) != nil else {
-                evidence("copying-" + fixture.id + "-picker-no-safe-rows", app: app)
-                XCTFail("Cuộn chỉ được bắt đầu/kết thúc trong hai hàng option thực đang hittable")
+                  dialog.buttons.matching(NSPredicate(format: "label == %@", first.label)).element.isHittable,
+                  dialog.buttons.matching(NSPredicate(format: "label == %@", last.label)).element.isHittable else {
+                evidence("copying-" + fixture.id + "-toc-no-safe-rows", app: app)
+                XCTFail("Hai đầu cuộn phải ở hai Button TOC thực đang nhìn thấy và hittable")
                 return false
             }
             let upward: Bool
             if target.frame.minY >= last.frame.maxY { upward = true }
             else if target.frame.maxY <= first.frame.minY { upward = false }
-            else {
-                XCTFail("Option trong vùng nhìn thấy phải có hit point thực; không chạm thử")
-                return false
-            }
+            else { XCTFail("Mục trong vùng nhìn thấy chưa có hit point; không chạm cứu hộ"); return false }
             let from = upward ? CGPoint(x: last.frame.midX, y: last.frame.midY) : CGPoint(x: first.frame.midX, y: first.frame.midY)
             let to = upward ? CGPoint(x: first.frame.midX, y: first.frame.midY) : CGPoint(x: last.frame.midX, y: last.frame.midY)
             guard viewport.insetBy(dx: 8, dy: 8).contains(from), viewport.insetBy(dx: 8, dy: 8).contains(to) else {
-                XCTFail("Hai đầu gesture phải cách mép hệ thống và nằm trong các hàng option đã xác minh")
+                XCTFail("Gesture TOC không được chạm mép hệ thống")
                 return false
             }
-            gestures.append("attempt=\(attempt); target=\(wanted); viewport=\(viewport); header=\(headers[0]); from=\(from); to=\(to)")
+            gestures.append("attempt=\(attempt); wanted=\(wanted); viewport=\(viewport); header=\(header); from=\(from); to=\(to)")
             previousVisible = visible
             let origin = app.coordinate(withNormalizedOffset: .zero)
             origin.withOffset(CGVector(dx: from.x - viewport.minX, dy: from.y - viewport.minY))
                 .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: to.x - viewport.minX, dy: to.y - viewport.minY)))
         }
-        evidence("copying-" + fixture.id + "-picker-option-unreachable", app: app)
-        XCTFail("Không tới được đúng option bằng vùng cuộn đã xác minh; không lặp tap")
+        evidence("copying-" + fixture.id + "-toc-unreachable", app: app)
+        XCTFail("Không tới được đúng Button TOC bằng vùng cuộn đã xác minh")
         return false
     }
 
-
-    @MainActor
-    private func useContinuousEditorForAX(_ app: XCUIApplication, phase: String) -> Bool {
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
-        guard let tools = unique(app.buttons.matching(NSPredicate(format: "label == %@", "Tùy chọn")),
-                                 phase + "-editor-tools", app: app) else { return false }
-        tap(tools, app: app)
-        let query = app.switches.matching(NSPredicate(format: "label == %@", "Cuộn liên tục"))
-        XCTAssertTrue(query.firstMatch.waitForExistence(timeout: 10))
-        guard let continuous = unique(query, phase + "-continuous-editor", app: app) else { return false }
-        let before = continuous.value as? String
-        XCTAssertEqual(before, "0", "Màn chép native vẫn phải bắt đầu ở chế độ phân trang")
-        tap(continuous, app: app)
-        let after = continuous.value as? String
-        let keyboardClosed = !app.keyboards.firstMatch.exists
-        XCTAssertEqual(after, "1")
-        XCTAssertTrue(keyboardClosed)
-        // Cùng thao tác UI của ca baseline: chỉ đổi hiển thị, không ghi/dán chữ nguồn vào bản chép.
-        let path = XCTAttachment(string: "book=\(phase)\nreadPath=actual-editor-tools-continuous\nbefore=\(before ?? "nil")\nafter=\(after ?? "nil")\nkeyboardClosed=\(keyboardClosed)")
-        path.name = "copying-" + phase + "-actual-editor-read-path"
-        path.lifetime = .keepAlways
-        add(path)
-        return before == "0" && after == "1" && keyboardClosed
-    }
 
     @MainActor
     private func verifyBook(_ fixture: Fixture) {
@@ -4303,13 +4363,13 @@ final class NativeCopyingReferenceTests: NativeGuestUITestCase {
             XCTFail("Chưa xác minh nhãn thẻ native của bộ kinh này")
             return
         }
-        let choices = app.switches.matching(NSPredicate(format: "label == %@", cardLabel))
+        let choices = app.webViews.firstMatch.switches.matching(NSPredicate(format: "label == %@", cardLabel))
         waitUntil("Thẻ bộ kinh thực phải sẵn sàng", timeout: 45) {
             choices.count == 1 && choices.element.isEnabled
         }
         guard let book = unique(choices, fixture.id + "-book", app: app) else { return }
         tap(book, app: app)
-        let begins = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Tôi đã đọc, tiếp tục chép"))
+        let begins = app.webViews.firstMatch.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Tôi đã đọc, tiếp tục chép"))
         waitUntil("Hướng dẫn phải sẵn sàng để xác nhận", timeout: 30) { begins.count == 1 && begins.element.isEnabled }
         guard let begin = unique(begins, fixture.id + "-guide-confirm", app: app) else { return }
         tap(begin, app: app)
@@ -4317,23 +4377,24 @@ final class NativeCopyingReferenceTests: NativeGuestUITestCase {
         assertReference(fixture.firstAnchor, app: app)
         if fixture.id == "duoc-su" { inspectDuocSuLines(app) }
 
-        guard let ghost = unique(app.switches.matching(NSPredicate(format: "label == %@", "Chữ mờ")),
-                                 fixture.id + "-ghost", app: app),
-              let editor = unique(app.textViews.matching(NSPredicate(format: "label == %@", "Tự gõ bản chép của bạn")),
-                                  fixture.id + "-editor", app: app) else { return }
+        let editorQuery = app.webViews.firstMatch.textViews.matching(NSPredicate(format: "label == %@", "Tự gõ bản chép của bạn"))
+        guard let ghost = unique(app.webViews.firstMatch.switches.matching(NSPredicate(format: "label == %@", "Chữ mờ")),
+                                 fixture.id + "-ghost", app: app) else { return }
+        guard editorQuery.count == 1 else { XCTFail("Phải có đúng editor thực trong WebView"); return }
+        let editor = editorQuery.element
         XCTAssertEqual(ghost.value as? String, "0")
-        tap(ghost, app: app)
+        tapVisible(ghost, app: app)
         XCTAssertEqual(ghost.value as? String, "1")
-        tap(editor, app: app)
+        tapVisible(editor, app: app)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
         editor.typeText(fixture.input)
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         XCTAssertTrue(ghost.isEnabled)
-        tap(ghost, app: app)
+        tapVisible(ghost, app: app)
         XCTAssertEqual(ghost.value as? String, "0")
         XCTAssertTrue(app.keyboards.firstMatch.exists, "Tắt chữ mờ khi đang gõ phải giữ bàn phím")
         XCTAssertTrue(ghost.isEnabled)
-        tap(ghost, app: app)
+        tapVisible(ghost, app: app)
         XCTAssertTrue(ghost.isEnabled)
         XCTAssertEqual(ghost.value as? String, "1")
         XCTAssertTrue(app.keyboards.firstMatch.exists, "Bật lại chữ mờ khi đang gõ phải giữ bàn phím")
@@ -4343,35 +4404,33 @@ final class NativeCopyingReferenceTests: NativeGuestUITestCase {
         XCTAssertTrue(done.isHittable)
         done.tap()
         waitUntil("Done thực phải đóng bàn phím") { !app.keyboards.firstMatch.exists }
-        tap(ghost, app: app)
+        tapVisible(ghost, app: app)
         XCTAssertEqual(ghost.value as? String, "0")
-        guard useContinuousEditorForAX(app, phase: fixture.id) else { return }
-        assertTyped(fixture.typed, app: app)
+        guard assertNativeCopyingContinuousDefault(app, phase: "copying-" + fixture.id) else { return }
+        assertTyped(fixture.typed, editor: editor)
 
-        guard let previous = unique(app.buttons.matching(NSPredicate(format: "label == %@", "Đoạn trước")),
+        guard let previous = unique(app.webViews.firstMatch.buttons.matching(NSPredicate(format: "label == %@", "Đoạn trước")),
                                     fixture.id + "-previous", app: app),
-              let next = unique(app.buttons.matching(NSPredicate(format: "label == %@", "Đoạn sau")),
+              let next = unique(app.webViews.firstMatch.buttons.matching(NSPredicate(format: "label == %@", "Đoạn sau")),
                                 fixture.id + "-next", app: app) else { return }
         XCTAssertFalse(previous.isEnabled)
         XCTAssertEqual(next.isEnabled, fixture.titles.count > 1)
         if fixture.titles.count > 1 {
-            tap(next, app: app)
-            let second = option(1, fixture: fixture)
+            tapVisible(next, app: app)
             waitUntil("Đoạn sau phải chuyển sang mục thứ hai thực") {
-                app.otherElements.matching(NSPredicate(format: "value == %@", second)).count == 1
+                self.counterMatches(1, fixture: fixture, app: app)
             }
             XCTAssertTrue(previous.isEnabled)
-            tap(previous, app: app)
-            let first = option(0, fixture: fixture)
+            tapVisible(previous, app: app)
             waitUntil("Đoạn trước phải trở về mục đầu thực") {
-                app.otherElements.matching(NSPredicate(format: "value == %@", first)).count == 1
+                self.counterMatches(0, fixture: fixture, app: app)
             }
             XCTAssertFalse(previous.isEnabled)
             guard selectReference(fixture.titles.count - 1, from: 0, fixture: fixture, app: app) else { return }
         }
         XCTAssertFalse(next.isEnabled)
         assertReference(fixture.lastAnchor, app: app)
-        assertTyped(fixture.typed, app: app)
+        assertTyped(fixture.typed, editor: editor)
         evidence("copying-" + fixture.id + "-last-reference-prefix-retained", app: app)
         XCTAssertEqual(previous.isEnabled, fixture.titles.count > 1)
         if fixture.titles.count > 1 {
@@ -4379,16 +4438,16 @@ final class NativeCopyingReferenceTests: NativeGuestUITestCase {
         }
         XCTAssertFalse(previous.isEnabled)
         assertReference(fixture.firstAnchor, app: app)
-        assertTyped(fixture.typed, app: app)
-        guard let options = unique(app.buttons.matching(NSPredicate(format: "label == %@", "Tùy chọn và bản đã lưu")),
+        assertTyped(fixture.typed, editor: editor)
+        guard let options = unique(app.webViews.firstMatch.buttons.matching(NSPredicate(format: "label == %@", "Tùy chọn và bản đã lưu")),
                                    fixture.id + "-options", app: app) else { return }
-        tap(options, app: app)
-        let internalChoice = app.otherElements.matching(NSPredicate(format: "label == %@ AND value == %@", "Đoạn", "1 / \(fixture.internalBlocks)"))
+        tapVisible(options, app: app)
+        let internalChoice = app.webViews.firstMatch.otherElements.matching(NSPredicate(format: "label == %@ AND value == %@", "Đoạn", "1 / \(fixture.internalBlocks)"))
         waitUntil("TOC không được đổi block nội bộ đang chép") { internalChoice.count == 1 }
-        guard let close = unique(app.buttons.matching(NSPredicate(format: "label == %@", "Đóng tùy chọn")),
+        guard let close = unique(app.webViews.firstMatch.buttons.matching(NSPredicate(format: "label == %@", "Đóng tùy chọn")),
                                  fixture.id + "-options-close", app: app) else { return }
-        tap(close, app: app)
-        assertTyped(fixture.typed, app: app)
+        tapVisible(close, app: app)
+        assertTyped(fixture.typed, editor: editor)
         evidence("copying-" + fixture.id + "-first-reference-final", app: app)
     }
 
@@ -4430,5 +4489,64 @@ final class NativeCopyingReferenceTests: NativeGuestUITestCase {
         geometry.lifetime = .keepAlways
         add(geometry)
         evidence("copying-duoc-su-formatted-lines", app: app)
+    }
+}
+
+// QA bàn phím thật và bản nháp native; độc lập với audit18 và4 ca TOC.
+final class NativeCopyingParagraphTests: NativeGuestUITestCase {
+    @MainActor
+    private func one(_ query: XCUIElementQuery, _ phase: String, app: XCUIApplication) -> XCUIElement? {
+        let matches = query.allElementsBoundByIndex
+        guard matches.count == 1 else {
+            evidence("copying-paragraphs-ambiguous-" + phase, app: app)
+            XCTFail("Cần đúng một control native cho \(phase), nhận \(matches.count)")
+            return nil
+        }
+        return matches[0]
+    }
+
+    @MainActor
+    func testNativeCopyingPreservesEmptyParagraphsInDurableDraft() {
+        let app = launchGuest()
+        openNativeLink(URL(string: "vn.quangtu.tutam:///tu-tap/chep-kinh")!, app: app)
+        deferStartupNotificationPrompt(app, timeout: 7)
+        let books = app.switches.matching(NSPredicate(format: "label == %@", "04 KINH DƯỢC SƯ 1 quyển"))
+        waitUntil("Thẻ Dược Sư thực phải sẵn sàng", timeout: 45) {
+            books.count == 1 && books.element.isEnabled
+        }
+        guard let book = one(books, "book", app: app) else { return }
+        tap(book, app: app)
+        let guides = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Tôi đã đọc, tiếp tục chép"))
+        waitUntil("Hướng dẫn thực phải sẵn sàng", timeout: 30) {
+            guides.count == 1 && guides.element.isEnabled
+        }
+        guard let guide = one(guides, "guide", app: app) else { return }
+        tap(guide, app: app)
+        guard let ghost = one(app.switches.matching(NSPredicate(format: "label == %@", "Chữ mờ")),
+                              "ghost", app: app) else { return }
+        XCTAssertEqual(ghost.value as? String, "0", "Profile mới phải giữ chữ mờ tắt")
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        guard assertNativeCopyingContinuousDefault(app, phase: "copying-paragraphs", closeTools: true) else { return }
+        guard let editor = one(app.textViews.matching(NSPredicate(format: "label == %@", "Tự gõ bản chép của bạn")),
+                               "editor", app: app) else { return }
+        tap(editor, app: app)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        let keyboardFrame = app.keyboards.firstMatch.frame
+        let visibleEditor = editor.frame.intersection(app.frame)
+        XCTAssertGreaterThan(visibleEditor.width, 0)
+        XCTAssertGreaterThan(min(visibleEditor.maxY, keyboardFrame.minY) - visibleEditor.minY, 0,
+                             "Phải có vùng editor thực phía trên bàn phím")
+        // Gửi Return thật qua XCTest; không dán, inject state hay đổi chữ nguồn.
+        editor.typeText("Nam\n\nmo Phat\n\n")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(ghost.value as? String, "0")
+        evidence("copying-paragraphs-after-native-returns", app: app)
+        let doneQuery = app.toolbars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "Xong", "Hoàn tất"] as NSArray))
+        guard let done = one(doneQuery, "keyboard-done", app: app) else { return }
+        XCTAssertTrue(done.isHittable)
+        done.tap()
+        waitUntil("Done thực phải đóng bàn phím") { !app.keyboards.firstMatch.exists }
+        evidence("copying-paragraphs-after-native-done", app: app)
+        // Oracle raw nằm ở host verifier:2 slot Filesystem/checksum/highest sequence.
     }
 }

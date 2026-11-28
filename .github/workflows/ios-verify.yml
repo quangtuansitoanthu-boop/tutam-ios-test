@@ -23,6 +23,7 @@ on:
           - biorhythm
           - share
           - copying
+          - copying-paragraphs
           - followup
           - tools
           - closing
@@ -250,6 +251,8 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeBiorhythmTests/testBiorhythmBirthEntryResultsGuideRotationAndSingleBack)
           elif [ "$IOS_TEST_SUITE" = "copying" ]; then
             testing_args=(-only-testing:AppUITests/NativeCopyingReferenceTests)
+          elif [ "$IOS_TEST_SUITE" = "copying-paragraphs" ]; then
+            testing_args=(-only-testing:AppUITests/NativeCopyingParagraphTests)
           elif [ "$IOS_TEST_SUITE" = "share" ]; then
             testing_args=(-only-testing:AppUITests/NativeQuoteShareTests/testQuoteShareDoubleTapCancelThenSaveImageToPhotosWithPermissionAndContent)
           elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
@@ -386,6 +389,8 @@ jobs:
             testing_args=(-only-testing:AppUITests/NativeBiorhythmTests/testBiorhythmBirthEntryResultsGuideRotationAndSingleBack)
           elif [ "$IOS_TEST_SUITE" = "copying" ]; then
             testing_args=(-only-testing:AppUITests/NativeCopyingReferenceTests)
+          elif [ "$IOS_TEST_SUITE" = "copying-paragraphs" ]; then
+            testing_args=(-only-testing:AppUITests/NativeCopyingParagraphTests)
           elif [ "$IOS_TEST_SUITE" = "share" ]; then
             testing_args=(-only-testing:AppUITests/NativeQuoteShareTests/testQuoteShareDoubleTapCancelThenSaveImageToPhotosWithPermissionAndContent)
           elif [ "$IOS_TEST_SUITE" = "navigation" ]; then
@@ -451,7 +456,7 @@ jobs:
           import json, os
           data=json.load(open('build/release-evidence/native-ui-summary.json'))
           suite=os.environ.get('IOS_TEST_SUITE','smoke')
-          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1, 'crud': 1, 'quote': 1, 'navigation': 1, 'dream': 1, 'biorhythm': 1, 'share': 1, 'copying': 4}[suite]
+          min_passed={'full': 16, 'smoke': 4, 'extended': 6, 'personal': 4, 'snapshot': 2, 'audio': 1, 'typing': 1, 'audit': 18, 'home': 1, 'crud': 1, 'quote': 1, 'navigation': 1, 'dream': 1, 'biorhythm': 1, 'share': 1, 'copying': 4, 'copying-paragraphs': 1}[suite]
           assert data['passedTests'] >= min_passed, f'Expected at least {min_passed} passing tests for suite={suite}, got {data["passedTests"]}'
           assert data['failedTests'] == 0, 'Native UI test failures'
           assert data['skippedTests'] == 0, 'Native UI tests must not be skipped'
@@ -466,6 +471,17 @@ jobs:
               with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
                   summary.write(f'Native iOS Biorhythm UI-14 QA: {data["passedTests"]} passed, 0 failed, 0 skipped. This separate layout/interaction check does not replace the required 18-test audit.\n')
           PY
+      - name: Verify exact native copying paragraph fixture
+        if: always() && matrix.suite == 'copying-paragraphs'
+        run: |
+          set -euo pipefail
+          test "${GITHUB_ACTIONS:-}" = true
+          test "${RUNNER_OS:-}" = macOS
+          test "${IOS_TEST_SUITE:-}" = copying-paragraphs
+          test -n "${TUTAM_QA_SIMULATOR:-}"
+          test -f build/release-evidence/production-host-isolation.json
+          qa_app_data="$(xcrun simctl get_app_container "$TUTAM_QA_SIMULATOR" vn.quangtu.tutam data)"
+          python3 .github/scripts/verify-ios-copying-paragraphs.py "$qa_app_data" build/release-evidence/copying-paragraphs-persistence.json
       - name: Verify existing audio cache backup exclusion
         if: always() && (matrix.suite == 'share' || matrix.suite == 'audio')
         timeout-minutes: 2

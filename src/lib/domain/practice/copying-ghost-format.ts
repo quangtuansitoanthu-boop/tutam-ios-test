@@ -1,10 +1,11 @@
 import { hasOpenCopyNote, withoutCopyNotes } from './scripture-copying';
 import type { CopySourceLine } from './copying-formatting';
-import type { TypedRun } from './copying-typed-format';
+import { copyingUppercaseParagraphs, type TypedRun } from './copying-typed-format';
 
 /** Convert canonical scripture sentences into styled runs for the ghost tracing underlay. */
 export function formatGhostRuns(source: CopySourceLine[]): TypedRun[] {
   const runs: TypedRun[] = [];
+  const uppercase = copyingUppercaseParagraphs(source);
   source.forEach((sentence, index) => {
     const line = sentence.paragraph ?? index;
     const previous = runs[runs.length - 1];
@@ -14,7 +15,7 @@ export function formatGhostRuns(source: CopySourceLine[]): TypedRun[] {
     for (const part of sentence.parts) {
       if (!part.text) continue;
       const last = runs[runs.length - 1];
-      if (last && last.bold === part.bold && last.line === line && last.align === sentence.align) {
+      if (last && last.bold === part.bold && last.line === line && last.align === sentence.align && last.uppercase === (uppercase.has(line) ? true : undefined)) {
         last.text += part.text;
       } else {
         runs.push({
@@ -22,6 +23,7 @@ export function formatGhostRuns(source: CopySourceLine[]): TypedRun[] {
           bold: part.bold,
           align: sentence.align,
           line,
+          ...(uppercase.has(line) ? { uppercase: true as const } : {}),
         });
       }
     }

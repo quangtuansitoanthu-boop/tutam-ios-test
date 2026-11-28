@@ -21,7 +21,7 @@
   import { copyingBlockCompleted, copyingChapterCompletion, copyingTextCompletion } from '$lib/domain/practice/copying-completion-progress';
   import { copySourceText, copySourceLayoutLines } from '$lib/domain/practice/copying-formatting';
   import sourceLayouts from '$lib/data/scripture-copying/layouts.json';
-  import { Check, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, PenLine, Settings, Save, Maximize, Minimize, ArrowDownUp, BookOpen, SlidersHorizontal, Volume2, Square, X } from '@lucide/svelte';
+  import { Check, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, PenLine, Settings, Save, Maximize, Minimize, ArrowDownUp, BookOpen, SlidersHorizontal, Volume2, Square, X, List } from '@lucide/svelte';
   import { copyingSentences, copyingCursorPosition, copyingSourceWordLines } from '$lib/domain/practice/copying-follow';
   import { buildCopyReferenceSections, findCopyReferenceSection, projectCopyReferenceSection, annotateCopyReferenceProjection, copyReferenceSourceOffset, type CopyReferenceSection } from '$lib/domain/practice/copying-reference';
   import { createInterfaceTranslator } from '$lib/i18n/copying-interface';
@@ -1053,6 +1053,11 @@
   });
   let sourceVisible = $state(true);
   let sourceToolsOpen = $state(false);
+  let sourceTocOpen = $state(false);
+  $effect(() => {
+    scope; selected; chapterNumber; book?.version; step;
+    sourceTocOpen = false;
+  });
   let editorToolsOpen = $state(false);
   const editorToolsLabel = $derived(localizeUi(editorToolsOpen ? 'Thu gọn' : 'Tùy chọn'));
   let sourceElement = $state<HTMLDivElement>();
@@ -1092,13 +1097,19 @@
       ))
   );
   const referenceIndex = $derived(Math.max(0, referenceSections.findIndex(item => item.id === referenceSection?.id)));
+  const referenceNavigationReady = $derived(Boolean(book) && !loading && !networkBusy && !restarting && referenceSections.length > 0);
+  const referenceCounter = $derived(localizeUi(
+    COPYING_BOOKS.find(item => item.id === selected)?.unit === 'quyển' ? 'Quyển {0}/{1}' : 'Phẩm {0}/{1}',
+    referenceIndex + 1, referenceSections.length,
+  ));
   const referenceProjection = $derived(book && referenceSection
     ? projectCopyReferenceSection(book, referenceSection, sourceLayouts[selected as keyof typeof sourceLayouts])
     : { lines: [] });
   const sourceSentenceGroups = $derived(annotateCopyReferenceProjection(referenceProjection, referenceActiveSource).lines);
   function chooseReference(index: number) {
     const item = referenceSections[index];
-    if (!book || !item || networkBusy || restarting) return;
+    if (!book || !item || !referenceNavigationReady) return;
+    sourceTocOpen = false;
     sampleSpeech.stop();
     referenceChoice = { scope, bookId: book.id, version: book.version, id: item.id };
     if (sourceElement) sourceElement.scrollTop = 0;
@@ -1229,7 +1240,7 @@
     if (canRequestFullscreen() && !document.fullscreenElement) {
       void document.documentElement.requestFullscreen().catch(() => {});
     }
-    continuousScroll = nativePlatform() === 'web' && !window.matchMedia('(max-width:700px)').matches;
+    continuousScroll = true;
     step = 'write'; optionsOpen = false; sourceToolsOpen = false; editorToolsOpen = false;
     approvedLocalDeparture = '';
     if (latestNotice) message = latestNotice;
@@ -1401,14 +1412,14 @@
     {#if loading || (draft && (draft.sutraId !== selected || draft.chapter !== chapterNumber))}<p role="status">{localizeUi("Đang mở bản chép trên máy…")}</p>
     {:else if chapter && draft}
       <p class="copy-chapter-location" title={chapter.title}>{chapter.title}</p>
-      <p class="book-run-progress" role="status">{localizeUi('Lượt {0} · Đã hoàn thành {1}/{2} phẩm/quyển', (bookSnapshot?.previousRuns.length ?? 0) + 1, completedChapters, book?.chapters.length ?? 0)}</p>
       <progress class="chapter-progress" max={100} value={chapterCompletion.percent} aria-label={localizeUi('Tiến độ chép kinh')} title={localizeUi('Đạt từ 90% được ghi nhận hoàn thành. Rà soát chỉ để tham khảo.')}></progress>
       {#if bookComplete || chapterComplete}<div class="completion-banner" class:book-complete={bookComplete}><div><strong>{localizeUi(bookComplete ? 'Đã chép trọn bộ kinh' : 'Đã chép xong phẩm/quyển này')}</strong><p role="status">{localizeUi(completionError ? 'Chưa ghi được công phu. Hãy thử lại trước khi mở lượt mới.' : bookComplete ? bookSnapshot?.legacyCompleted ? 'Bản chép cũ và lịch sử công phu được giữ nguyên.' : 'Đã ghi nhận 1 lượt vào Công phu của tôi. Bản chép được giữ nguyên.' : 'Chỉ ghi nhận 1 lượt công phu khi hoàn thành trọn bộ kinh.')}</p></div>{#if completionError}<button type="button" onclick={() => void recordCompletion()}>{localizeUi('Thử lại')}</button>{:else if bookComplete}<div class="book-run-actions"><button class="primary" type="button" disabled={restarting || networkBusy || composing || completionRun !== bookSnapshot?.runId} onclick={restartCopy}>{localizeUi('Bắt đầu lượt {0}', (bookSnapshot?.previousRuns.length ?? 0) + 2)}</button><button type="button" onclick={() => { archivePreview = draft; optionsOpen = true; }}>{localizeUi('Xem bản đã chép')}</button><a href="/tien-do-tu-tap">{localizeUi('Công phu của tôi')}</a></div>{:else if book && chapterNumber < book.chapters.length}<button type="button" onclick={() => { focusAfterChapter = { scope, book: selected, chapter: chapterNumber + 1 }; chapterNumber++; }}>{localizeUi('Sang phẩm/quyển tiếp theo')}</button>{:else if nextIncompleteChapter > 0}<button type="button" onclick={() => { focusAfterChapter = { scope, book: selected, chapter: nextIncompleteChapter }; chapterNumber = nextIncompleteChapter; }}>{localizeUi('Tiếp tục phẩm/quyển chưa hoàn thành: {0}', nextIncompleteChapter)}</button>{/if}</div>{/if}
       <div class="writing-grid" inert={optionsOpen} class:source-hidden={!sourceVisible}>
         <section class="source-panel" aria-labelledby="copy-source-title">
           <div class="panel-heading source-heading">
             <h2 id="copy-source-title">{localizeUi('Kinh mẫu')}</h2>
-            <div class="block-nav"><button class="icon-button" type="button" aria-label={localizeUi('Đoạn trước')} disabled={referenceIndex === 0} onclick={() => chooseReference(referenceIndex - 1)}><ChevronLeft size={20} aria-hidden="true" /></button><label for="copy-block">{localizeUi('Đoạn')}</label><select id="copy-block" value={referenceIndex} title={referenceSection?.title} onchange={e => chooseReference(Number(e.currentTarget.value))}>{#each referenceSections as item, i (item.id)}<option value={i}>{i + 1} / {referenceSections.length} · {item.title}{referenceIsComplete(item) ? ' ✓' : ''}</option>{/each}</select><button class="icon-button" type="button" aria-label={localizeUi('Đoạn sau')} disabled={referenceIndex === referenceSections.length - 1} onclick={() => chooseReference(referenceIndex + 1)}><ChevronRight size={20} aria-hidden="true" /></button></div>
+            <div class="block-nav"><button class="icon-button" type="button" aria-label={localizeUi('Đoạn trước')} disabled={!referenceNavigationReady || referenceIndex === 0} onclick={() => chooseReference(referenceIndex - 1)}><ChevronLeft size={20} aria-hidden="true" /></button><output class="reference-counter" aria-live="polite">{referenceCounter}</output><button class="icon-button" type="button" aria-label={localizeUi('Đoạn sau')} disabled={!referenceNavigationReady || referenceIndex === referenceSections.length - 1} onclick={() => chooseReference(referenceIndex + 1)}><ChevronRight size={20} aria-hidden="true" /></button></div>
+            <button class="source-toc-trigger" type="button" disabled={!referenceNavigationReady} aria-haspopup="dialog" aria-expanded={sourceTocOpen} aria-controls="copy-reference-toc" onclick={() => sourceTocOpen = true}><List size={18} aria-hidden="true" />{localizeUi('Mục lục')}</button>
             <button class="icon-button source-tools-trigger" type="button" aria-label={localizeUi('Tùy chọn kinh mẫu')} aria-expanded={sourceToolsOpen} aria-controls="copy-source-tools" title={localizeUi('Tùy chọn kinh mẫu')} onclick={() => sourceToolsOpen = !sourceToolsOpen}><SlidersHorizontal size={18} aria-hidden="true" /></button>
           </div>
           <div class="source-tools" class:tools-open={sourceToolsOpen} id="copy-source-tools">
@@ -1460,7 +1471,7 @@
               <div class="source-font-controls editor-font-controls" role="group" aria-label={localizeUi('Cỡ chữ bản chép')}>
                 <button type="button" aria-label={localizeUi('Giảm cỡ chữ bản chép')} disabled={editorFontSize <= 14 || composing} onclick={() => changeEditorFontSize(-2)}>A−</button><output aria-live="polite">{editorFontSize}px</output><button type="button" aria-label={localizeUi('Tăng cỡ chữ bản chép')} disabled={editorFontSize >= 40 || composing} onclick={() => changeEditorFontSize(2)}>A+</button>
               </div>
-              <button class="icon-button" type="button" disabled={composing} aria-pressed={continuousScroll} aria-label="Cuộn liên tục" title={continuousScroll ? 'Chuyển sang chia trang' : 'Chuyển sang cuộn liên tục'} onclick={toggleEditorScroll}>{#if continuousScroll}<ArrowDownUp size={18} aria-hidden="true" />{:else}<BookOpen size={18} aria-hidden="true" />{/if}</button>
+              <button class="icon-button editor-scroll-mode-toggle" type="button" disabled={composing} aria-pressed={continuousScroll} aria-label="Cuộn liên tục" title={continuousScroll ? 'Chuyển sang chia trang' : 'Chuyển sang cuộn liên tục'} onclick={toggleEditorScroll}>{#if continuousScroll}<ArrowDownUp size={18} aria-hidden="true" />{:else}<BookOpen size={18} aria-hidden="true" />{/if}</button>
               {#if !continuousScroll}<div class="editor-pages" role="group" aria-label={localizeUi('Trang gõ')}><button type="button" aria-label={localizeUi('Trang gõ trước')} disabled={editorPage === 0 || composing} onclick={() => goEditorPage(editorPage - 1)}><ChevronLeft size={16} aria-hidden="true" /></button><output aria-live="polite">{editorPage + 1}/{editorPages.length}</output><button type="button" aria-label={localizeUi('Trang gõ sau')} disabled={editorPage === editorPages.length - 1 || composing} onclick={() => goEditorPage(editorPage + 1)}><ChevronRight size={16} aria-hidden="true" /></button></div>{/if}
           </div>
           <RichCopyEditor editingContext={JSON.stringify([scope, selected, chapterNumber, block, editorPage])} readonly={restarting} allowPaste={canPaste} bind:this={editor} value={pageText} runs={typedRuns} {ghostRuns} {canonicalGhostRuns} traceCanonical={canonicalTraceEligible} showGhost={ghostEnabled} mismatch={Boolean(ghostMismatchWord)} onmismatch={triggerGhostMismatch} font={editorFont} scale={editorScale} size={editorFontSize} label={localizeUi('Tự gõ bản chép của bạn')} placeholder={localizeUi('Chậm rãi gõ từng lời kinh…')} invalid={issues.length > 0} maxlength={Math.max(0, chapter.blocks[block].length * 2 + 1000 - (text.length - pageText.length))} onreferencepaste={pasteReference} onlayout={scheduleEditorReflow} onvalue={(next, type) => { clearGhostMismatch(); input(next, type); }} onbeforeinput={beforeInput} ondisallow={disallow} oncaret={followEditorCaret} oncomposing={active => { composing = active; if (active) cancelAutoAdvance(); if (!active) { pageTurnPending = true; followEditorCaret(); if (reflowPending) { reflowPending = false; scheduleEditorReflow(); } checkTypingAutoAdvance(text, ''); } }} />{#if ghostMismatchWord}<span class="copy-mismatch-hint" role="status" aria-live="polite">{localizeUi('Cần gõ:')} <strong>{ghostMismatchWord}</strong></span>{/if}<span class="copy-note">{localizeUi('Phần trong ngoặc ( ) là hướng dẫn, không bắt buộc chép.')}</span><span id="copy-input-help" class="sr-only">{localizeUi(canPaste ? "Quản trị viên có thể dán văn bản để kiểm tra." : "Không hỗ trợ dán hoặc kéo thả. Bạn có thể sửa, xóa và gõ dấu tiếng Việt.")}</span>
@@ -1578,6 +1589,19 @@
       </div>
     </dialog>
   {/if}
+  {#if sourceTocOpen}
+    <dialog class="copy-reference-toc-dialog" id="copy-reference-toc" use:modalDialog aria-labelledby="copy-reference-toc-heading" tabindex="-1" oncancel={(event) => { event.preventDefault(); sourceTocOpen = false; }} onkeydown={(event) => event.stopPropagation()}>
+      <header class="copy-reference-toc-heading"><h2 id="copy-reference-toc-heading">{localizeUi('Mục lục kinh mẫu')}</h2><button class="icon-button" type="button" data-modal-focus aria-label={localizeUi('Đóng')} onclick={() => sourceTocOpen = false}><X size={20} aria-hidden="true" /></button></header>
+      <nav aria-label={localizeUi('Mục lục kinh mẫu')}>
+        {#each referenceSections as item, position (item.id)}
+          <button type="button" class:current={item.id === referenceSection?.id} aria-current={item.id === referenceSection?.id ? 'true' : undefined} disabled={!referenceNavigationReady} onclick={() => chooseReference(position)}>
+            <span>{position + 1}. {item.title}{referenceIsComplete(item) ? ' ✓' : ''}</span>
+            {#if item.id === referenceSection?.id}<small><Check size={14} aria-hidden="true" />{localizeUi('Đang xem')}</small>{/if}
+          </button>
+        {/each}
+      </nav>
+    </dialog>
+  {/if}
   {#if fontSheetOpen}
     <dialog class="bottom-sheet-dialog" use:modalDialog oncancel={() => fontSheetOpen = false}>
       <div class="sheet-handle" aria-hidden="true"></div>
@@ -1639,13 +1663,14 @@
   .compact-select-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:4px;min-height:44px;padding:6px 10px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg2);color:var(--text);cursor:pointer;user-select:none;transition:background .15s,border-color .15s}
   .compact-select-btn:hover{background:var(--bg3);border-color:var(--gold)}
   .compact-select-btn.font-select-btn{min-width:86px;max-width:130px}
-  .compact-select-btn.size-select-btn{min-width:48px;max-width:60px}
+  .compact-select-btn.size-select-btn{min-width:64px;max-width:none;flex-shrink:0}
   .compact-select-btn .btn-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .compact-select-btn.size-select-btn .btn-text{overflow:visible;text-overflow:clip;flex-shrink:0}
   @media(max-width:700px){
     .copy-writing .compact-editor-display{display:flex;gap:calc(var(--space-page) / 5);min-width:0}
     .copy-writing .compact-select-btn{min-height:44px;padding:calc(var(--space-page) / 5) 8px;font-size:11px}
     .copy-writing .compact-select-btn.font-select-btn{width:86px}
-    .copy-writing .compact-select-btn.size-select-btn{width:48px}
+    .copy-writing .compact-select-btn.size-select-btn{width:64px}
     .copy-writing .editor-heading>label{min-width:0;flex:1;line-height:1.4}
     .copy-writing .editor-tools>.icon-button{min-width:44px!important;min-height:44px!important}
     .copy-writing .editor-tools{flex-shrink:0}
@@ -1667,8 +1692,8 @@
   .sheet-size-btn.selected{background:var(--gold);border-color:var(--gold);color:var(--on-gold,#24180c);font-weight:700}
   .completion-banner.book-complete{flex-direction:column;align-items:stretch}
   .book-complete strong{display:block;text-align:center;font-weight:700}
-  .keyboard-open .book-run-progress{display:none}
-  .book-run-progress{color:var(--text2);margin:0;flex-shrink:0}
+  
+  
   .book-run-actions{display:flex;gap:calc(var(--space-page) * .4);flex-wrap:wrap;align-items:center}
   @media(max-width:700px){.book-run-actions{flex-direction:column;align-items:stretch}}
   .book-run-actions a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:calc(var(--space-page) * .4);border:1px solid var(--border);border-radius:var(--radius-control);color:var(--text);text-decoration:none}
@@ -1696,17 +1721,17 @@
   .selection-progress{margin-top:14px}.progress-row{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;padding:13px 16px;text-align:left;border:1px solid var(--border);border-radius:12px;background:var(--bg2)}.progress-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}.progress-row strong{flex-shrink:0;font-size:16px;color:var(--brown);font-variant-numeric:tabular-nums}
 
   :global(.copying-workspace-open:not(.copying-auth-open) .qts-header),:global(.copying-workspace-open:not(.copying-auth-open) .qts-nav),:global(.copying-workspace-open:not(.copying-auth-open) .tt-topbar),:global(.copying-workspace-open .qts-bottom-nav),:global(:root[data-native-app='true'] .copying-workspace-open .qts-bottom-nav),:global(.copying-workspace-open [data-guest-notice-banner]),:global(.copying-workspace-open .qts-footer){display:none!important}
-  /* Chỉ màn chọn/chuẩn bị dành chỗ theo chiều cao thật của thanh điều hướng. */
-  .copy-page:not(.copy-writing){padding-top:calc(var(--practice-topbar-height,calc(64px + var(--app-safe-top,env(safe-area-inset-top,0px)))) + var(--space-page))}
+  /* Shell đã dành chỗ cho điều hướng; màn chọn chỉ giữ khoảng cách trang. */
+  .copy-page:not(.copy-writing){padding-top:var(--space-page)}
   .copy-page{max-width:1040px;margin:0 auto;padding:26px 24px 100px;color:var(--text);font-family:var(--font-ui,inherit)}
   button,select{font:inherit;color:inherit}button,select{min-height:44px;border:1px solid var(--border);border-radius:12px;background:var(--bg2);padding:10px 14px}button{cursor:pointer}button:disabled{cursor:default;opacity:.45}button:focus-visible,select:focus-visible,.source:focus-visible{outline:3px solid var(--gold);outline-offset:2px}h1,h2,h3,p{margin:0}p{line-height:1.6}h2{font-size:19px}h3{font-size:16px}.muted,.selection-hint,.edition-note{color:var(--text2);font-size:12px}.error{color:var(--danger-text)}.eyebrow{font-size:10px;letter-spacing:.13em;color:var(--text2)}.choose-header h1{font:700 var(--font-size-section-title)/1.3 var(--font-app);margin:8px 0}.choose-header p{color:var(--text2);max-width:550px;font-size:15px}.choose-header h1:focus,.writing-title h1:focus{outline:none}
   .stepper{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:center;gap:12px;list-style:none;padding:0;margin:26px 0}.stepper li{display:flex;align-items:center;gap:9px;color:var(--text2);font-size:14px}.stepper li[aria-current]{color:var(--brown);font-weight:700}.stepper span{display:grid;place-items:center;width:28px;height:28px;background:var(--bg3);border-radius:50%;border:1px solid var(--border)}.stepper li[aria-current] span{background:var(--gold);color:var(--on-gold,#fff);border-color:var(--gold)}
   .selection-section{border:1px solid var(--border);background:var(--bg2);border-radius:22px;padding:26px}.books{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:20px 0 24px}.books button{position:relative;display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:20px 18px;gap:12px;border:2px solid var(--border);min-height:160px;background:var(--bg);transition:border-color .15s,background .15s}.books button.active{border-color:var(--gold);background:var(--gold-light,var(--bg3))}.books strong{font-family:var(--font-reader,serif);font-size:17px;line-height:1.5;text-transform:uppercase}.book-number,.books small{color:var(--text2);font-size:12px}.books :global(.selected-mark){position:absolute;right:12px;top:15px;color:var(--brown)}.chapter-choice{display:grid;gap:9px}.chapter-choice label{font-size:13px;font-weight:650}.chapter-choice select{width:100%;min-width:0;max-width:100%;text-overflow:ellipsis;padding-right:36px}.primary{display:inline-flex;align-items:center;justify-content:center;gap:10px;background:var(--gold);border-color:var(--gold);color:var(--on-gold,#fff);font-weight:700}.start-copying{width:100%;margin:22px 0 10px;min-height:52px}.selection-hint{text-align:center}.resume-note{font-size:13px;color:var(--brown);margin-top:14px}.notice{margin-top:20px;border-radius:16px;background:var(--bg3);padding:18px 20px;border:1px solid var(--border)}.notice h2{font-size:15px;margin-bottom:8px}.notice p{color:var(--text2);font-size:13px}.notice button{margin-top:12px}
   .copy-writing{position:fixed;inset:0;top:var(--copy-viewport-top,0px);height:100vh;height:var(--copy-viewport-height,100dvh);max-width:none;width:100%;box-sizing:border-box;z-index:150;background:var(--bg);padding:0 max(20px,calc((100vw - 1440px)/2)) max(10px,env(safe-area-inset-bottom));display:flex;flex-direction:column;overflow:hidden}
-  .writing-bar{display:flex;align-items:center;gap:12px;padding:12px 0 8px;flex-shrink:0}.icon-button{display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:8px;flex-shrink:0}.writing-title{flex:1;min-width:0}.writing-title h1{font-size:16px;line-height:1.4;margin:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.writing-title p{font-size:11px;color:var(--text2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.save-button{font-size:12px;max-width:190px}.save-status{display:flex;justify-content:space-between;gap:12px;color:var(--text2);font-size:11px;padding:0 0 10px;flex-shrink:0}.save-status.error{color:var(--danger-text)}.message{display:flex;align-items:flex-start;gap:8px;background:var(--bg3);border-left:3px solid var(--gold);padding:6px 10px;margin:0 0 8px;max-height:20vh;overflow:auto;flex-shrink:0}.message p{font-size:12px;flex:1}.guest-draft{display:flex;align-items:center;gap:10px;font-size:12px;padding:8px 12px;background:var(--bg3);border-left:3px solid var(--gold);border-radius:10px;max-height:20vh;overflow:auto;flex-shrink:0;animation:guestBannerFadeIn .25s ease-out}.guest-draft p{font-size:12px;flex:1;margin:0;line-height:1.4}.guest-draft .guest-adopt-btn{font-size:12px;padding:6px 12px;white-space:nowrap;flex-shrink:0}.guest-draft .guest-close-btn{min-width:32px;min-height:32px;padding:4px;flex-shrink:0;color:var(--text2);border:none;background:transparent;cursor:pointer}@keyframes guestBannerFadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}.block-nav{display:flex;align-items:center;gap:8px}.block-nav label{font-size:13px}.block-nav select{max-width:90px;min-width:62px;padding:6px 10px}.chapter-progress{display:block;width:100%;height:3px;min-height:3px;margin:10px 0 14px;accent-color:var(--gold);flex-shrink:0}
+  .writing-bar{display:flex;align-items:center;gap:12px;padding:12px 0 8px;flex-shrink:0}.icon-button{display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:8px;flex-shrink:0}.writing-title{flex:1;min-width:0}.writing-title h1{font-size:16px;line-height:1.4;margin:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.writing-title p{font-size:11px;color:var(--text2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.save-button{font-size:12px;max-width:190px}.save-status{display:flex;justify-content:space-between;gap:12px;color:var(--text2);font-size:11px;padding:0 0 10px;flex-shrink:0}.save-status.error{color:var(--danger-text)}.message{display:flex;align-items:flex-start;gap:8px;background:var(--bg3);border-left:3px solid var(--gold);padding:6px 10px;margin:0 0 8px;max-height:20vh;overflow:auto;flex-shrink:0}.message p{font-size:12px;flex:1}.guest-draft{display:flex;align-items:center;gap:10px;font-size:12px;padding:8px 12px;background:var(--bg3);border-left:3px solid var(--gold);border-radius:10px;max-height:20vh;overflow:auto;flex-shrink:0;animation:guestBannerFadeIn .25s ease-out}.guest-draft p{font-size:12px;flex:1;margin:0;line-height:1.4}.guest-draft .guest-adopt-btn{font-size:12px;padding:6px 12px;white-space:nowrap;flex-shrink:0}.guest-draft .guest-close-btn{min-width:32px;min-height:32px;padding:4px;flex-shrink:0;color:var(--text2);border:none;background:transparent;cursor:pointer}@keyframes guestBannerFadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}.block-nav{display:flex;align-items:center;gap:8px}.chapter-progress{display:block;width:100%;height:3px;min-height:3px;margin:10px 0 14px;accent-color:var(--gold);flex-shrink:0}
   .writing-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);gap:18px;flex:1;min-height:0}.source-panel,.editor-panel{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden}.panel-heading{display:flex;align-items:center;gap:10px;padding:10px 14px;flex-shrink:0;flex-wrap:wrap}.panel-heading h2,.panel-heading label{font-size:13px;font-weight:700;margin-right:auto}.source-font-controls{display:flex;align-items:center;gap:7px}.source-font-controls button{padding:6px;min-width:40px;min-height:40px;font-size:14px;font-weight:700}.source-font-controls output{font-size:11px;min-width:30px;font-variant-numeric:tabular-nums;text-align:center}.source-toggle{display:flex;align-items:center;gap:5px;border:0;background:none;padding:5px;font-size:11px;min-height:40px}.source{font-family:var(--font-reader,serif);font-size:20px;line-height:1.8;user-select:none;-webkit-user-select:none;overflow-wrap:anywhere;overflow:auto;overscroll-behavior:contain;flex:1;padding:10px 20px 24px;scrollbar-width:thin}.source-line{margin:0 0 .5em;line-height:inherit;white-space:pre-wrap}.source-line:last-child{margin-bottom:0}.review-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-top:1px solid var(--border);flex-shrink:0}.review-actions button{font-size:12px;padding:8px 12px}.review-actions strong{font-size:11px;color:var(--brown)}.review-actions .muted{font-size:10px}.source-hidden{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.source-hidden .source-panel{align-self:start}
   .options-panel{position:absolute;right:max(16px,calc((100vw - 1440px)/2));top:68px;bottom:max(16px,env(safe-area-inset-bottom));width:min(440px,calc(100% - 32px));z-index:3;overflow:auto;box-sizing:border-box;background:var(--bg2);border:1px solid var(--border);border-radius:18px;box-shadow:0 12px 48px #0003;padding:6px 18px 20px}.options-panel>.panel-heading{position:sticky;top:-6px;z-index:1;background:var(--bg2);padding:8px 0;border-bottom:1px solid var(--border)}.storage-details,.cloud-panel{padding:18px 0;border-bottom:1px solid var(--border)}.options-panel h3{margin-bottom:8px}.options-panel p{font-size:13px;color:var(--text2);margin:8px 0}.options-panel button{font-size:12px}.cloud-panel ul{list-style:none;padding:0}.cloud-panel li{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;margin:12px 0}.edition-note{margin-top:16px!important}
-  @media(max-width:700px){.copy-page{padding:20px 14px 90px}.choose-header h1{font-size:var(--font-size-section-title)}.choose-header p{font-size:var(--font-size-body)}.stepper{margin:20px 0;gap:8px}.stepper li{flex-direction:column;text-align:center;font-size:12px}.selection-section{padding:18px 14px;border-radius:18px}.selection-section h2{font-size:var(--font-size-card-title)}.books{grid-template-columns:1fr;gap:9px;margin:16px 0}.books button{min-height:78px;padding:12px 34px 12px 13px;display:grid;grid-template-columns:24px 1fr;gap:4px 10px}.books strong{font-size:15px}.books small{grid-column:2}.book-number{align-self:center}.chapter-choice select{font-size:12px}.selection-hint{font-size:11px}.copy-writing{padding:0 10px max(6px,env(safe-area-inset-bottom))}.writing-bar{padding:7px 0 5px;gap:6px}.writing-title h1{font-size:12px}.writing-title p{display:none}.writing-bar .icon-button{min-width:40px;min-height:40px;padding:7px}.save-button{max-width:105px;font-size:10px;padding:7px 9px;min-height:40px;line-height:1.4}.save-status{font-size:10px;padding-bottom:6px}.account-note{max-width:52%;text-align:right}.block-nav{gap:5px}.block-nav label{font-size:12px}.block-nav .icon-button{min-width:36px;min-height:36px;padding:4px}.block-nav select{min-height:36px;min-width:58px;font-size:12px;padding:5px}.chapter-progress{margin:5px 0 8px}.writing-grid,.source-hidden{display:flex;flex-direction:column;gap:8px}.source-panel{flex:0 1 auto;max-height:36%;border-radius:12px}.source-hidden .source-panel{align-self:stretch;max-height:none;flex-shrink:0}.panel-heading{padding:5px 9px;gap:5px;flex-wrap:nowrap}.panel-heading h2,.panel-heading label{font-size:12px}.source-font-controls{gap:3px}.source-font-controls button{min-width:36px;min-height:36px;font-size:12px;padding:5px}.source-font-controls output{font-size:10px;min-width:28px}.source-toggle{font-size:10px;min-height:36px;padding:4px;gap:2px}.source-toggle :global(svg){width:12px}.source{max-height:20vh;max-height:20dvh;padding:4px 12px 12px;flex:0 1 auto;line-height:1.7}.editor-panel{flex:1;border-radius:12px}.review-actions{padding:5px 8px;gap:6px}.review-actions button{font-size:11px;min-height:36px;padding:7px 10px}.review-actions .muted{font-size:9px}.options-panel{top:55px;right:10px;bottom:8px;width:calc(100% - 20px)}.message p,.guest-draft{font-size:11px}.guest-draft{padding:6px 8px;gap:6px}.guest-draft .guest-adopt-btn{font-size:10px;padding:6px 8px}.guest-draft .guest-close-btn{min-width:28px;min-height:28px;padding:2px}}
+  @media(max-width:700px){.copy-page{padding:20px 14px 90px}.choose-header h1{font-size:var(--font-size-section-title)}.choose-header p{font-size:var(--font-size-body)}.stepper{margin:20px 0;gap:8px}.stepper li{flex-direction:column;text-align:center;font-size:12px}.selection-section{padding:18px 14px;border-radius:18px}.selection-section h2{font-size:var(--font-size-card-title)}.books{grid-template-columns:1fr;gap:9px;margin:16px 0}.books button{min-height:78px;padding:12px 34px 12px 13px;display:grid;grid-template-columns:24px 1fr;gap:4px 10px}.books strong{font-size:15px}.books small{grid-column:2}.book-number{align-self:center}.chapter-choice select{font-size:12px}.selection-hint{font-size:11px}.copy-writing{padding:0 10px max(6px,env(safe-area-inset-bottom))}.writing-bar{padding:7px 0 5px;gap:6px}.writing-title h1{font-size:12px}.writing-title p{display:none}.writing-bar .icon-button{min-width:40px;min-height:40px;padding:7px}.save-button{max-width:105px;font-size:10px;padding:7px 9px;min-height:40px;line-height:1.4}.save-status{font-size:10px;padding-bottom:6px}.account-note{max-width:52%;text-align:right}.block-nav{gap:5px}.block-nav .icon-button{min-width:36px;min-height:36px;padding:4px}.chapter-progress{margin:5px 0 8px}.writing-grid,.source-hidden{display:flex;flex-direction:column;gap:8px}.source-panel{flex:0 1 auto;max-height:36%;border-radius:12px}.source-hidden .source-panel{align-self:stretch;max-height:none;flex-shrink:0}.panel-heading{padding:5px 9px;gap:5px;flex-wrap:nowrap}.panel-heading h2,.panel-heading label{font-size:12px}.source-font-controls{gap:3px}.source-font-controls button{min-width:36px;min-height:36px;font-size:12px;padding:5px}.source-font-controls output{font-size:10px;min-width:28px}.source-toggle{font-size:10px;min-height:36px;padding:4px;gap:2px}.source-toggle :global(svg){width:12px}.source{max-height:20vh;max-height:20dvh;padding:4px 12px 12px;flex:0 1 auto;line-height:1.7}.editor-panel{flex:1;border-radius:12px}.review-actions{padding:5px 8px;gap:6px}.review-actions button{font-size:11px;min-height:36px;padding:7px 10px}.review-actions .muted{font-size:9px}.options-panel{top:55px;right:10px;bottom:8px;width:calc(100% - 20px)}.message p,.guest-draft{font-size:11px}.guest-draft{padding:6px 8px;gap:6px}.guest-draft .guest-adopt-btn{font-size:10px;padding:6px 8px}.guest-draft .guest-close-btn{min-width:28px;min-height:28px;padding:2px}}
   .source.admin-copy{user-select:text;-webkit-user-select:text}.source-line--current{background:var(--gold-light,var(--bg3));box-shadow:-3px 0 0 var(--gold);border-radius:3px}
   .editor-pages{display:flex;align-items:center;gap:5px}.editor-pages button{display:flex;align-items:center;justify-content:center;padding:4px;min-width:34px;min-height:34px}.editor-pages output{font-size:11px;min-width:34px;text-align:center;font-variant-numeric:tabular-nums}
   .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.keyboard-open .source{max-height:64px}.keyboard-open .source-panel{max-height:32%}.keyboard-open .review-actions .muted,.keyboard-open .account-note{display:none}
@@ -1729,7 +1754,7 @@
     .copy-writing .editor-heading>.ghost-toggle-btn{min-height:44px;padding:4px 7px;font-size:11px}
     @media(max-width:360px){
       .compact-editor-display .compact-select-btn.font-select-btn{width:68px}
-      .compact-editor-display .compact-select-btn.size-select-btn{width:44px}
+      .compact-editor-display .compact-select-btn.size-select-btn{width:64px}
       .ghost-toggle-btn{padding:3px 5px;font-size:10px}
       .editor-heading>label{font-size:11px}
     }
@@ -1805,10 +1830,24 @@
   .writing-actions{display:flex;align-items:center;justify-content:flex-end;gap:inherit;min-width:0}
   .editor-tools-trigger,.source-tools-trigger,.mobile-account-actions,.mobile-review-label{display:none}
   .source-tools,.editor-tools{display:flex;align-items:center;flex-wrap:wrap;gap:var(--radius-sm);padding:0 var(--space-page) var(--radius-sm);flex-shrink:0}
-  .source-heading .block-nav select{max-width:none}
+  .copy-writing .source-heading .icon-button{min-width:var(--touch-target-size);min-height:var(--touch-target-size)}
+  .source-heading .block-nav .reference-counter{min-width:56px;padding-inline:4px;font-size:var(--font-size-label);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:center}
+  .copy-writing .source-heading .source-toc-trigger{display:inline-flex;align-items:center;justify-content:center;gap:4px;flex-shrink:0;min-width:44px;min-height:44px;padding:0 var(--radius-sm);border:1px solid var(--border);border-radius:var(--radius-control);background:var(--gold-light);color:var(--brown);font:600 var(--font-size-label) var(--font-app);white-space:nowrap}
   .source-heading button,.editor-pages button,.editor-tools-trigger{color:var(--text)}
   .source-tools .source-toggle{color:var(--copy-paper-ink)}
-  .source-heading .block-nav label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .copy-reference-toc-dialog{box-sizing:border-box;position:fixed;inset:auto 0 0;margin:0 auto;width:min(100%,560px);max-width:100%;max-height:80vh;max-height:80dvh;padding:var(--space-page);padding-bottom:calc(var(--space-page) + env(safe-area-inset-bottom));border:1px solid var(--border);border-radius:var(--radius-card) var(--radius-card) 0 0;background:var(--card);color:var(--text);font-family:var(--font-app);box-shadow:var(--shadow);overflow:auto}
+  .copy-reference-toc-dialog::backdrop{background:var(--practice-dialog-backdrop)}
+  .copy-reference-toc-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--space-page);position:sticky;top:calc(-1 * var(--space-page));background:var(--card)}
+  .copy-reference-toc-heading h2{font-size:var(--font-size-section-title)}
+  .copy-reference-toc-dialog button{min-width:44px;min-height:44px;padding:calc(var(--space-page)/2);border:1px solid var(--border);border-radius:var(--radius-control);background:var(--bg);color:var(--text);font:inherit;cursor:pointer}
+  .copy-reference-toc-dialog nav{display:grid;gap:calc(var(--space-page)/2)}
+  .copy-reference-toc-dialog nav button{text-align:left;overflow-wrap:anywhere}
+  .copy-reference-toc-dialog nav button > span{font-weight:700}
+  .copy-reference-toc-dialog nav button.current{background:var(--gold-light);border-color:var(--gold)}
+  .copy-reference-toc-dialog small{display:flex;align-items:center;gap:4px;color:var(--text2);margin-top:calc(var(--space-page)/4)}
+  .copy-reference-toc-dialog button:disabled{opacity:.6;cursor:wait}
+  :global(:root[data-native-app='true']) .editor-tools > .editor-scroll-mode-toggle{display:none}
+  @media(max-width:700px){.editor-tools > .editor-scroll-mode-toggle{display:none}}
   .copy-mismatch-hint{display:inline-flex;align-items:center;gap:4px;padding:4px var(--space-page);font-size:var(--font-size-meta);color:var(--danger-text);font-weight:600}
   .copy-review{position:fixed;inset:0;margin:auto;height:fit-content;width:min(calc(100% - var(--space-page) * 2), 32rem);max-height:70vh;max-height:min(70dvh, calc(var(--copy-viewport-height, 100dvh) - var(--space-page) * 2), 38rem);box-sizing:border-box;padding:0;overflow:hidden;background:color-mix(in srgb,var(--card) 96%,transparent);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-card);box-shadow:var(--shadow-xl)}
   .copy-review[open]{display:flex;flex-direction:column}
@@ -1854,12 +1893,12 @@
     .copy-writing .source-heading{padding-inline:calc(var(--radius-sm) * .75);gap:calc(var(--radius-sm) / 3);justify-content:space-between}
     .copy-writing .source-heading h2{margin-inline-end:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:var(--font-size-meta)}
     .copy-writing .source-heading .block-nav{margin-inline-start:auto;border:1px solid var(--copy-paper-rule);border-radius:var(--radius-control)}
-    .copy-writing .source-heading button,.copy-writing .source-heading select{background:transparent;color:var(--copy-paper-ink);border-color:transparent}
-    .copy-writing .source-heading .block-nav select{min-width:74px;width:auto;max-width:110px;padding-inline:4px;font-variant-numeric:tabular-nums}
+    .copy-writing .source-heading button{background:transparent;color:var(--copy-paper-ink);border-color:transparent}
+    .copy-writing .source-heading .block-nav .reference-counter{padding-inline:4px}
     .copy-writing .source-tools.tools-open{align-items:center;border-top:1px solid var(--copy-paper-rule);padding-top:var(--radius-sm)}
     .copy-writing .source-tools .source-toggle{margin-inline-start:auto}
     .copy-writing .source-heading .block-nav{display:flex;gap:0}
-    .copy-writing .source-heading .block-nav select{padding-inline:0}
+    .copy-writing .source-heading .block-nav .reference-counter{padding-inline:2px}
     .copy-writing .source-heading .icon-button{padding:0}
     .copy-writing .source-heading h2{min-width:0;overflow-wrap:anywhere}
     .source-heading .source-tools-trigger,.editor-heading .editor-tools-trigger{display:inline-flex;align-items:center;justify-content:center;gap:var(--radius-sm)}
@@ -1880,7 +1919,7 @@
     .copy-writing .options-panel{top:var(--app-safe-top,env(safe-area-inset-top,0px))}
   }
   @media(max-width:360px){
-    .copy-writing .source-heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+    .copy-writing .source-heading h2{position:static;width:auto;height:auto;clip-path:none;flex-shrink:1}
     .copy-writing .source-heading .block-nav{margin-inline:auto}
     .copy-writing .editor-pages output{min-width:26px}
   }

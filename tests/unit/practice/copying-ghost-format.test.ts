@@ -2,8 +2,41 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { copyingSentences } from '../../../src/lib/domain/practice/copying-follow';
 import { alignGhostRuns, formatGhostRuns, clipGhostRuns, nextGhostTraceText } from '../../../src/lib/domain/practice/copying-ghost-format';
+import { copySourceLayoutLines } from '../../../src/lib/domain/practice/copying-formatting';
+import currentDiaTang from '../../../src/lib/data/scripture-copying/dia-tang.json';
 
 describe('formatGhostRuns', () => {
+  it('marks the current second Địa Tạng heading while leaving its bold mixed-case verses unchanged', () => {
+    const blocks = currentDiaTang.chapters[0].blocks;
+    const source = copyingSentences(blocks, 0, copySourceLayoutLines(blocks[0], currentDiaTang.layouts[0][0]));
+    const original = JSON.stringify(source), runs = formatGhostRuns(source);
+    expect(runs.filter(run => run.line === 2).map(run => run.text).join('')).toBe(' TỊNH TAM NGHIỆP CHÂN NGÔN\n');
+    expect(runs.filter(run => run.line === 2).every(run => run.uppercase === true)).toBe(true);
+    expect(runs.filter(run => run.line === 1).map(run => run.text).join('')).toBe(' Tu rị tu rị, ma ha tu rị tu tu rị, ta bà ha.\n');
+    expect(runs.filter(run => run.line === 1 || run.line === 3).every(run => !Object.hasOwn(run, 'uppercase'))).toBe(true);
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it.each(['NFC', 'NFD'] as const)('keeps heading presentation metadata across alignment and clipping of raw %s text', normalization => {
+    const source = copyingSentences(['{align:center|**TỊNH TAM**}\n{align:justify|Lời nguyện tiếp theo.}'], 0);
+    const runs = formatGhostRuns(source), original = JSON.stringify(runs);
+    const typed = 'tịnh ta'.normalize(normalization), aligned = alignGhostRuns(runs, typed)!;
+    expect(aligned.map(run => run.text).join('').slice(0, typed.length)).toBe(typed);
+    expect(aligned.filter(run => run.line === 0).every(run => run.uppercase === true)).toBe(true);
+    const clipped = clipGhostRuns(aligned, 0, typed.length);
+    expect(clipped.map(run => run.text).join('')).toBe(typed);
+    expect(clipped.every(run => run.uppercase === true)).toBe(true);
+    expect(aligned.filter(run => run.line === 1).every(run => !Object.hasOwn(run, 'uppercase'))).toBe(true);
+    expect(JSON.stringify(runs)).toBe(original);
+  });
+
+  it('does not uppercase one sentence of a mixed paragraph or numeric guidance', () => {
+    const source = copyingSentences(['{align:center|A DI ĐÀ. Lời nguyện tiếp theo.}\n123 (3 lần)'], 0);
+    const runs = formatGhostRuns(source);
+    expect(runs.map(run => run.text).join('')).toBe('A DI ĐÀ. Lời nguyện tiếp theo.\n123');
+    expect(runs.every(run => !Object.hasOwn(run, 'uppercase'))).toBe(true);
+  });
+
   it.each(['X', 'LỜI NGUYỆN\nCon thàmh tâm'])('lays out an imperfect raw prefix %j with the reference tail without changing either input', typed => {
     const reference = formatGhostRuns(copyingSentences(['{align:center|**LỜI NGUYỆN**}\n{align:justify|Con thành tâm đảnh lễ chư Phật.}'], 0));
     const original = JSON.stringify(reference);
