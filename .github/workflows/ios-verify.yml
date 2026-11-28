@@ -24,7 +24,7 @@ jobs:
       - name: Verify source snapshot and add capture-only XCTest class
         run: |
           set -euo pipefail
-          git merge-base --is-ancestor 7acde9da0b504fcceb02e489e2329f66aaac25f7 HEAD
+          git fetch --no-tags --depth=1 origin 7acde9da0b504fcceb02e489e2329f66aaac25f7
           git diff --exit-code 7acde9da0b504fcceb02e489e2329f66aaac25f7 -- src static ios android package.json package-lock.json scripts capacitor.config.ts svelte.config.js
           cat .github/store-preview/NativeStorePreviewTests.swift >> ios/App/AppUITests/NativeGuestSmokeTests.swift
           mkdir -p build/store-preview
