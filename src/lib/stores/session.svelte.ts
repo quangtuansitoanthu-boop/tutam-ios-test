@@ -6,6 +6,8 @@ import { isNativeApp } from '$lib/browser/native-platform';
 import { requestDeadline } from '$lib/browser/network-deadline';
 import { afterNativeAuthMutation, isNativeAuthMutationActive, nativeAuthMutationRevision } from '$lib/browser/native-auth-transaction';
 import { selectTalkCatalogPrincipal } from '$lib/browser/talk-catalog-cache';
+import '$lib/browser/divination-storage';
+import { pendingSpiritualToolsPurgePrincipals, retryPendingSpiritualToolsPurges, selectSpiritualToolsSession } from '$lib/browser/spiritual-tools-operations';
 
 export const SESSION_CONTEXT = Symbol('quangtu-session');
 const SESSION_CHANGED_EVENT = 'quangtu:session-changed';
@@ -239,6 +241,20 @@ export function createSessionStore(initial: PageSessionDTO, initialVerified = in
   let active = false;
   let sessionGeneration = 0;
 
+  function selectSpiritualTools(recover: boolean): void {
+    if (typeof window === 'undefined') return;
+    selectSpiritualToolsSession(session.authenticated ? session.user?.id ?? null : null, verifiedPrincipal, session.csrfToken);
+    if (!recover) return;
+    try {
+      if (!pendingSpiritualToolsPurgePrincipals().length) return;
+      const snapshot = session;
+      void retryPendingSpiritualToolsPurges().then(() => {
+        if (session === snapshot) selectSpiritualToolsSession(session.authenticated ? session.user?.id ?? null : null, verifiedPrincipal, session.csrfToken);
+      }).catch(() => undefined); // Receipt stays pending; no new request or recurring retry loop.
+    } catch { /* Retain pending receipts when browser storage is unavailable. */ }
+  }
+  selectSpiritualTools(true);
+
   function emit(): void {
     if (!active || typeof window === 'undefined') return;
     announceOfflinePdfPrincipal(session);
@@ -277,6 +293,7 @@ export function createSessionStore(initial: PageSessionDTO, initialVerified = in
     verification = session.authenticated ? verified ? 'verified' : 'cached' : 'anonymous';
     initialResolutionComplete = true;
     verifiedPrincipal = verified;
+    selectSpiritualTools(session.authenticated && verified);
     if (active) selectTalkCatalogPrincipal(session.authenticated ? session.user?.id ?? null : null, session.user?.role ?? 'guest', verified);
     scheduleExpiryRefresh();
     emit();

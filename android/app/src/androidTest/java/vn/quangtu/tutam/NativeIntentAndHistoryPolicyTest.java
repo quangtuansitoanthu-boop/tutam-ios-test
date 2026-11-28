@@ -194,6 +194,130 @@ public class NativeIntentAndHistoryPolicyTest {
         @Override public void reject(String message, String code, Exception error, JSObject data) { rejection = message; }
     }
 
+    private static final class HistoryRemovalFixture implements AutoCloseable {
+        final java.io.File directory;
+        final DivinationHistoryPlugin plugin;
+        final java.util.List<java.io.File> created = new java.util.ArrayList<>();
+
+        HistoryRemovalFixture(boolean createDirectory) throws Exception {
+            android.content.Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+            assertTrue("History removal tests require the isolated QA package", context.getPackageName().endsWith(".securityqa"));
+            directory = new java.io.File(context.getCacheDir(), "native-history-remove-" + java.util.UUID.randomUUID());
+            if (createDirectory) assertTrue(directory.mkdir());
+            android.content.Context isolated = new android.content.ContextWrapper(context) {
+                @Override public java.io.File getNoBackupFilesDir() { return directory; }
+            };
+            plugin = new DivinationHistoryPlugin() {
+                @Override public android.content.Context getContext() { return isolated; }
+            };
+        }
+
+        java.io.File file(String name) { return new java.io.File(directory, name); }
+
+        java.io.File put(String name, String value) throws Exception {
+            java.io.File file = file(name);
+            try (java.io.FileOutputStream output = new java.io.FileOutputStream(file)) {
+                output.write(value.getBytes(StandardCharsets.UTF_8));
+            }
+            created.add(file);
+            return file;
+        }
+
+        RecordedCall remove(String key) throws Exception {
+            // Reflection keeps this regression compilable before the bridge method exists (RED).
+            java.lang.reflect.Method method = DivinationHistoryPlugin.class.getMethod("remove", PluginCall.class);
+            assertNotNull(method.getAnnotation(com.getcapacitor.PluginMethod.class));
+            RecordedCall call = new RecordedCall(new JSObject().put("key", key));
+            method.invoke(plugin, call);
+            return call;
+        }
+
+        @Override public void close() {
+            for (int i = created.size() - 1; i >= 0; i--) created.get(i).delete();
+            directory.delete();
+        }
+    }
+
+    @Test public void removeHistoryDeletesOnlyTheExactKeyAndAtomicSidecars() throws Exception {
+        try (HistoryRemovalFixture fixture = new HistoryRemovalFixture(true)) {
+            String key = "quangtu_principal_v1:qa-user-a:tt_divination_history_v1";
+            String name = DivinationHistoryPlugin.historyFileName(key);
+            java.io.File base = fixture.put(name, "[\"owned\"]");
+            java.io.File backup = fixture.put(name + ".bak", "[\"owned-backup\"]");
+            java.io.File pending = fixture.put(name + ".new", "[\"owned-pending\"]");
+            java.io.File other = fixture.put(DivinationHistoryPlugin.historyFileName("quangtu_principal_v1:qa-user-b:tt_divination_history_v1"), "[\"other\"]");
+            java.io.File guest = fixture.put(DivinationHistoryPlugin.historyFileName("quangtu_principal_v1:anonymous:tt_divination_history_v1"), "[\"guest\"]");
+            RecordedCall removed = fixture.remove(key);
+            assertTrue(removed.resolved);
+            assertNull(removed.rejection);
+            assertFalse(base.exists()); assertFalse(backup.exists()); assertFalse(pending.exists());
+            assertTrue(other.exists()); assertTrue(guest.exists());
+        }
+    }
+
+    @Test public void removeHistoryAlsoDeletesItsReadableLongLegacyFile() throws Exception {
+        try (HistoryRemovalFixture fixture = new HistoryRemovalFixture(true)) {
+            char[] letters = new char[59]; java.util.Arrays.fill(letters, 'ệ');
+            String key = new String(letters);
+            String name = DivinationHistoryPlugin.historyFileName(key);
+            String encoded = Base64.encodeToString(key.getBytes(StandardCharsets.UTF_8), Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
+            java.io.File legacy = fixture.put("divination-" + encoded + ".json", "[\"legacy\"]");
+            assertEquals(252, legacy.getName().length());
+            java.io.File base = fixture.put(name, "[\"current\"]");
+            java.io.File backup = fixture.put(name + ".bak", "[\"backup\"]");
+            java.io.File pending = fixture.put(name + ".new", "[\"pending\"]");
+            java.io.File other = fixture.put(DivinationHistoryPlugin.historyFileName(key.substring(1) + "ế"), "[\"other\"]");
+            RecordedCall removed = fixture.remove(key);
+            assertTrue(removed.resolved); assertNull(removed.rejection);
+            assertFalse(legacy.exists()); assertFalse(base.exists()); assertFalse(backup.exists()); assertFalse(pending.exists());
+            assertTrue(other.exists());
+            RecordedCall read = new RecordedCall(new JSObject().put("key", key));
+            fixture.plugin.read(read);
+            assertEquals("[]", read.value);
+        }
+    }
+
+    @Test public void removeMissingHistoryIsIdempotentAndKeepsInvalidKeyGuards() throws Exception {
+        try (HistoryRemovalFixture fixture = new HistoryRemovalFixture(false)) {
+            String key = "quangtu_principal_v1:qa-missing:tt_divination_history_v1";
+            assertTrue(fixture.remove(key).resolved);
+            assertTrue(fixture.remove(key).resolved);
+            assertFalse(fixture.directory.exists());
+            RecordedCall invalid = fixture.remove(new String(new char[161]).replace('\0', 'x'));
+            assertFalse(invalid.resolved); assertNotNull(invalid.rejection);
+            assertFalse(fixture.directory.exists());
+        }
+    }
+
+    @Test public void removeHistoryRejectsARealPermissionFailureAndCanRetry() throws Exception {
+        try (HistoryRemovalFixture fixture = new HistoryRemovalFixture(true)) {
+            String key = "quangtu_principal_v1:qa-permission:tt_divination_history_v1";
+            java.io.File file = fixture.put(DivinationHistoryPlugin.historyFileName(key), "[\"retained\"]");
+            try {
+                android.system.Os.chmod(fixture.directory.getAbsolutePath(), 0500);
+                RecordedCall failed = fixture.remove(key);
+                assertFalse(failed.resolved); assertNotNull(failed.rejection);
+                assertTrue(file.exists());
+            } finally {
+                android.system.Os.chmod(fixture.directory.getAbsolutePath(), 0700);
+            }
+            assertTrue(fixture.remove(key).resolved);
+            assertFalse(file.exists());
+        }
+    }
+
+    @Test public void removeHistoryDoesNotRecursivelyDeleteAnUnexpectedDirectory() throws Exception {
+        try (HistoryRemovalFixture fixture = new HistoryRemovalFixture(true)) {
+            String key = "quangtu_principal_v1:qa-directory:tt_divination_history_v1";
+            String name = DivinationHistoryPlugin.historyFileName(key);
+            java.io.File blocked = fixture.file(name); assertTrue(blocked.mkdir()); fixture.created.add(blocked);
+            java.io.File marker = fixture.put(name + "/sentinel", "fixture");
+            RecordedCall failed = fixture.remove(key);
+            assertFalse(failed.resolved); assertNotNull(failed.rejection);
+            assertTrue(blocked.isDirectory()); assertTrue(marker.exists());
+        }
+    }
+
     @Test public void readableLongLegacyHistorySurvivesTheNewAtomicFileName() throws Exception {
         android.content.Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         java.io.File directory = new java.io.File(context.getCacheDir(), "native-history-audit-" + java.util.UUID.randomUUID());

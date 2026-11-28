@@ -4,6 +4,29 @@ import { runInNewContext } from 'node:vm';
 import { expect, it } from 'vitest';
 
 const source = fs.readFileSync('ios/App/App/TuTapBridgeViewController.swift', 'utf8');
+
+function stripDebugRegions(text: string): string {
+  const release: string[] = [];
+  let depth = 0;
+  for (const line of text.split(/(?<=\n)/u)) {
+    if (depth === 0) {
+      if (/^[ \t]*#if[ \t]+DEBUG(?:[ \t]*&&[ \t]*targetEnvironment\(simulator\))?[ \t]*(?:\r?\n)?$/u.test(line)) {
+        depth = 1;
+      } else {
+        release.push(line);
+      }
+      continue;
+    }
+    if (/^[ \t]*#if\b/u.test(line)) depth++;
+    else if (/^[ \t]*#endif\b/u.test(line)) depth--;
+    else if (depth === 1 && /^[ \t]*#(?:else|elseif)\b/u.test(line)) {
+      throw new Error('DEBUG release branches require an explicit snapshot policy');
+    }
+  }
+  if (depth !== 0) throw new Error('Unterminated DEBUG conditional region');
+  return release.join('');
+}
+
 const start = source.indexOf('          const libraryInputTokens = new WeakMap();');
 const end = source.indexOf("          for (const type of ['pointermove', 'touchmove']) {", start);
 const helper = start < 0 || end < 0 ? '' : source.slice(start, end);
@@ -85,12 +108,24 @@ it('samples only the exact library search control, preserves node identity and n
   expect(helper).not.toMatch(/preventDefault|stopPropagation|setPointerCapture|\.focus\(|\.blur\(|\.value\b|textContent|innerText|getAttribute|location\.(?:search|href|hash)/u);
 });
 
+it('strips nested DEBUG regions while preserving all release whitespace and other conditionals', () => {
+  const fixture = 'release-before\r\n#if DEBUG\r\ndebug-before\r\n#if targetEnvironment(simulator)\r\nnested\r\n#endif\r\ndebug-after\r\n#endif\r\n'
+    + '#if DEBUG && targetEnvironment(simulator)\r\nprobe\r\n#if canImport(UIKit)\r\nnested-probe\r\n#endif\r\n#endif\r\n'
+    + '\r\n#if canImport(UIKit)\r\nrelease-conditional\r\n#endif\r\nrelease-after';
+  expect(stripDebugRegions(fixture)).toBe('release-before\r\n\r\n#if canImport(UIKit)\r\nrelease-conditional\r\n#endif\r\nrelease-after');
+  expect(() => stripDebugRegions('#if DEBUG\nunfinished\n')).toThrow('Unterminated DEBUG conditional region');
+  expect(() => stripDebugRegions('#if DEBUG\ndebug\n#else\nrelease\n#endif\n')).toThrow('DEBUG release branches');
+});
+
 it('keeps release bytes, footer schema, public numeric sampling, caps and observer counts unchanged', () => {
-  const release = source.replace(/^[ \t]*#if DEBUG\n[\s\S]*?^[ \t]*#endif\n?/gmu, '');
-  expect(Buffer.byteLength(release)).toBe(20273);
-  expect(createHash('sha256').update(release).digest('hex')).toBe('a1ea83f292e700d6146b19f898aaef0fe0e5c62cbb591d8eee0ff7ad5c393afc');
+  const release = stripDebugRegions(source);
+  // Frozen R02 baseline: public remove + historyFile(createDirectory:).
+  // Pre-R02: 20273 bytes, SHA256 a1ea83f292e700d6146b19f898aaef0fe0e5c62cbb591d8eee0ff7ad5c393afc.
+  expect(Buffer.byteLength(release)).toBe(21180);
+  expect(createHash('sha256').update(release).digest('hex')).toBe('81d85713b0e350f1ecd33f0f5c6ed6c03180a716e7b671c8765d6cabba2c4b52');
   expect(release).not.toContain('libraryInputTokens');
   expect(release).not.toContain('native-library-search-state');
+  expect(release).not.toContain('TuTapQADivinationRemovalProbe');
   expect(source).toContain('guard ProcessInfo.processInfo.arguments.contains("-tutam-qa-events") else { return nil }');
   expect(source).toContain('body.utf8.count <= 4096');
   expect(source).toContain('let limit: UInt64 = 256 * 1024');

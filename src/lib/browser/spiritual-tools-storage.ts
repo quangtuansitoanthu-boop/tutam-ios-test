@@ -1,6 +1,7 @@
-import { principalStorageKey } from './principal-storage';
+import { ANONYMOUS_STORAGE_PRINCIPAL, principalStorageKey } from './principal-storage';
 import { BIORHYTHM_PROFILE_KEY, DREAM_JOURNAL_KEY } from './storage-contract';
 import { readDivinationStorageValue, writeDivinationStorageValue } from './divination-storage';
+import { beginSpiritualToolsOperation, purgeSpiritualToolsOperations, withSpiritualToolsWriteLock } from './spiritual-tools-operations';
 
 export interface BiorhythmProfile {
   version: 1;
@@ -26,12 +27,7 @@ let pendingWrite: Promise<unknown> = Promise.resolve();
 
 function serializeWrite<T>(operation: () => Promise<T>): Promise<T> {
   // Giữ thứ tự đọc–sửa–ghi kể cả khi người dùng lưu/xóa liên tiếp.
-  const result = pendingWrite.then(async (): Promise<T> => {
-    if (typeof navigator !== 'undefined' && navigator.locks) {
-      return await navigator.locks.request('quangtu-spiritual-tools-write', operation);
-    }
-    return await operation();
-  });
+  const result = pendingWrite.then(() => withSpiritualToolsWriteLock(operation));
   pendingWrite = result.catch(() => undefined);
   return result;
 }
@@ -61,14 +57,21 @@ function isJournalEntry(value: unknown): value is DreamJournalEntry {
 }
 
 export async function loadBiorhythmProfile(principal: string | null | undefined): Promise<BiorhythmProfile | null> {
-  await pendingWrite;
-  const raw = await readDivinationStorageValue(principalStorageKey(principal, BIORHYTHM_PROFILE_KEY));
-  if (!raw) return null;
-  const parsed: unknown = JSON.parse(raw);
-  // Bridge hiện có trả [] cho file chưa tồn tại.
-  if (Array.isArray(parsed) && parsed.length === 0) return null;
-  if (!isProfile(parsed)) throw new Error('invalid_biorhythm_profile');
-  return parsed;
+  const operation = beginSpiritualToolsOperation(principal);
+  try {
+    await pendingWrite;
+    operation.assertCurrent();
+    const raw = await readDivinationStorageValue(principalStorageKey(principal, BIORHYTHM_PROFILE_KEY));
+    operation.assertCurrent();
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    // Bridge hiện có trả [] cho file chưa tồn tại.
+    if (Array.isArray(parsed) && parsed.length === 0) return null;
+    if (!isProfile(parsed)) throw new Error('invalid_biorhythm_profile');
+    return parsed;
+  } finally {
+    operation.finish();
+  }
 }
 
 export async function saveBiorhythmProfile(
@@ -76,13 +79,20 @@ export async function saveBiorhythmProfile(
   profile: BiorhythmProfile,
 ): Promise<boolean> {
   if (!isProfile(profile)) return false;
-  const key = principalStorageKey(principal, BIORHYTHM_PROFILE_KEY);
-  const value = JSON.stringify(profile);
+  const operation = beginSpiritualToolsOperation(principal);
   try {
-    await serializeWrite(() => writeDivinationStorageValue(key, value));
+    const key = principalStorageKey(principal, BIORHYTHM_PROFILE_KEY);
+    const value = JSON.stringify(profile);
+    await serializeWrite(() => {
+      operation.assertCurrent();
+      return writeDivinationStorageValue(key, value);
+    });
+    operation.assertCurrent();
     return true;
   } catch {
     return false;
+  } finally {
+    operation.finish();
   }
 }
 
@@ -95,23 +105,37 @@ async function readJournal(key: string): Promise<DreamJournalEntry[]> {
 }
 
 export async function loadDreamJournal(principal: string | null | undefined): Promise<DreamJournalEntry[]> {
-  await pendingWrite;
-  return readJournal(principalStorageKey(principal, DREAM_JOURNAL_KEY));
+  const operation = beginSpiritualToolsOperation(principal);
+  try {
+    await pendingWrite;
+    operation.assertCurrent();
+    const entries = await readJournal(principalStorageKey(principal, DREAM_JOURNAL_KEY));
+    operation.assertCurrent();
+    return entries;
+  } finally {
+    operation.finish();
+  }
 }
 
 async function updateDreamJournal(
   principal: string | null | undefined,
   update: (entries: DreamJournalEntry[]) => DreamJournalEntry[],
 ): Promise<JournalUpdate> {
-  const key = principalStorageKey(principal, DREAM_JOURNAL_KEY);
+  const operation = beginSpiritualToolsOperation(principal);
   try {
+    const key = principalStorageKey(principal, DREAM_JOURNAL_KEY);
     return await serializeWrite(async () => {
+      operation.assertCurrent();
       const entries = update(await readJournal(key));
+      operation.assertCurrent();
       await writeDivinationStorageValue(key, JSON.stringify(entries));
+      operation.assertCurrent();
       return { ok: true, entries };
     });
   } catch {
     return { ok: false, entries: [] };
+  } finally {
+    operation.finish();
   }
 }
 
@@ -131,4 +155,10 @@ export function deleteDreamJournalEntry(principal: string | null | undefined, id
 
 export function clearDreamJournal(principal: string | null | undefined): Promise<JournalUpdate> {
   return updateDreamJournal(principal, () => []);
+}
+
+export async function purgeSpiritualToolsForAccount(principal: string, options: { onlyPending?: boolean } = {}): Promise<void> {
+  const owner = String(principal ?? '').trim();
+  if (!owner || owner === ANONYMOUS_STORAGE_PRINCIPAL) throw new Error('account_principal_required');
+  await purgeSpiritualToolsOperations(owner, options.onlyPending);
 }

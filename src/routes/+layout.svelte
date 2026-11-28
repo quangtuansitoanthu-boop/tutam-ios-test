@@ -8,12 +8,12 @@
   import { getBrowserPracticeSessionOutbox, PRACTICE_SESSION_ACCEPTED_EVENT, type PracticeSessionAcceptedDetail, type PracticeSessionOutboxStatus } from '$lib/browser/practice-session-outbox';
   import { fetchWithSessionRefresh, getBrowserSession } from '$lib/browser/session-csrf';
   import { getBrowserStorage } from '$lib/browser/storage-contract';
-  import { afterNavigate, goto } from '$app/navigation';
+  import { goto, onNavigate } from '$app/navigation';
   import { browser } from '$app/environment';
   import { page } from '$app/state';
   import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
   import { contentUpdateText } from '$lib/i18n/content-updates';
-  import { onMount, untrack, type Snippet } from 'svelte';
+  import { onMount, tick, untrack, type Snippet } from 'svelte';
   import { startPersonalEventsSync } from '$lib/browser/personal-lunar-events';
   import MasterShell from '$lib/components/layout/MasterShell.svelte';
   import NativeSelectPicker from '$lib/components/layout/NativeSelectPicker.svelte';
@@ -146,8 +146,10 @@
     if (!pwaRegistration?.applyUpdate()) pwaUpdateApplying = false;
   }
 
-  afterNavigate(() => {
+  onNavigate(async () => {
     cancelAppDialogs();
+    // Release the old route's fixed-body lock before Kit restores destination scroll.
+    await tick();
   });
 
   onMount(() => watchVeganWeekPreload());

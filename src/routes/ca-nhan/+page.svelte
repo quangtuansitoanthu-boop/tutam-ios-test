@@ -50,6 +50,8 @@
   } from "$lib/browser/practice-community";
   import { serverStateKeys } from "$lib/browser/server-state";
   import { getPracticeIdentity } from "$lib/domain/practice/progress-achievements";
+  import { purgeSpiritualToolsForAccount } from "$lib/browser/spiritual-tools-storage";
+  import { pendingSpiritualToolsPurgePrincipals } from "$lib/browser/spiritual-tools-operations";
   import PracticeBadgeIcon from "$lib/components/practice/community/PracticeBadgeIcon.svelte";
   import "$lib/components/practice/community/avatar-rings.css";
   import { resolveApiUrl } from "$lib/browser/native-api";
@@ -239,6 +241,7 @@
   let deletingAccount = $state(false);
   let deleteAccountPrincipal = $state<string | null>(null);
   let deleteAccountGeneration = 0;
+  let localPurgeRetryPrincipals = $state<string[]>([]);
   let feedbackEmailModalOpen = $state(false);
   let expectedDeleteCode = $state("");
   let deleteConfirmationInput = $state("");
@@ -271,6 +274,14 @@
   }
   $effect(() => {
     const principal = session.authenticated ? (session.user?.id ?? null) : null;
+    if (localPurgeRetryPrincipals.length) {
+      if (!principal) return; // An already-deleted account can retry its receipt while guest.
+      localPurgeRetryPrincipals = [];
+      deleteAccountGeneration += 1;
+      deleteAccountModalOpen = false;
+      deletingAccount = false;
+      return;
+    }
     if (deleteAccountModalOpen && principal !== deleteAccountPrincipal) {
       deleteAccountGeneration += 1;
       deleteAccountModalOpen = false;
@@ -439,6 +450,14 @@
   ]);
 
   onMount(() => {
+    try {
+      const pending = pendingSpiritualToolsPurgePrincipals();
+      if (!sessionStore.value.authenticated && pending.length) {
+        localPurgeRetryPrincipals = pending;
+        deleteAccountModalOpen = true;
+        feedbackMessage = t.profile.deleteLocalDataFailed;
+      }
+    } catch { /* Keep normal account controls usable when local storage is blocked. */ }
     try {
       if (typeof localStorage !== "undefined") {
         fontSize = Math.min(
@@ -625,6 +644,26 @@
   }
 
   async function handleDeleteAccount() {
+    if (localPurgeRetryPrincipals.length) {
+      if (deletingAccount || sessionStore.value.authenticated) return;
+      const owners = [...localPurgeRetryPrincipals];
+      const generation = deleteAccountGeneration;
+      deletingAccount = true;
+      try {
+        const results = await Promise.allSettled(owners.map(owner => purgeSpiritualToolsForAccount(owner, { onlyPending: true })));
+        if (sessionStore.value.authenticated || generation !== deleteAccountGeneration) return;
+        if (results.some(result => result.status === 'rejected')) {
+          feedbackMessage = t.profile.deleteLocalDataFailed;
+        } else {
+          localPurgeRetryPrincipals = [];
+          deleteAccountModalOpen = false;
+          feedbackMessage = "";
+        }
+      } finally {
+        if (generation === deleteAccountGeneration) deletingAccount = false;
+      }
+      return;
+    }
     if (deletingAccount || !isDeleteCodeMatched) return;
     const principal = deleteAccountPrincipal;
     const generation = deleteAccountGeneration;
@@ -652,7 +691,7 @@
         },
         body: JSON.stringify({ preserveSessionCookie: !isNativeApp() }),
       });
-      if (!isCurrent()) return;
+      if (!res.ok && !isCurrent()) return;
       if (!res.ok) {
         let data = await res.json().catch(() => ({}));
         if (!isCurrent()) return;
@@ -685,7 +724,7 @@
               preserveSessionCookie: !isNativeApp(),
             }),
           });
-          if (!isCurrent()) return;
+          if (!res.ok && !isCurrent()) return;
           if (!res.ok) {
             data = await res.json().catch(() => ({}));
             if (!isCurrent()) return;
@@ -701,13 +740,23 @@
           return;
         }
       }
+      let localPurgeFailed = false;
+      try {
+        // A successful server deletion still purges A when the visible session has become B.
+        await purgeSpiritualToolsForAccount(principal!);
+      } catch {
+        localPurgeFailed = true;
+        if (isCurrent()) feedbackMessage = t.profile.deleteLocalDataFailed;
+      }
+      if (!isCurrent()) return;
       // Chỉ xóa phiên nhà cung cấp sau khi server đã chấp nhận xóa tài khoản.
       await logoutNativeAuth(isCurrent).catch(() => undefined);
       if (!isCurrent()) return;
+      if (localPurgeFailed) localPurgeRetryPrincipals = [principal!];
       clearLocalSession();
       clearBrowserSession();
-      deleteAccountModalOpen = false;
-      if (typeof window !== "undefined") {
+      deleteAccountModalOpen = localPurgeFailed;
+      if (!localPurgeFailed && typeof window !== "undefined") {
         window.location.replace("/");
       }
     } catch (e: any) {
@@ -2194,9 +2243,10 @@
       }}
     >
       <div class="cn-modal-icon">⚠️</div>
-      <h3 id="modal-delete-title">{t.profile.deleteConfirmTitle}</h3>
-      <p>{t.profile.deleteConfirmDesc}</p>
+      <h3 id="modal-delete-title">{localPurgeRetryPrincipals.length ? t.profile.deleteLocalDataRetryTitle : t.profile.deleteConfirmTitle}</h3>
+      <p>{localPurgeRetryPrincipals.length ? `${t.profile.deleteLocalDataFailed} ${t.profile.deleteLocalDataRetry}` : t.profile.deleteConfirmDesc}</p>
 
+      {#if !localPurgeRetryPrincipals.length}
       <div class="cn-delete-code-section">
         <label for="delete-confirm-input" class="cn-delete-code-label">
           {t.profile.deleteConfirmCodePrompt}
@@ -2224,6 +2274,7 @@
             : t.profile.deleteConfirmCodeUnmatched}
         </div>
       </div>
+      {/if}
 
       <div class="cn-modal-actions dialog-actions-balanced">
         <button
@@ -2237,12 +2288,12 @@
         <button
           type="button"
           class="cn-btn cn-btn-danger"
-          disabled={deletingAccount || !isDeleteCodeMatched}
+          disabled={deletingAccount || (!localPurgeRetryPrincipals.length && !isDeleteCodeMatched)}
           onclick={handleDeleteAccount}
         >
           {deletingAccount
             ? t.profile.deletingAccount
-            : t.profile.deleteConfirmButton}
+            : localPurgeRetryPrincipals.length ? t.profile.deleteLocalDataRetryAction : t.profile.deleteConfirmButton}
         </button>
       </div>
     </div>

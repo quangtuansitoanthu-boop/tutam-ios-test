@@ -7,6 +7,16 @@ import { expect, it } from 'vitest';
 const controller = fs.readFileSync('ios/App/App/TuTapBridgeViewController.swift', 'utf8');
 const speech = fs.readFileSync('ios/App/App/ReaderSpeechPlugin.swift', 'utf8');
 
+it('exposes idempotent per-key divination removal without replacing read or write', () => {
+  const start = controller.indexOf('@objc(DivinationHistoryPlugin)');
+  const end = controller.indexOf('@objc(ScreenWakeLockPlugin)', start);
+  const history = controller.slice(start, end);
+  for (const method of ['read', 'write', 'remove']) {
+    expect(history).toContain(`CAPPluginMethod(name: "${method}", returnType: CAPPluginReturnPromise)`);
+    expect(history).toContain(`@objc public func ${method}(_ call: CAPPluginCall)`);
+  }
+});
+
 it('keeps the Objective-C runtime name aligned with every bridged plugin identifier', () => {
   const files = ['ios/App/App/TuTapBridgeViewController.swift', 'ios/App/App/ReaderSpeechPlugin.swift'];
   for (const file of files) {

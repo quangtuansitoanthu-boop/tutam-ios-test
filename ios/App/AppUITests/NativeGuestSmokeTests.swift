@@ -645,6 +645,22 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
         let legacyPerformanceBudget: TimeInterval = 20
         var readinessObservedAt: TimeInterval? = nil
         var readinessOutcome = "functional_timeout"
+        var waiterOutcome = "not_started"
+        var nextProbeAt = started
+        var probeCount = 0
+        var sheetQueryCount = 0
+        var stateQueryCount = 0
+        var navigationQueryCount = 0
+        var geometryQueryCount = 0
+        var saveQueryCount = 0
+        var locationQueryCount = 0
+        var screenshotCount = 0
+        var ocrCount = 0
+        var queryTimings: [String] = []
+        func recordQuery(_ query: String, startedAt: TimeInterval) {
+            let endedAt = ProcessInfo.processInfo.systemUptime
+            queryTimings.append("probe=\(probeCount) query=\(query) startedUptime=\(startedAt) endedUptime=\(endedAt) elapsedSeconds=\(endedAt - startedAt)")
+        }
         defer {
             let ended = ProcessInfo.processInfo.systemUptime
             let elapsed = (readinessObservedAt ?? ended) - started
@@ -661,102 +677,202 @@ final class NativeGuestSmokeTests: NativeGuestUITestCase {
                 "firstReadyObservedElapsedSeconds=\(readinessObservedAt == nil ? -1 : elapsed)",
                 "helperWallElapsedSeconds=\(ended - started)",
                 "outcome=\(readinessOutcome)",
-                "readyWithin20Seconds=\(readyWithin20Seconds)"
+                "readyWithin20Seconds=\(readyWithin20Seconds)",
+                "waiterOutcome=\(waiterOutcome)",
+                "queryTimingScope=predicate_probes_only",
+                "probeCount=\(probeCount)",
+                "sheetQueryCount=\(sheetQueryCount)",
+                "stateQueryCount=\(stateQueryCount)",
+                "navigationQueryCount=\(navigationQueryCount)",
+                "geometryQueryCount=\(geometryQueryCount)",
+                "saveQueryCount=\(saveQueryCount)",
+                "locationQueryCount=\(locationQueryCount)",
+                "screenshotCount=\(screenshotCount)",
+                "ocrCount=\(ocrCount)"
             ]
             let timing = XCTAttachment(string: lines.joined(separator: "\n"))
             timing.name = "quote-native-picker-readiness"
             timing.lifetime = .keepAlways
             add(timing)
+            let queries = XCTAttachment(string: "helperStartedUptime=\(started)\n" + queryTimings.joined(separator: "\n"))
+            queries.name = "quote-native-picker-query-timings"
+            queries.lifetime = .keepAlways
+            add(queries)
         }
         let sheet = app.otherElements["Browse View (Picker)"].firstMatch
         let navigation = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].firstMatch
         let save = navigation.buttons.matching(NSPredicate(format: "label IN %@", ["Lưu", "Save"] as NSArray)).firstMatch
-        var screenshot = XCUIScreen.main.screenshot()
         var recognizedText = ""
         var selectedNativeLocation = false
-        repeat {
-            if app.state == .runningForeground && sheet.exists && navigation.exists {
-                let screen = app.frame
-                let sheetFrame = sheet.frame
-                let header = screen.intersection(sheetFrame).intersection(navigation.frame)
-                if save.exists && save.isHittable && header.contains(save.frame) {
-                    let observedAt = ProcessInfo.processInfo.systemUptime
-                    guard observedAt < deadline else { break }
-                    readinessObservedAt = observedAt
-                    readinessOutcome = "accessibility"
-                    return .accessibility(save)
-                }
-                screenshot = XCUIScreen.main.screenshot()
-                do {
-                    let observations = try recognizeScreenTextObservations(screenshot)
-                    recognizedText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
-                    let size = screenshot.image.size
-                    guard screen.width > 0, screen.height > 0, size.width > 0, size.height > 0,
-                          abs(size.width / size.height - screen.width / screen.height) < 0.01 else {
-                        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-                        continue
-                    }
-                    let recognizedControls = observations.compactMap { observation -> (label: String, frame: CGRect)? in
-                        guard let text = observation.topCandidates(1).first?.string else { return nil }
-                        // Vision trả tọa độ ảnh chuẩn hóa với gốc ở góc trái dưới.
-                        // https://developer.apple.com/documentation/vision/vndetectedobjectobservation/boundingbox
-                        let box = observation.boundingBox
-                        let frame = CGRect(x: screen.minX + box.minX * screen.width,
-                                           y: screen.minY + (1 - box.maxY) * screen.height,
-                                           width: box.width * screen.width, height: box.height * screen.height)
-                        return frame.width > 0 && frame.height > 0 ? (self.normalizedQuoteFeedback(text), frame) : nil
-                    }
-                    let candidates = recognizedControls.filter {
-                        ["luu", "save"].contains($0.label) && header.contains($0.frame)
-                    }.map { $0.frame }
-                    if candidates.count == 1, let frame = candidates.first {
-                        let observedAt = ProcessInfo.processInfo.systemUptime
-                        guard observedAt < deadline else { break }
-                        readinessObservedAt = observedAt
-                        readinessOutcome = "recognized_text"
-                        let image = XCTAttachment(screenshot: screenshot)
-                        image.name = "quote-native-picker-visible-save-screen"
-                        image.lifetime = .keepAlways
-                        add(image)
-                        let text = XCTAttachment(string: "Visible native Save bounds: \(frame)\n" + recognizedText)
-                        text.name = "quote-native-picker-visible-save-recognized-text"
-                        text.lifetime = .keepAlways
-                        add(text)
-                        return .recognizedText(frame)
-                    }
-                    // Bộ chọn mới có thể dừng ở Duyệt. Chọn vị trí thật một lần
-                    // trong cùng ngân sách20giây, trước khi yêu cầu nút Lưu xuất hiện.
-                    let browseHeaderVisible = recognizedControls.contains {
-                        ["duyet", "browse"].contains($0.label) && header.contains($0.frame)
-                    }
-                    let locations = recognizedControls.filter {
-                        ["tren iphone", "on my iphone"].contains($0.label) &&
-                        screen.contains($0.frame) && sheetFrame.contains($0.frame) && $0.frame.minY >= header.maxY
-                    }
-                    let location = sheet.staticTexts.matching(NSPredicate(format: "label IN %@", ["Trên iPhone", "On My iPhone"] as NSArray)).firstMatch
-                    if !selectedNativeLocation && browseHeaderVisible && locations.count == 1 && location.exists {
-                        let frame = location.frame
-                        if screen.contains(frame) && sheetFrame.contains(frame) &&
-                            frame.intersects(locations[0].frame) && location.isHittable {
-                            selectedNativeLocation = true
-                            let image = XCTAttachment(screenshot: screenshot)
-                            image.name = "quote-native-picker-before-location-selection"
-                            image.lifetime = .keepAlways
-                            add(image)
-                            let text = XCTAttachment(string: "Selecting native location once: \(frame)\n" + recognizedText)
-                            text.name = "quote-native-picker-location-recognized-text"
-                            text.lifetime = .keepAlways
-                            add(text)
-                            location.tap()
-                        }
-                    }
-                } catch {
-                    recognizedText = "Vision text recognition failed: \(error)"
+        var action: NativePickerSaveAction? = nil
+        var visibleSaveScreenshot: XCUIScreenshot? = nil
+        var visibleSaveDescription = ""
+        var locationScreenshot: XCUIScreenshot? = nil
+        var locationDescription = ""
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let probeStarted = ProcessInfo.processInfo.systemUptime
+            guard probeStarted < deadline, probeStarted >= nextProbeAt else { return false }
+            nextProbeAt = probeStarted + 1
+            probeCount += 1
+            defer { recordQuery("probe", startedAt: probeStarted) }
+
+            // While the remote sheet is missing, issue only one sheet query per second.
+            let sheetStarted = ProcessInfo.processInfo.systemUptime
+            sheetQueryCount += 1
+            let sheetExists = sheet.exists
+            recordQuery("sheet.exists", startedAt: sheetStarted)
+            guard sheetExists, ProcessInfo.processInfo.systemUptime < deadline else { return false }
+
+            let stateStarted = ProcessInfo.processInfo.systemUptime
+            stateQueryCount += 1
+            let foreground = app.state == .runningForeground
+            recordQuery("app.state", startedAt: stateStarted)
+            guard foreground else { return false }
+            let navigationStarted = ProcessInfo.processInfo.systemUptime
+            navigationQueryCount += 1
+            let navigationExists = navigation.exists
+            recordQuery("navigation.exists", startedAt: navigationStarted)
+            guard navigationExists, ProcessInfo.processInfo.systemUptime < deadline else { return false }
+
+            let geometryStarted = ProcessInfo.processInfo.systemUptime
+            let screen = app.frame
+            let sheetFrame = sheet.frame
+            let header = screen.intersection(sheetFrame).intersection(navigation.frame)
+            geometryQueryCount += 3
+            recordQuery("screen/sheet/navigation.frame", startedAt: geometryStarted)
+            let saveStarted = ProcessInfo.processInfo.systemUptime
+            saveQueryCount += 1
+            let saveExists = save.exists
+            var saveIsHittable = false
+            var saveFrame = CGRect.zero
+            if saveExists {
+                saveQueryCount += 1
+                saveIsHittable = save.isHittable
+                if saveIsHittable {
+                    saveQueryCount += 1
+                    saveFrame = save.frame
                 }
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        } while ProcessInfo.processInfo.systemUptime < deadline
-        let image = XCTAttachment(screenshot: screenshot)
+            recordQuery("save.exists/isHittable/frame", startedAt: saveStarted)
+            if saveExists && saveIsHittable && header.contains(saveFrame) {
+                let observedAt = ProcessInfo.processInfo.systemUptime
+                guard observedAt < deadline else { return false }
+                readinessObservedAt = observedAt
+                readinessOutcome = "accessibility"
+                action = .accessibility(save)
+                return true
+            }
+
+            guard ProcessInfo.processInfo.systemUptime < deadline else { return false }
+            let screenshotStarted = ProcessInfo.processInfo.systemUptime
+            screenshotCount += 1
+            let screenshot = XCUIScreen.main.screenshot()
+            recordQuery("screenshot", startedAt: screenshotStarted)
+            do {
+                let ocrStarted = ProcessInfo.processInfo.systemUptime
+                ocrCount += 1
+                let observations: [VNRecognizedTextObservation]
+                do {
+                    observations = try self.recognizeScreenTextObservations(screenshot)
+                } catch {
+                    recordQuery("vision.perform", startedAt: ocrStarted)
+                    throw error
+                }
+                recordQuery("vision.perform", startedAt: ocrStarted)
+                recognizedText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+                let size = screenshot.image.size
+                guard ProcessInfo.processInfo.systemUptime < deadline,
+                      screen.width > 0, screen.height > 0, size.width > 0, size.height > 0,
+                      abs(size.width / size.height - screen.width / screen.height) < 0.01 else { return false }
+                let recognizedControls = observations.compactMap { observation -> (label: String, frame: CGRect)? in
+                    guard let text = observation.topCandidates(1).first?.string else { return nil }
+                    // Vision uses normalized image bounds with a bottom-left origin.
+                    let box = observation.boundingBox
+                    let frame = CGRect(x: screen.minX + box.minX * screen.width,
+                                       y: screen.minY + (1 - box.maxY) * screen.height,
+                                       width: box.width * screen.width, height: box.height * screen.height)
+                    return frame.width > 0 && frame.height > 0 ? (self.normalizedQuoteFeedback(text), frame) : nil
+                }
+                let candidates = recognizedControls.filter {
+                    ["luu", "save"].contains($0.label) && header.contains($0.frame)
+                }.map { $0.frame }
+                if candidates.count == 1, let frame = candidates.first {
+                    let observedAt = ProcessInfo.processInfo.systemUptime
+                    guard observedAt < deadline else { return false }
+                    readinessObservedAt = observedAt
+                    readinessOutcome = "recognized_text"
+                    visibleSaveScreenshot = screenshot
+                    visibleSaveDescription = "Visible native Save bounds: \(frame)\n" + recognizedText
+                    action = .recognizedText(frame)
+                    return true
+                }
+                let browseHeaderVisible = recognizedControls.contains {
+                    ["duyet", "browse"].contains($0.label) && header.contains($0.frame)
+                }
+                let locations = recognizedControls.filter {
+                    ["tren iphone", "on my iphone"].contains($0.label) &&
+                    screen.contains($0.frame) && sheetFrame.contains($0.frame) && $0.frame.minY >= header.maxY
+                }
+                let location = sheet.staticTexts.matching(NSPredicate(format: "label IN %@", ["Trên iPhone", "On My iPhone"] as NSArray)).firstMatch
+                if !selectedNativeLocation && browseHeaderVisible && locations.count == 1 {
+                    let locationStarted = ProcessInfo.processInfo.systemUptime
+                    locationQueryCount += 1
+                    let locationExists = location.exists
+                    if locationExists {
+                        locationQueryCount += 1
+                        let frame = location.frame
+                        if screen.contains(frame) && sheetFrame.contains(frame) && frame.intersects(locations[0].frame) {
+                            locationQueryCount += 1
+                            let locationIsHittable = location.isHittable
+                            recordQuery("location.exists/frame/isHittable", startedAt: locationStarted)
+                            if locationIsHittable && ProcessInfo.processInfo.systemUptime < deadline {
+                                selectedNativeLocation = true
+                                locationScreenshot = screenshot
+                                locationDescription = "Selecting native location once: \(frame)\n" + recognizedText
+                                let tapStarted = ProcessInfo.processInfo.systemUptime
+                                location.tap()
+                                recordQuery("location.tap", startedAt: tapStarted)
+                            }
+                        } else {
+                            recordQuery("location.exists/frame", startedAt: locationStarted)
+                        }
+                    } else {
+                        recordQuery("location.exists", startedAt: locationStarted)
+                    }
+                }
+            } catch {
+                recognizedText = "Vision text recognition failed: \(error)"
+            }
+            return false
+        }, object: NSObject())
+        let waitResult = XCTWaiter.wait(for: [ready], timeout: max(0, deadline - ProcessInfo.processInfo.systemUptime))
+        waiterOutcome = String(describing: waitResult)
+
+        // Encode diagnostic attachments only after XCTest finishes waiting.
+        if let screenshot = locationScreenshot {
+            let image = XCTAttachment(screenshot: screenshot)
+            image.name = "quote-native-picker-before-location-selection"
+            image.lifetime = .keepAlways
+            add(image)
+            let text = XCTAttachment(string: locationDescription)
+            text.name = "quote-native-picker-location-recognized-text"
+            text.lifetime = .keepAlways
+            add(text)
+        }
+        if let screenshot = visibleSaveScreenshot {
+            let image = XCTAttachment(screenshot: screenshot)
+            image.name = "quote-native-picker-visible-save-screen"
+            image.lifetime = .keepAlways
+            add(image)
+            let text = XCTAttachment(string: visibleSaveDescription)
+            text.name = "quote-native-picker-visible-save-recognized-text"
+            text.lifetime = .keepAlways
+            add(text)
+        }
+        if waitResult == .completed, let action = action { return action }
+        readinessObservedAt = nil
+        readinessOutcome = waitResult == .timedOut ? "functional_timeout" : "waiter_" + waiterOutcome
+        let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         image.name = "quote-native-picker-save-not-found-screen"
         image.lifetime = .keepAlways
         add(image)
@@ -3442,12 +3558,30 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     private func quoteParts(_ app: XCUIApplication) -> (quote: String, source: String)? {
         // Canvas aria-label lấy nguyên quoteText + “ — ” + sourceTitle từ QuoteCardModal.svelte:267.
         // Chỉ đọc AX của UI thật; không seed quote, không JS hoặc truy cập storage.
-        let labels = Set(app.webViews.firstMatch.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", " — ")).allElementsBoundByIndex
-            .map(\.label).filter { !$0.contains("Tạo ảnh trích dẫn") && !$0.contains("Chọn nền và chia sẻ") })
+        // AX iOS 26.2: dialog và canvas đều là Other; title document cũng có dấu “ — ”.
+        let modalLabel = "Tạo ảnh trích dẫn, hộp thoại web"
+        let modals = app.webViews.firstMatch.descendants(matching: .other)
+            .matching(NSPredicate(format: "label == %@", modalLabel)).allElementsBoundByIndex
+        XCTAssertEqual(modals.count, 1, "Phải xác định đúng một modal tạo ảnh trước khi đọc canvas")
+        guard modals.count == 1 else { evidence("share-quote-modal-ambiguous", app: app); return nil }
+        guard let modal = try? modals[0].snapshot(), modal.elementType == .other, modal.label == modalLabel,
+              modal.frame.width > 0, modal.frame.height > 0, app.frame.contains(modal.frame) else {
+            evidence("share-quote-modal-frame-unavailable", app: app)
+            XCTFail("Modal tạo ảnh phải có snapshot và khung thực nằm trong viewport")
+            return nil
+        }
+        let canvasLabels = modals[0].descendants(matching: .other)
+            .matching(NSPredicate(format: "label CONTAINS %@", " — ")).allElementsBoundByIndex.compactMap { element -> String? in
+                guard element.exists, let snapshot = try? element.snapshot(), snapshot.elementType == .other,
+                      snapshot.frame.width > 0, snapshot.frame.height > 0,
+                      modal.frame.contains(snapshot.frame), app.frame.contains(snapshot.frame) else { return nil }
+                return snapshot.label
+            }
+        XCTAssertEqual(canvasLabels.count, 1, "Trong modal phải có đúng một canvas AX thực, không gộp các node trùng nhãn")
+        let labels = Set(canvasLabels)
         note("share-quote-canvas-label-candidates", labels.sorted().joined(separator: "\n"))
         XCTAssertEqual(labels.count, 1, "Phải đọc được đúng một canvas label gồm quote và nguồn trước share")
-        guard labels.count == 1, let label = labels.first else { evidence("share-quote-label-unavailable", app: app); return nil }
+        guard canvasLabels.count == 1, labels.count == 1, let label = labels.first else { evidence("share-quote-label-unavailable", app: app); return nil }
         let pieces = label.components(separatedBy: " — ")
         XCTAssertEqual(pieces.count, 2, "Canvas quote/source phải phân biệt rõ trước khi đối chiếu ảnh Photos")
         guard pieces.count == 2 else { return nil }

@@ -330,6 +330,7 @@ public class MainActivity extends BridgeActivity {
                 if (lower.endsWith(".otf")) return "font/otf";
                 if (lower.endsWith(".css")) return "text/css";
                 if (lower.endsWith(".js") || lower.endsWith(".mjs")) return "application/javascript";
+                if (lower.endsWith(".wasm")) return "application/wasm";
                 if (lower.endsWith(".map")) return "application/json";
                 return "application/octet-stream";
             }

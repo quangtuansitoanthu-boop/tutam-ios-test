@@ -2,6 +2,9 @@ package vn.quangtu.tutam;
 
 import android.util.AtomicFile;
 import android.util.Base64;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -86,6 +89,40 @@ public class DivinationHistoryPlugin extends Plugin {
             call.resolve();
         } catch (IOException | IllegalArgumentException error) {
             call.reject("Unable to write local divination history");
+        }
+    }
+
+    private static void removeHistoryFiles(File directory, String name) throws IOException {
+        for (String suffix : new String[]{"", ".bak", ".new"}) {
+            // Encoded names are ASCII; oversized legacy sidecars cannot exist on this filesystem.
+            if (name.length() + suffix.length() > 255) continue;
+            File file = new File(directory, name + suffix);
+            if (file.isDirectory()) throw new IOException("History path is not a file");
+            // delete() returns false for both absence and I/O failure. Only ENOENT proves absence.
+            file.delete();
+            try {
+                Os.lstat(file.getAbsolutePath());
+            } catch (ErrnoException error) {
+                if (error.errno == OsConstants.ENOENT) continue;
+                throw new IOException("Unable to verify history removal");
+            }
+            throw new IOException("History file remains after removal");
+        }
+    }
+
+    @PluginMethod
+    public void remove(PluginCall call) {
+        try {
+            String key = call.getString("key");
+            String name = historyFileName(key);
+            String legacy = legacyHistoryFileName(key);
+            File directory = getContext().getNoBackupFilesDir();
+            if (directory == null) throw new IOException("History storage is unavailable");
+            removeHistoryFiles(directory, name);
+            if (!legacy.equals(name)) removeHistoryFiles(directory, legacy);
+            call.resolve();
+        } catch (IOException | IllegalArgumentException | SecurityException error) {
+            call.reject("Unable to remove local divination history");
         }
     }
 }

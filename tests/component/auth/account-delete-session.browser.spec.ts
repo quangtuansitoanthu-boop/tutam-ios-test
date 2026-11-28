@@ -3,7 +3,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import Harness from './account-delete-session-harness.svelte';
 import { beginNativeAuthMutation, isNativeAuthMutationActive } from '$lib/browser/native-auth-transaction';
 
-const mocks = vi.hoisted(() => ({ csrf: vi.fn(), request: vi.fn(), logout: vi.fn(), clearLocal: vi.fn(), clearBrowser: vi.fn(), apple: vi.fn(), native: vi.fn(() => false) }));
+const mocks = vi.hoisted(() => ({ csrf: vi.fn(), request: vi.fn(), logout: vi.fn(), clearLocal: vi.fn(), clearBrowser: vi.fn(), apple: vi.fn(), purge: vi.fn(), native: vi.fn(() => false) }));
 vi.mock('$app/state', () => ({ page: { url: new URL('http://localhost/ca-nhan?tab=account') } }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/browser/session-csrf', () => ({
@@ -13,6 +13,7 @@ vi.mock('$lib/browser/session-csrf', () => ({
     : mocks.request(url, init),
 }));
 vi.mock('$lib/browser/native-auth', () => ({ logoutNativeAuth: mocks.logout, loginWithGoogleNative: vi.fn(), loginWithAppleNative: vi.fn(), authorizeAppleAccountDeletion: mocks.apple }));
+vi.mock('$lib/browser/spiritual-tools-storage', () => ({ purgeSpiritualToolsForAccount: mocks.purge }));
 vi.mock('$lib/browser/native-platform', () => ({ isNativeApp: mocks.native, nativePlatform: () => mocks.native() ? 'ios' : 'web' }));
 vi.mock('$lib/stores/session.svelte', async importOriginal => ({
   ...await importOriginal<typeof import('$lib/stores/session.svelte')>(),
@@ -35,6 +36,8 @@ beforeEach(() => {
   mocks.native.mockReturnValue(false);
   mocks.apple.mockResolvedValue({ appleIdentityToken: 'fresh-apple-token', appleAuthorizationCode: 'fresh-apple-code' });
   mocks.logout.mockResolvedValue(undefined);
+  mocks.clearBrowser.mockImplementation(() => component?.becomeGuest());
+  mocks.purge.mockResolvedValue(undefined);
   mocks.request.mockResolvedValue(Response.json({ deleted: true }));
 });
 afterEach(async () => {
@@ -141,9 +144,60 @@ it('does not clear the replacement account when deletion of the previous princip
   expect(mocks.request).toHaveBeenCalledTimes(1);
   component!.switchAccount(); flushSync();
   finishDeletion(Response.json({ deleted: true })); await tick(); await tick();
+  expect(mocks.purge).toHaveBeenCalledWith('owner-a');
   expect(mocks.logout).not.toHaveBeenCalled();
   expect(mocks.clearLocal).not.toHaveBeenCalled();
   expect(mocks.clearBrowser).not.toHaveBeenCalled();
+});
+
+it('waits for local deletion of the captured UID without clearing an account that replaces it during cleanup', async () => {
+  let finishPurge!: () => void;
+  mocks.purge.mockImplementationOnce(() => new Promise<void>(resolve => { finishPurge = resolve; }));
+  await confirmDeletion();
+  await vi.waitFor(() => expect(mocks.purge).toHaveBeenCalledWith('owner-a'));
+  expect(mocks.logout).not.toHaveBeenCalled();
+  expect(mocks.clearBrowser).not.toHaveBeenCalled();
+  component!.switchAccount(); flushSync();
+  finishPurge(); await tick(); await tick();
+  expect(mocks.logout).not.toHaveBeenCalled();
+  expect(mocks.clearLocal).not.toHaveBeenCalled();
+  expect(mocks.clearBrowser).not.toHaveBeenCalled();
+});
+
+it('does not show A account deletion failure on B when A local cleanup rejects late', async () => {
+  let failPurge!: () => void;
+  mocks.purge.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+    failPurge = () => reject(new Error('native remove failed'));
+  }));
+  await confirmDeletion();
+  await vi.waitFor(() => expect(mocks.purge).toHaveBeenCalledWith('owner-a'));
+  component!.switchAccount(); flushSync();
+  failPurge(); await tick(); await tick();
+  expect(document.body.textContent).not.toContain('Tài khoản đã được xóa');
+  expect(document.querySelector('.cn-delete-dialog')).toBeNull();
+  expect(mocks.logout).not.toHaveBeenCalled();
+  expect(mocks.clearLocal).not.toHaveBeenCalled();
+  expect(mocks.clearBrowser).not.toHaveBeenCalled();
+});
+
+it('clears deleted account authentication on local purge failure and lets the guest retry only local cleanup', async () => {
+  mocks.purge.mockRejectedValueOnce(new Error('native remove failed'));
+  await confirmDeletion();
+  await vi.waitFor(() => expect(document.body.textContent).toContain('Tài khoản đã được xóa'));
+  expect(mocks.request).toHaveBeenCalledOnce();
+  expect(mocks.logout).toHaveBeenCalledOnce();
+  expect(mocks.clearLocal).toHaveBeenCalledOnce();
+  expect(mocks.clearBrowser).toHaveBeenCalledOnce();
+  expect(document.querySelector('.cn-btn-delete-account')).toBeNull();
+  expect(document.querySelector('#delete-confirm-input')).toBeNull();
+  let finishRetry!: () => void;
+  mocks.purge.mockImplementationOnce(() => new Promise<void>(resolve => { finishRetry = resolve; }));
+  (document.querySelector('.cn-delete-dialog .cn-btn-danger') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(mocks.purge).toHaveBeenCalledTimes(2));
+  expect(mocks.request).toHaveBeenCalledOnce();
+  component!.switchAccount(); flushSync();
+  finishRetry(); await tick(); await tick();
+  expect(mocks.clearBrowser).toHaveBeenCalledOnce();
 });
 
 it('invalidates the displayed confirmation when its account changes before submission', async () => {
@@ -177,6 +231,7 @@ it.each([
   expect(mocks.clearLocal).not.toHaveBeenCalled();
   expect(mocks.clearBrowser).not.toHaveBeenCalled();
   expect(localStorage.getItem('appleAuthorizationCode')).toBeNull();
+  expect(mocks.purge).not.toHaveBeenCalled();
 });
 
 it('does not retry deletion for a replacement principal when the Apple sheet resolves late', async () => {

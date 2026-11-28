@@ -6,7 +6,7 @@
   import { getLocaleContext } from '$lib/stores/locale.svelte';
   const localeStore = getLocaleContext();
   const label = (vi: string, en: string) => localeStore.current === 'en' ? en : vi;
-  import { afterNavigate, goto } from '$app/navigation';
+  import { afterNavigate, goto, onNavigate } from '$app/navigation';
   import { onMount, tick } from 'svelte';
   import { parseAudioArtwork } from '$lib/domain/audio-artwork';
   import { audioPlayer, getAudioPlayer } from '$lib/stores/audio-player.svelte';
@@ -208,11 +208,16 @@
     return () => clearTimeout(timer);
   });
 
-  afterNavigate(({ to }) => {
-    if (to?.url.pathname.startsWith('/phap-thoai')) audioBannerHidden = false;
+  onNavigate(async () => {
     timerMenuOpen = false;
     speedSheetOpen = false;
     mobileExpanded = false;
+    // Finish modal teardown before Kit applies the destination's scroll position.
+    await tick();
+  });
+
+  afterNavigate(({ to }) => {
+    if (to?.url.pathname.startsWith('/phap-thoai')) audioBannerHidden = false;
   });
 
   onMount(() => {

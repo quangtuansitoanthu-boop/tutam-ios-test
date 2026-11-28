@@ -333,6 +333,9 @@ class TuTapBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(ScreenWakeLockPlugin())
         bridge?.registerPluginInstance(DivinationHistoryPlugin())
 #if DEBUG
+#if targetEnvironment(simulator)
+        TuTapQADivinationRemovalProbe.schedule(bridge)
+#endif
         recordNativeStartup(.qaInstallBefore)
         installQAEventsIfRequested()
         recordNativeStartup(.qaInstallAfter)
@@ -846,21 +849,24 @@ public class DivinationHistoryPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "DivinationHistory"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "read", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "write", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "write", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise)
     ]
 
-    private func historyFile(_ call: CAPPluginCall) throws -> URL {
+    private func historyFile(_ call: CAPPluginCall, createDirectory: Bool = true) throws -> URL {
         guard let key = call.getString("key"), !key.isEmpty, key.count <= 160 else {
             throw CocoaError(.fileWriteInvalidFileName)
         }
         let manager = FileManager.default
         let support = try manager.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                      appropriateFor: nil, create: true)
+                                      appropriateFor: nil, create: createDirectory)
         var directory = support.appendingPathComponent("DivinationHistory", isDirectory: true)
-        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        try directory.setResourceValues(values)
+        if createDirectory {
+            try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try directory.setResourceValues(values)
+        }
         let name = Data(key.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_")
         return directory.appendingPathComponent(name + ".json")
     }
@@ -887,6 +893,23 @@ public class DivinationHistoryPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve()
         } catch {
             call.reject("Unable to write local divination history")
+        }
+    }
+
+    @objc public func remove(_ call: CAPPluginCall) {
+        do {
+            let file = try historyFile(call, createDirectory: false)
+            let manager = FileManager.default
+            let attributes = try manager.attributesOfItem(atPath: file.path)
+            guard (attributes[.type] as? FileAttributeType) == .typeRegular else {
+                throw CocoaError(.fileWriteInvalidFileName)
+            }
+            try manager.removeItem(at: file)
+            call.resolve()
+        } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+            call.resolve()
+        } catch {
+            call.reject("Unable to remove local divination history")
         }
     }
 }
@@ -1006,3 +1029,154 @@ public class AppSystemBarsPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 }
+#if DEBUG && targetEnvironment(simulator)
+private enum TuTapQADivinationRemovalProbe {
+    private static var scheduled = false
+    private struct Fixture {
+        let owner: String
+        let slot: String
+        let key: String
+        let value: String
+        let file: URL
+    }
+    private enum Failure: Error { case check(String) }
+
+    static func schedule(_ candidate: CAPBridgeProtocol?) {
+        let args = ProcessInfo.processInfo.arguments
+        guard !scheduled, args.contains("-tutam-qa-events"),
+              let index = args.firstIndex(of: "-tutam-qa-r02-remove"), index + 1 < args.count,
+              let nonce = UUID(uuidString: args[index + 1]),
+              let bridge = candidate as? CapacitorBridge, bridge.isSimEnvironment else { return }
+        scheduled = true
+        // Public getter of the same serial queue used by installed CapacitorBridge.handleJSCall.
+        bridge.dispatchQueue.async {
+            run(bridge.plugin(withName: "DivinationHistory") as? DivinationHistoryPlugin,
+                nonce: nonce.uuidString.lowercased())
+        }
+    }
+
+    private static func require(_ condition: Bool, _ message: String) throws {
+        if !condition { throw Failure.check(message) }
+    }
+
+    private static func existsRegular(_ file: URL) throws -> Bool {
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+            try require((attributes[.type] as? FileAttributeType) == .typeRegular, "Unexpected nonregular fixture path")
+            return true
+        } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+            return false
+        }
+    }
+
+    private static func invoke(_ plugin: DivinationHistoryPlugin, _ method: String, key: String,
+                               value: String? = nil, rejectExpected: Bool = false,
+                               calls: inout [[String: Any]]) throws -> String? {
+        var options: [String: Any] = ["key": key]
+        if let value { options["value"] = value }
+        var resolved = false, rejected = false, callbacks = 0
+        var returned: String?
+        guard let call = CAPPluginCall(callbackId: "qa-r02-" + UUID().uuidString, methodName: method,
+            options: options, success: { result, _ in
+                callbacks += 1; resolved = true; returned = result?.data?["value"] as? String
+            }, error: { _ in callbacks += 1; rejected = true }) else {
+            throw Failure.check("CAPPluginCall initializer failed")
+        }
+        switch method {
+        case "write": plugin.write(call)
+        case "read": plugin.read(call)
+        case "remove": plugin.remove(call)
+        default: throw Failure.check("Unsupported probe action")
+        }
+        calls.append(["method": method, "resolved": resolved, "rejected": rejected,
+                      "callbackCount": callbacks, "rejectExpected": rejectExpected])
+        try require(callbacks == 1 && resolved == !rejectExpected && rejected == rejectExpected,
+                    "Public plugin completion did not match the expected result")
+        return returned
+    }
+
+    private static func run(_ registered: DivinationHistoryPlugin?, nonce: String) {
+        let manager = FileManager.default
+        var calls: [[String: Any]] = [], observations: [[String: Any]] = []
+        var owned: [Fixture] = [], cleanup: [[String: Any]] = []
+        var report: [String: Any] = ["probe": "R02-native-remove", "version": 1, "nonce": nonce,
+            "registeredPlugin": registered != nil, "simulatorOnly": true, "sdkSerialQueue": true,
+            "actualAnonymousAccessed": false, "actualAccountAccessed": false,
+            "networkCallsByProbe": 0, "pass": false,
+            "scope": "Direct public CAPPluginCall on registered instance and SDK queue; not JS nativePromise marshalling",
+            "errorScope": "Invalid-key rejection only; no iOS permission-fault matrix",
+            "guestScope": "UUID-owned guest fixture; real anonymous namespace remains JS-unit coverage"]
+        do {
+            guard let plugin = registered else { throw Failure.check("Registered DivinationHistory plugin missing") }
+            let support = try manager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+                .appendingPathComponent("DivinationHistory", isDirectory: true)
+            let slots = [("history", "tt_divination_history_v1"), ("bio", "tt_biorhythm_profile_v1"), ("dream", "tt_dream_journal_v1")]
+            let fixtures = ["a", "b", "guest-fixture"].flatMap { owner in slots.map { item -> Fixture in
+                let slot = item.0, suffix = item.1
+                let key = "quangtu_principal_v1:qa-r02-\(owner)-\(nonce):\(suffix)"
+                let name = Data(key.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_") + ".json"
+                return Fixture(owner: owner, slot: slot, key: key, value: "[\"qa-r02-\(nonce)-\(owner)-\(slot)\"]",
+                               file: support.appendingPathComponent(name))
+            }}
+            // No fixture data is read or written until all nine exact UUID paths are absent.
+            for fixture in fixtures { try require(try !existsRegular(fixture.file), "UUID fixture preflight collided") }
+            for fixture in fixtures {
+                owned.append(fixture)
+                _ = try invoke(plugin, "write", key: fixture.key, value: fixture.value, calls: &calls)
+                try require(try existsRegular(fixture.file), "Native write did not create its expected regular file")
+                try require(try Data(contentsOf: fixture.file) == Data(fixture.value.utf8), "Written fixture bytes differ")
+                let read = try invoke(plugin, "read", key: fixture.key, calls: &calls)
+                try require(read == fixture.value, "Public native read did not return owned fixture bytes")
+                observations.append(["owner": fixture.owner, "slot": fixture.slot, "nativeWriteAndRead": true,
+                                     "fileManagerRegularFile": true, "byteCount": fixture.value.utf8.count])
+            }
+            for fixture in fixtures where fixture.owner == "a" {
+                _ = try invoke(plugin, "remove", key: fixture.key, calls: &calls)
+                try require(try !existsRegular(fixture.file), "A fixture remained after public remove")
+                observations.append(["owner": fixture.owner, "slot": fixture.slot, "fileManagerAbsentAfterRemove": true])
+            }
+            for fixture in fixtures where fixture.owner != "a" {
+                try require(try existsRegular(fixture.file), "Other-principal fixture was removed")
+                try require(try Data(contentsOf: fixture.file) == Data(fixture.value.utf8), "Other-principal fixture bytes changed")
+                observations.append(["owner": fixture.owner, "slot": fixture.slot, "preservedBytesAfterARemoves": true])
+            }
+            guard let first = fixtures.first else { throw Failure.check("Missing A fixture") }
+            _ = try invoke(plugin, "remove", key: first.key, calls: &calls)
+            _ = try invoke(plugin, "remove", key: first.key, calls: &calls)
+            _ = try invoke(plugin, "remove", key: String(repeating: "x", count: 161), rejectExpected: true, calls: &calls)
+            report["assertionsCompleted"] = true
+        } catch {
+            report["assertionsCompleted"] = false
+            report["fatal"] = String(describing: error)
+        }
+        // Exact tracked list only. Verify fixture identity; never enumerate/delete a directory or a symlink.
+        for fixture in owned.reversed() {
+            do {
+                if try existsRegular(fixture.file) {
+                    try require(try Data(contentsOf: fixture.file) == Data(fixture.value.utf8), "Cleanup fixture identity changed")
+                    try manager.removeItem(at: fixture.file)
+                }
+                try require(try !existsRegular(fixture.file), "Fixture remained after cleanup")
+                cleanup.append(["owner": fixture.owner, "slot": fixture.slot, "absent": true])
+            } catch {
+                cleanup.append(["owner": fixture.owner, "slot": fixture.slot, "absent": false,
+                                "errorDomain": (error as NSError).domain, "errorCode": (error as NSError).code])
+            }
+        }
+        report["calls"] = calls; report["observations"] = observations; report["cleanup"] = cleanup
+        report["parentDirectoryRetained"] = true
+        report["pass"] = (report["assertionsCompleted"] as? Bool) == true && owned.count == 9
+            && cleanup.count == 9 && cleanup.allSatisfy { ($0["absent"] as? Bool) == true }
+        report["finishedAt"] = ISO8601DateFormatter().string(from: Date())
+        do {
+            let caches = try manager.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+            let output = caches.appendingPathComponent("native-r02-divination-remove-\(nonce).json")
+            // This UUID's output is never overwritten. Host waits for complete parseable JSON.
+            try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+                .write(to: output, options: .withoutOverwriting)
+        } catch {
+            NSLog("[TutamQA] R02 probe report could not be written")
+        }
+    }
+}
+#endif
