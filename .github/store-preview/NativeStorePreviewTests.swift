@@ -10,7 +10,7 @@ final class NativeStorePreviewTests: NativeGuestUITestCase {
         FileHandle.standardOutput.write(Data(marker.utf8))
         Thread.sleep(forTimeInterval: 1.0)
         motion?()
-        Thread.sleep(forTimeInterval: 7.5)
+        Thread.sleep(forTimeInterval: 11.5)
     }
 
     @MainActor

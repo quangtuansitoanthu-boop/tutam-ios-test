@@ -31,8 +31,22 @@ jobs:
           git rev-parse HEAD > build/store-preview/source-commit.txt
       - name: Install locked dependencies
         run: npm ci
-      - name: Build existing iOS web assets and native dependencies
-        run: npm run build:mobile -- --platform ios
+      - name: Build iOS web assets and install native dependencies
+        run: |
+          if [ -z "${VITE_GOOGLE_IOS_CLIENT_ID:-}" ]; then
+            export VITE_GOOGLE_IOS_CLIENT_ID="$(python3 - <<'PY'
+          import plistlib
+          with open('ios/App/App/Info.plist', 'rb') as f:
+              plist = plistlib.load(f)
+          for entry in plist.get('CFBundleURLTypes', []):
+              for scheme in entry.get('CFBundleURLSchemes', []):
+                  if scheme.startswith('com.googleusercontent.apps.'):
+                      print('.'.join(reversed(scheme.split('.'))))
+                      raise SystemExit(0)
+          PY
+          )"
+          fi
+          npm run build:mobile -- --platform ios
       - name: Isolate production hosts before native simulator UI tests
         run: |
           set -euo pipefail
