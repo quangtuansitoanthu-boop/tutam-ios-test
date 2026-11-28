@@ -37,7 +37,7 @@ class NativeGuestUITestCase: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         evidenceApplication = app
-        app.launchArguments = ["-tutam-qa-events", "1", "-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
+        app.launchArguments = ["-AppleLanguages", "(vi)", "-AppleLocale", "vi_VN"]
         app.launch()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30), "Native WKWebView must load")
         if retryBlankWebView {
