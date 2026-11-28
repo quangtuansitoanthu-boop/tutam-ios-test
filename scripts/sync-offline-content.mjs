@@ -11,7 +11,7 @@ const safeId = id => typeof id === 'string' && /^[\w.-]+$/u.test(id);
 const PRIMARY_ORIGIN = 'https://quangtu.vn';
 const WORKER_ORIGIN = 'https://quangtu-web.quangtu-ansitoanthu.workers.dev';
 
-export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch, includeAlbumPlays = false } = {}) {
+export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch, includeAlbumPlays = false, bookScriptureOnly = false } = {}) {
   const snapshot = randomUUID();
   const read = (file, fallback) => fs.existsSync(path.join(root, file))
     ? JSON.parse(fs.readFileSync(path.join(root, file), 'utf8')) : fallback;
@@ -71,15 +71,16 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
     }
   }
   const items = [];
-  const query = {};
+  const query = bookScriptureOnly ? { talksDone: '1' } : {};
   let scopedChapterIndex = true;
   for (let pageNumber = 0; ; pageNumber++) {
     if (pageNumber >= 1000) throw new Error('Catalog pagination exceeded');
     const page = await json(query);
     if (!Array.isArray(page.items)) throw new Error('Invalid catalog');
     scopedChapterIndex &&= page.chapterIndexVersion === 1;
-    items.push(...page.items);
-    for (const name of ['articles', 'talks']) {
+    items.push(...page.items.filter(item => !bookScriptureOnly
+      || (item.kind === 'article' && ['book', 'scripture'].includes(item.group))));
+    for (const name of bookScriptureOnly ? ['articles'] : ['articles', 'talks']) {
       const next = page[`${name}Next`];
       if (next === null) query[`${name}Done`] = '1';
       else {
@@ -87,30 +88,59 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
         query[`${name}After`] = next;
       }
     }
-    if (page.articlesNext === null && page.talksNext === null) break;
+    if (page.articlesNext === null && (bookScriptureOnly || page.talksNext === null)) break;
   }
   if (new Set(items.map(item => `${item.kind}:${item.row?.id}`)).size !== items.length) throw new Error('Duplicate catalog IDs');
   const fullArticleIds = items.filter(item => item.kind === 'article' && item.mode !== 'shell').map(item => item.row?.id);
   if (fullArticleIds.some(id => !safeId(id))) throw new Error('Invalid catalog article ID');
   const useScopedIndex = scopedChapterIndex && fullArticleIds.length <= 200 && fullArticleIds.join(',').length <= 6000;
-  // Older Workers omit the capability and still serve the guarded legacy index.
-  const chapterIndex = useScopedIndex
-    ? fullArticleIds.length ? await json({ action: 'chapter-index', ids: fullArticleIds.join(',') }) : []
-    : await json({ select: 'id,bai_viet_id,so_thu_tu,updated_at', order: 'id.asc', limit: '5000' }, '/api/data/tap_noi_dung');
-  if (!Array.isArray(chapterIndex) || chapterIndex.length >= 5000
+  let chapterIndex;
+  if (bookScriptureOnly) {
+    // Đồng bộ riêng sách và kinh không được chuyển sang quét chỉ mục chương cũ toàn cục.
+    if (fullArticleIds.length && !scopedChapterIndex) throw new Error('Scoped chapter index unavailable');
+    const batches = [];
+    let batch = [];
+    let length = 0;
+    for (const id of fullArticleIds) {
+      if (id.length > 200) throw new Error('Invalid catalog article ID');
+      if (batch.length === 200 || length + id.length + (batch.length ? 1 : 0) > 6000) {
+        batches.push(batch);
+        batch = [];
+        length = 0;
+      }
+      length += id.length + (batch.length ? 1 : 0);
+      batch.push(id);
+    }
+    if (batch.length) batches.push(batch);
+    chapterIndex = [];
+    for (const ids of batches) {
+      const index = await json({ action: 'chapter-index', ids: ids.join(',') });
+      if (!Array.isArray(index) || index.length >= 5000) throw new Error('Incomplete chapter index: server pagination required');
+      const requested = new Set(ids);
+      if (index.some(row => !requested.has(row.bai_viet_id))) throw new Error('Invalid scoped chapter index');
+      chapterIndex.push(...index);
+    }
+  } else {
+    // Older Workers omit the capability and still serve the guarded legacy index.
+    chapterIndex = useScopedIndex
+      ? fullArticleIds.length ? await json({ action: 'chapter-index', ids: fullArticleIds.join(',') }) : []
+      : await json({ select: 'id,bai_viet_id,so_thu_tu,updated_at', order: 'id.asc', limit: '5000' }, '/api/data/tap_noi_dung');
+  }
+  if (!Array.isArray(chapterIndex) || (!bookScriptureOnly && chapterIndex.length >= 5000)
     || new Set(chapterIndex.map(row => row.id)).size !== chapterIndex.length) throw new Error('Incomplete chapter index: server pagination required');
-  if (useScopedIndex) {
+  if (useScopedIndex || bookScriptureOnly) {
     const ids = new Set(fullArticleIds);
     if (chapterIndex.some(row => !ids.has(row.bai_viet_id))) throw new Error('Invalid scoped chapter index');
   }
   console.log(`Web snapshot: ${items.length} catalog items, ${chapterIndex.length} chapter revisions.`);
   const previous = read('src/lib/data/offline-content-versions.json', {});
   const existing = new Map(read('src/lib/data/offline-bundled-articles.json', []).map(row => [row.id, row]));
+  const selectedIds = new Set(items.map(item => item.row?.id));
   // Catalog cập nhật chỉ gồm các nhóm tải offline; giữ các mục ngoài phạm vi đó.
   const articles = new Map(existing);
   const talks = new Map(read('src/lib/data/offline-talks.json', []).map(row => [row.id, row]));
   const staged = new Map();
-  const versions = {};
+  const versions = bookScriptureOnly ? { ...previous } : {};
   let changedArticles = 0;
   for (const item of items) {
     if (!safeId(item.row?.id) || !/^[a-f0-9]{64}$/u.test(item.version) || !['article', 'talk'].includes(item.kind)) throw new Error('Invalid catalog item');
@@ -158,8 +188,9 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
     }
     versions[id] = { revision };
   }
-  for (const [rows, field] of [[articles, 'anh_url'], [talks, 'anh_dai_dien']]) {
+  for (const [rows, field] of bookScriptureOnly ? [[articles, 'anh_url']] : [[articles, 'anh_url'], [talks, 'anh_dai_dien']]) {
     for (const row of rows.values()) {
+      if (bookScriptureOnly && !selectedIds.has(row.id)) continue;
       if (!row[field]) continue;
       if (field === 'anh_dai_dien') {
         const cover = bundledTalkCover(row.id, row[field]);
@@ -193,7 +224,7 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
   // The live catalog can still return the older labels and crop for this album.
   // Match those exact values so a later editorial update survives the sync.
   const diaTangVideo = talks.get(DIA_TANG_VIDEO_ALBUM_ID);
-  if (diaTangVideo) talks.set(DIA_TANG_VIDEO_ALBUM_ID, normalizeBundledDiaTangVideoMetadata(diaTangVideo));
+  if (diaTangVideo && !bookScriptureOnly) talks.set(DIA_TANG_VIDEO_ALBUM_ID, normalizeBundledDiaTangVideoMetadata(diaTangVideo));
   // Converted books ship their original illustrations with their complete text.
   // Stage everything before writing, so an image failure cannot publish a half bundle.
   const convertedSources = new Map();
@@ -201,6 +232,7 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
     : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 ? 'jpeg'
       : bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP' ? 'webp' : null;
   for (const [id, article] of articles) {
+    if (bookScriptureOnly && !selectedIds.has(id)) continue;
     const chapterFile = `static/offline-data/chapters/${id}.json`;
     const chapters = staged.get(chapterFile) ?? read(chapterFile, []);
     if (![article.noi_dung, ...chapters.map(row => row.noi_dung)].some(text => typeof text === 'string' && text.includes('tt-converted-book'))) continue;
@@ -257,7 +289,8 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
 
   // Giữ owner ảnh tải riêng; URL nguồn web và đường dẫn cục bộ cùng một ảnh đã xác minh.
   const missionFile = `static/offline-data/chapters/${missionImages.bookId}.json`;
-  const missionChapters = staged.get(missionFile) ?? read(missionFile, []);
+  const missionChapters = bookScriptureOnly && !selectedIds.has(missionImages.bookId)
+    ? [] : staged.get(missionFile) ?? read(missionFile, []);
   const imagePaths = new Set(missionImages.images.map(image => image.path));
   const remotePrefix = `https://media.quangtu.vn/content/${missionImages.directory.split('/').at(-1)}/`;
   let localized = false;
@@ -290,6 +323,7 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
     }).join('');
   };
   for (const id of presentationIds) {
+    if (bookScriptureOnly && !selectedIds.has(id)) continue;
     const article = articles.get(id);
     if (!article) continue;
     article.noi_dung = formatPresentation(id, article.noi_dung);
@@ -304,7 +338,7 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
     if (changed) staged.set(file, chapters);
   }
   const revisionFile = 'src/lib/data/ritual-guidance-revision.json';
-  const revisions = read(revisionFile, []);
+  const revisions = bookScriptureOnly ? [] : read(revisionFile, []);
   for (const revision of revisions) {
     if (!versions[revision.id]) continue;
     const chapters = staged.get(`static/offline-data/chapters/${revision.id}.json`)
@@ -322,16 +356,21 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
   const spiritMissionId = 'tt_1781081372340_1_xqcxo';
   const spiritMission = articles.get(spiritMissionId);
   const spiritMissionSummary = read('src/lib/data/offline-books-vi.json', {})[spiritMissionId]?.summary;
-  if (spiritMission && spiritMissionSummary) spiritMission.tom_tat = spiritMissionSummary;
+  if (spiritMission && spiritMissionSummary && (!bookScriptureOnly || selectedIds.has(spiritMissionId))) spiritMission.tom_tat = spiritMissionSummary;
   for (const [id, version] of Object.entries(versions)) {
+    if (bookScriptureOnly && !selectedIds.has(id)) continue;
     version.content = digest([articles.get(id), staged.get(`static/offline-data/chapters/${id}.json`)
       ?? read(`static/offline-data/chapters/${id}.json`, [])]);
   }
   // Cùng một snapshot cho fetch asset cục bộ và dynamic import.
-  for (const file of ['src/lib/data/offline-bundled-articles.json', 'static/offline-bundled-articles.json']) staged.set(file, [...articles.values()]);
-  for (const file of ['src/lib/data/offline-talks.json', 'static/offline-data/talks.json']) staged.set(file, [...talks.values()]);
-  staged.set('src/lib/data/offline-content-versions.json', versions);
-  if (includeAlbumPlays) {
+  if (!bookScriptureOnly || items.length) {
+    for (const file of ['src/lib/data/offline-bundled-articles.json', 'static/offline-bundled-articles.json']) staged.set(file, [...articles.values()]);
+  }
+  if (!bookScriptureOnly) {
+    for (const file of ['src/lib/data/offline-talks.json', 'static/offline-data/talks.json']) staged.set(file, [...talks.values()]);
+  }
+  if (!bookScriptureOnly || items.length) staged.set('src/lib/data/offline-content-versions.json', versions);
+  if (includeAlbumPlays && !bookScriptureOnly) {
     const counts = await json({}, '/api/album-plays');
     if (!Array.isArray(counts) || counts.some(row => !safeId(row?.albumId)
       || !Number.isSafeInteger(row.playCount) || row.playCount < 0)
@@ -354,5 +393,6 @@ export async function syncOfflineContent({ root = process.cwd(), fetcher = fetch
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  await syncOfflineContent({ includeAlbumPlays: true });
+  const bookScriptureOnly = process.argv.includes('--books-and-scriptures');
+  await syncOfflineContent({ bookScriptureOnly, includeAlbumPlays: !bookScriptureOnly });
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -253,4 +253,167 @@ it('never commits a converted bundle when one illustration download fails', asyn
     : json({ items: [book], articlesNext: null, talksNext: null }));
   await expect(syncOfflineContent({ root, fetcher })).rejects.toThrow('illustration');
   expect(() => read(root, 'src/lib/data/offline-bundled-articles.json')).toThrow();
+});
+
+const seed = (root: string, file: string, value: unknown) => {
+  mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+  writeFileSync(path.join(root, file), typeof value === 'string' ? value : JSON.stringify(value));
+};
+
+it('refreshes only catalog books and scriptures, retaining other content and reusing unchanged selected chapters', async () => {
+  const root = temporary();
+  const ritualId = 'nghi-thuc-tri-chu-phat-danh-ton-thang-da-la-ni';
+  const retained = [
+    { id: ritualId, tieu_de: 'Local ritual', noi_dung: '<p>(Keep this exact text)</p>', anh_url: 'https://media.quangtu.vn/covers/do-not-fetch.webp' },
+    { id: 'pdf', tieu_de: 'Local PDF', pdf_url: '/pdfs/old.pdf', is_pdf_book: true },
+    { id: 'book_book', tieu_de: 'Legacy alias', custom: { retained: true } },
+    { id: 'unrelated', noi_dung: '<div class="tt-converted-book"><img src="https://media.quangtu.vn/content/do-not-fetch.png"></div>' },
+  ];
+  const oldBook = { id: 'book', tieu_de: 'Old book', bundled_offline: true };
+  seed(root, 'src/lib/data/offline-bundled-articles.json', [oldBook, ...retained]);
+  seed(root, 'static/offline-bundled-articles.json', [oldBook, ...retained]);
+  const retainedVersion = { revision: 'retained-revision', content: 'retained-content', images: [{ path: '/old.png', bytes: 5 }] };
+  seed(root, 'src/lib/data/offline-content-versions.json', { book: { revision: 'old' }, [ritualId]: retainedVersion, book_book: retainedVersion });
+  const untouched = {
+    'src/lib/data/offline-talks.json': '[ { "id": "local-talk", "tracks": [] } ]\n',
+    'static/offline-data/talks.json': '[ { "id": "static-talk" } ]\n',
+    'src/lib/data/offline-album-plays.json': '[ { "albumId": "local-talk", "playCount": 7 } ]\n',
+    'src/lib/data/ritual-guidance-revision.json': '[ { "id": "' + ritualId + '", "chapterIndex": 0, "sha256": "unchanged", "unchanged": [] } ]\n',
+    [`static/offline-data/chapters/${ritualId}.json`]: '[ { "id": "ritual-c", "so_thu_tu": 0, "noi_dung": "(Keep original parentheses)" } ]\n',
+    'static/offline-data/chapters/unrelated.json': '[ { "id": "unrelated-c", "noi_dung": "Old unrelated text" } ]\n',
+  };
+  for (const [file, bytes] of Object.entries(untouched)) seed(root, file, bytes);
+  const selected = [
+    { ...book, group: 'book', row: { ...book.row, tieu_de: 'Updated book' } },
+    { ...book, group: 'scripture', row: { id: 'sutra', tieu_de: 'New scripture', has_muc_luc: 1 } },
+  ];
+  let selectedChapters = [
+    { ...chapter, id: 17 },
+    { ...chapter, id: 'sutra-c', bai_viet_id: 'sutra', noi_dung: 'Complete scripture' },
+  ];
+  const fetcher = vi.fn(async (url: URL) => {
+    expect(url.pathname).toBe('/api/content-updates');
+    switch (url.searchParams.get('action')) {
+      case 'chapter-index':
+        expect(url.searchParams.get('ids')).toBe('book,sutra');
+        return json(selectedChapters.map(({ noi_dung: _body, ...metadata }) => metadata));
+      case 'article': {
+        const id = url.searchParams.get('id');
+        return json({ article: selected.find(item => item.row.id === id)!.row,
+          chapters: selectedChapters.filter(row => row.bai_viet_id === id), next: null });
+      }
+      default:
+        expect(url.searchParams.get('talksDone')).toBe('1');
+        expect(url.searchParams.has('talksAfter')).toBe(false);
+        return json({ items: [...selected, { ...book, group: 'ritual', row: { id: ritualId, tieu_de: 'Remote ritual' } },
+          { ...book, group: 'pdf', mode: 'shell', row: { id: 'pdf', tieu_de: 'Remote PDF' } },
+          { ...book, row: { id: 'unrelated', has_muc_luc: 1 } }, talk],
+        articlesNext: null, talksNext: null, chapterIndexVersion: 1 });
+    }
+  });
+  expect((await syncOfflineContent({ root, fetcher, bookScriptureOnly: true, includeAlbumPlays: true })).requests).toBe(4);
+  const rows = read(root, 'src/lib/data/offline-bundled-articles.json');
+  expect(rows.find((row: { id: string }) => row.id === 'book').tieu_de).toBe('Updated book');
+  expect(rows.find((row: { id: string }) => row.id === 'sutra').bundled_offline).toBe(true);
+  for (const row of retained) expect(JSON.stringify(rows.find((value: { id: string }) => value.id === row.id))).toBe(JSON.stringify(row));
+  expect(read(root, 'static/offline-bundled-articles.json')).toEqual(rows);
+  expect(read(root, 'src/lib/data/offline-content-versions.json')[ritualId]).toEqual(retainedVersion);
+  expect(read(root, 'src/lib/data/offline-content-versions.json').book_book).toEqual(retainedVersion);
+  expect(read(root, 'static/offline-data/chapters/book.json')[0].id).toBe(17);
+  expect((await syncOfflineContent({ root, fetcher, bookScriptureOnly: true })).requests).toBe(2);
+  selectedChapters = selectedChapters.map(row => row.bai_viet_id === 'sutra' ? { ...row, updated_at: '2026-11-28', noi_dung: 'Revised scripture' } : row);
+  expect((await syncOfflineContent({ root, fetcher, bookScriptureOnly: true })).requests).toBe(3);
+  expect(read(root, 'static/offline-data/chapters/sutra.json')[0].noi_dung).toBe('Revised scripture');
+  for (const [file, bytes] of Object.entries(untouched)) expect(readFileSync(path.join(root, file), 'utf8'), file).toBe(bytes);
+});
+
+it.each([
+  ['ID count', Array.from({ length: 201 }, (_, index) => `book-${index}`), [200, 1]],
+  ['query value length', Array.from({ length: 100 }, (_, index) => `book-${String(index).padStart(3, '0')}-` + 'x'.repeat(90)), [60, 40]],
+] as const)('batches the selected chapter index by %s without fetching a legacy global index', async (_reason, ids, expectedSizes) => {
+  const root = temporary();
+  const selected = ids.map(id => ({ ...book, group: 'book', row: { id, tieu_de: id, noi_dung: 'Complete single article' } }));
+  const batches: string[][] = [];
+  const fetcher = vi.fn(async (url: URL) => {
+    expect(url.pathname).toBe('/api/content-updates');
+    if (url.searchParams.get('action') === 'chapter-index') {
+      const value = url.searchParams.get('ids')!;
+      expect(value.length).toBeLessThanOrEqual(6000);
+      const batch = value.split(',');
+      expect(batch.length).toBeLessThanOrEqual(200);
+      batches.push(batch);
+      return json([]);
+    }
+    if (url.searchParams.get('action') === 'article') {
+      return json({ article: selected.find(item => item.row.id === url.searchParams.get('id'))!.row, chapters: [], next: null });
+    }
+    expect(url.searchParams.get('talksDone')).toBe('1');
+    return json({ items: selected, articlesNext: null, talksNext: null, chapterIndexVersion: 1 });
+  });
+  expect((await syncOfflineContent({ root, fetcher, bookScriptureOnly: true })).requests).toBe(1 + expectedSizes.length + ids.length);
+  expect(batches.map(batch => batch.length)).toEqual(expectedSizes);
+  expect(batches.flat()).toEqual(ids);
+});
+
+it('refuses a scoped refresh without the advertised bounded chapter index before writing', async () => {
+  const root = temporary();
+  const before = '[ { "id": "book", "tieu_de": "Installed content" } ]\n';
+  seed(root, 'src/lib/data/offline-bundled-articles.json', before);
+  const fetcher = vi.fn(async (url: URL) => {
+    expect(url.pathname).toBe('/api/content-updates');
+    expect(url.searchParams.has('action')).toBe(false);
+    return json({ items: [{ ...book, group: 'book' }], articlesNext: null, talksNext: null });
+  });
+  await expect(syncOfflineContent({ root, fetcher, bookScriptureOnly: true })).rejects.toThrow('Scoped chapter index unavailable');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(readFileSync(path.join(root, 'src/lib/data/offline-bundled-articles.json'), 'utf8')).toBe(before);
+});
+
+it('rejects an incomplete selected chapter page without committing earlier staged text', async () => {
+  const root = temporary();
+  const before = '[ { "id": "book", "tieu_de": "Previous complete book" } ]\n';
+  seed(root, 'src/lib/data/offline-bundled-articles.json', before);
+  seed(root, 'static/offline-bundled-articles.json', before);
+  seed(root, 'static/offline-data/chapters/book.json', '[ { "noi_dung": "Previous chapter" } ]\n');
+  seed(root, 'src/lib/data/offline-content-versions.json', '{ "book": { "revision": "previous" } }\n');
+  const files = ['src/lib/data/offline-bundled-articles.json', 'static/offline-bundled-articles.json',
+    'static/offline-data/chapters/book.json', 'src/lib/data/offline-content-versions.json'];
+  const bytes = files.map(file => readFileSync(path.join(root, file), 'utf8'));
+  const selected = [{ ...book, group: 'book', row: { ...book.row, anh_url: 'https://media.quangtu.vn/covers/new.webp' } },
+    { ...book, group: 'scripture', row: { id: 'sutra', has_muc_luc: 1 } }];
+  const index = [chapter, { ...chapter, id: 'sutra-c', bai_viet_id: 'sutra' }];
+  const fetcher = vi.fn(async (url: URL) => {
+    expect(url.pathname).toBe('/api/content-updates');
+    if (url.searchParams.get('action') === 'chapter-index') return json(index);
+    if (url.searchParams.get('action') === 'article') {
+      const id = url.searchParams.get('id');
+      return json({ article: selected.find(item => item.row.id === id)!.row, chapters: id === 'book' ? [chapter] : [], next: null });
+    }
+    return json({ items: selected, articlesNext: null, talksNext: null, chapterIndexVersion: 1 });
+  });
+  await expect(syncOfflineContent({ root, fetcher, bookScriptureOnly: true })).rejects.toThrow('Incomplete or changed article: sutra');
+  expect(files.map(file => readFileSync(path.join(root, file), 'utf8'))).toEqual(bytes);
+  expect(existsSync(path.join(root, 'static/covers/new.webp'))).toBe(false);
+  expect(existsSync(path.join(root, 'static/offline-data/chapters/sutra.json'))).toBe(false);
+});
+
+it('leaves the bundle byte-for-byte unchanged when the catalog has no selected books or scriptures', async () => {
+  const root = temporary();
+  const files = {
+    'src/lib/data/offline-bundled-articles.json': '[ { "id": "ritual", "noi_dung": "Original text" } ]\n',
+    'static/offline-bundled-articles.json': '[ { "id": "ritual", "noi_dung": "Original text" } ]\n',
+    'src/lib/data/offline-content-versions.json': '{ "ritual": { "content": "original" } }\n',
+  };
+  for (const [file, bytes] of Object.entries(files)) seed(root, file, bytes);
+  const fetcher = vi.fn(async (url: URL) => {
+    expect(url.pathname).toBe('/api/content-updates');
+    expect(url.searchParams.has('action')).toBe(false);
+    expect(url.searchParams.get('talksDone')).toBe('1');
+    return json({ items: [{ ...book, group: 'ritual', row: { id: 'ritual', noi_dung: 'Changed remote ritual' } }],
+      articlesNext: null, talksNext: null, chapterIndexVersion: 1 });
+  });
+  expect((await syncOfflineContent({ root, fetcher, bookScriptureOnly: true })).requests).toBe(1);
+  for (const [file, bytes] of Object.entries(files)) expect(readFileSync(path.join(root, file), 'utf8')).toBe(bytes);
+  expect(existsSync(path.join(root, 'src/lib/data/offline-talks.json'))).toBe(false);
+  expect(existsSync(path.join(root, 'static/offline-data/chapters/ritual.json'))).toBe(false);
 });
