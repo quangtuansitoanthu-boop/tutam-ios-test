@@ -3140,19 +3140,105 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     }
 
     @MainActor
+    private func nativeShareSheet(_ app: XCUIApplication) -> (sheet: XCUIElement, owner: XCUIElement)? {
+        guard app.state == .runningForeground, app.alerts.count == 0,
+              XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.count == 0 else { return nil }
+        let predicate = NSPredicate(format: "identifier == %@", "ActivityListView")
+        let sheets = app.descendants(matching: .other).matching(predicate).allElementsBoundByIndex
+        guard sheets.count == 1, app.webViews.descendants(matching: .other).matching(predicate).count == 0,
+              let snapshot = try? sheets[0].snapshot(), snapshot.elementType == .other,
+              snapshot.identifier == "ActivityListView", snapshot.frame.width > 0, snapshot.frame.height > 0,
+              app.frame.contains(snapshot.frame) else { return nil }
+        let owners = sheets[0].descendants(matching: .other)
+            .matching(NSPredicate(format: "identifier == %@", "ShareSheet.RemoteContainerView")).allElementsBoundByIndex
+        guard owners.count == 1, let owner = try? owners[0].snapshot(), owner.elementType == .other,
+              owner.identifier == "ShareSheet.RemoteContainerView", owner.frame.width > 0, owner.frame.height > 0,
+              snapshot.frame.contains(owner.frame), app.frame.contains(owner.frame) else { return nil }
+        return (sheets[0], owners[0])
+    }
+
+    @MainActor
+    private func nativeShareSaveActions(_ app: XCUIApplication) -> [XCUIElement] {
+        guard let native = nativeShareSheet(app) else { return [] }
+        let cells = native.owner.cells.matching(NSPredicate(format: "identifier == %@ AND label IN %@",
+            "actionGroupCell", saveLabels as NSArray)).allElementsBoundByIndex
+        guard cells.count == 1, let snapshot = try? cells[0].snapshot(), snapshot.elementType == .cell,
+              snapshot.identifier == "actionGroupCell", saveLabels.contains(snapshot.label),
+              snapshot.frame.width >= 44, snapshot.frame.height >= 44,
+              native.sheet.frame.contains(snapshot.frame), app.frame.contains(snapshot.frame), cells[0].isEnabled,
+              insideViewport(cells[0], app: app), closePhotoFrames(snapshot.frame, cells[0].frame) else { return [] }
+        return cells
+    }
+
+    @MainActor
     private func nativeAction(_ app: XCUIApplication, labels: [String], phase: String) -> XCUIElement? {
         let webCandidates = app.webViews.buttons.matching(NSPredicate(format: "label IN %@", labels as NSArray))
             .allElementsBoundByIndex.filter { $0.exists && $0.isHittable && $0.isEnabled }
         XCTAssertTrue(webCandidates.isEmpty, "\(phase): candidate phải thuộc share sheet native, không phải nút web phía sau")
         guard webCandidates.isEmpty else { evidence(phase + "-unexpected-web-action", app: app); return nil }
-        return oneButton(app, labels: labels, phase: phase)
+        evidence(phase, app: app)
+        let candidates = labels == saveLabels ? nativeShareSaveActions(app) : []
+        note(phase + "-candidates", candidates.map { "role=\($0.elementType) identifier=\($0.identifier) label=\($0.label) frame=\($0.frame)" }.joined(separator: "\n"))
+        XCTAssertEqual(candidates.count, 1, "\(phase): cần đúng một Cell Save Image native có id/nhãn/khung và hit point đã xác minh")
+        return candidates.count == 1 ? candidates[0] : nil
     }
 
     @MainActor
     private func shareSheetReady(_ app: XCUIApplication) -> Bool {
-        visibleButtons(app, labels: saveLabels).count == 1 &&
+        nativeShareSaveActions(app).count == 1 &&
             app.webViews.buttons.matching(NSPredicate(format: "label IN %@", saveLabels as NSArray))
                 .allElementsBoundByIndex.allSatisfy { !$0.isHittable || !$0.isEnabled }
+    }
+
+    @MainActor
+    private func nativeShareSheetGone(_ app: XCUIApplication) -> Bool {
+        app.state == .runningForeground && app.descendants(matching: .other)
+            .matching(NSPredicate(format: "identifier IN %@", ["ActivityListView", "ShareSheet.RemoteContainerView"] as NSArray)).count == 0
+    }
+
+    @MainActor
+    private func dismissNativeShare(_ app: XCUIApplication, phase: String) -> Bool {
+        evidence(phase + "-before-native-drag", app: app)
+        guard nativeShareSaveActions(app).count == 1, let native = nativeShareSheet(app),
+              let snapshot = try? native.sheet.snapshot() else {
+            XCTFail("Không xác minh được share sheet native đang hoạt động trước một lần Cancel bằng gesture")
+            return false
+        }
+        let sheet = native.sheet
+        let headers = native.owner.navigationBars.matching(NSPredicate(format: "identifier == %@", "UIActivityContentView"))
+            .allElementsBoundByIndex
+        XCTAssertEqual(headers.count, 1, "Cần đúng một header native đã quan sát, không dùng nút Đóng web phía sau")
+        guard headers.count == 1, let first = try? headers[0].snapshot(), let second = try? headers[0].snapshot(),
+              first.elementType == .navigationBar, second.elementType == .navigationBar,
+              first.identifier == "UIActivityContentView", second.identifier == "UIActivityContentView" else {
+            evidence(phase + "-native-header-unavailable", app: app)
+            XCTFail("Thiếu snapshot header native đúng role/id; không đoán điểm gesture")
+            return false
+        }
+        let viewport = app.frame
+        let sheetFrame = sheet.frame
+        let headerFrame = second.frame
+        let from = CGPoint(x: headerFrame.midX, y: headerFrame.minY + 8)
+        let to = CGPoint(x: from.x, y: min(sheetFrame.maxY - 16, viewport.maxY - 24))
+        let safeViewport = viewport.insetBy(dx: 8, dy: 24)
+        guard closePhotoFrames(snapshot.frame, sheetFrame), closePhotoFrames(first.frame, headerFrame),
+              closePhotoFrames(headerFrame, headers[0].frame), closePhotoFrames(viewport, app.frame),
+              viewport.contains(sheetFrame), sheetFrame.contains(headerFrame),
+              headerFrame.width > 0, headerFrame.height > 0, headerFrame.contains(from),
+              sheetFrame.contains(from), sheetFrame.contains(to), safeViewport.contains(from), safeViewport.contains(to),
+              to.y - from.y >= 44 else {
+            note(phase + "-rejected-geometry", "sheet=\(sheetFrame) header=\(headerFrame) viewport=\(viewport) from=\(from) to=\(to)")
+            evidence(phase + "-native-drag-rejected", app: app)
+            XCTFail("Gesture Cancel cần khung native ổn định và hai đầu nằm trong sheet/viewport, tránh cạnh hệ thống")
+            return false
+        }
+        note(phase + "-native-drag", "sheet=\(sheetFrame) header=\(headerFrame) viewport=\(viewport) from=\(from) to=\(to) gestureCount=1")
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: from.x - viewport.minX, dy: from.y - viewport.minY))
+        let end = origin.withOffset(CGVector(dx: to.x - viewport.minX, dy: to.y - viewport.minY))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        // true chỉ xác nhận đã gửi một gesture; điều kiện sau Cancel và mở lại thật vẫn phải PASS.
+        return true
     }
 
     @MainActor
@@ -3660,12 +3746,11 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         XCTAssertTrue(insideViewport(share, app: app))
         share.doubleTap()
         waitUntil("Double tap Chia sẻ phải mở share sheet native có Save Image") { self.shareSheetReady(app) }
-        guard nativeAction(app, labels: saveLabels, phase: "share-native-first-save-image") != nil,
-              let cancel = nativeAction(app, labels: cancelLabels, phase: "share-native-first-cancel") else { return }
+        guard nativeAction(app, labels: saveLabels, phase: "share-native-first-save-image") != nil else { return }
         XCTAssertFalse(share.isEnabled, "Share promise phải còn pending khi sheet đang sở hữu file")
-        cancel.tap()
+        guard dismissNativeShare(app, phase: "share-native-first-cancel") else { return }
         waitUntil("Một lần Cancel phải đóng sheet và trả lại đúng modal quote có thể tương tác") {
-            title.exists && share.exists && share.isEnabled && !self.shareSheetReady(app)
+            title.exists && share.exists && share.isEnabled && !self.shareSheetReady(app) && self.nativeShareSheetGone(app)
         }
         evidence("share-single-cancel-restores-quote", app: app)
         // Mở sheet lần hai bằng nút thật là oracle tương tác sau Cancel, không chỉ một nhãn enabled.
@@ -3676,7 +3761,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         save.tap()
         guard allowOwnAddPhotosPrompt(app) else { return }
         waitUntil("Save Image phải kết thúc share sheet và trả lại quote dùng được; không đợi toast của Files") {
-            title.exists && reopenedShare.exists && reopenedShare.isEnabled && !self.shareSheetReady(app)
+            title.exists && reopenedShare.exists && reopenedShare.isEnabled && !self.shareSheetReady(app) && self.nativeShareSheetGone(app)
         }
         evidence("share-save-image-returned-to-quote", app: app)
         photos.activate()

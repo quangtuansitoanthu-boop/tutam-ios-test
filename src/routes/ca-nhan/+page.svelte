@@ -3924,6 +3924,7 @@
 
   .cn-author-btn {
     display: flex;
+    min-height: var(--touch-target-size);
     align-items: center;
     justify-content: center;
     gap: 8px;

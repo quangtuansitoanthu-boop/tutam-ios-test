@@ -1378,6 +1378,7 @@
 
   .reminder-check-row {
     display: flex;
+    min-height: var(--touch-target-size);
     align-items: flex-start;
     gap: 10px;
     margin-bottom: 10px;
