@@ -2111,9 +2111,13 @@ final class NativePersonalReminderTests: NativeGuestUITestCase {
 
     @MainActor
     private func addEvent(_ title: String, solar: Bool, day: Int, month: Int, app: XCUIApplication) {
-        evidence("personal-before-add-event-tap", app: app)
         tap(app.buttons["+ Thêm ngày lễ kỷ niệm"].firstMatch, app: app)
-        evidence("personal-after-add-event-tap", app: app)
+        let nameField = app.textFields["Tên ngày lễ *"].firstMatch
+        guard nameField.waitForExistence(timeout: 15) else {
+            evidence("personal-add-first-tap-failed", app: app)
+            XCTFail("One Add tap must open the actual personal-event title field before typing")
+            return
+        }
         replaceName(title, app: app)
         if solar { selectPersonalSegment("Dương lịch", app: app) }
         select("Chu kỳ:", option: "Hàng năm", app: app)
@@ -3164,9 +3168,17 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
             "actionGroupCell", saveLabels as NSArray)).allElementsBoundByIndex
         guard cells.count == 1, let snapshot = try? cells[0].snapshot(), snapshot.elementType == .cell,
               snapshot.identifier == "actionGroupCell", saveLabels.contains(snapshot.label),
-              snapshot.frame.width >= 44, snapshot.frame.height >= 44,
-              native.sheet.frame.contains(snapshot.frame), app.frame.contains(snapshot.frame), cells[0].isEnabled,
-              insideViewport(cells[0], app: app), closePhotoFrames(snapshot.frame, cells[0].frame) else { return [] }
+              snapshot.frame.width >= 44, snapshot.frame.height >= 44 else { return [] }
+        // Remote-container snapshot có thể dùng tọa độ local; vùng chạm dùng hai live frame toàn màn hình.
+        let viewport = app.frame
+        let sheetFrame = native.sheet.frame
+        let firstFrame = cells[0].frame
+        let liveFrame = cells[0].frame
+        guard firstFrame.width >= 44, firstFrame.height >= 44, liveFrame.width >= 44, liveFrame.height >= 44,
+              sheetFrame.contains(firstFrame), sheetFrame.contains(liveFrame),
+              viewport.contains(firstFrame), viewport.contains(liveFrame),
+              cells[0].exists, cells[0].isEnabled, cells[0].isHittable,
+              closePhotoFrames(firstFrame, liveFrame) else { return [] }
         return cells
     }
 

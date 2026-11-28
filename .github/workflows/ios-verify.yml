@@ -167,7 +167,7 @@ jobs:
               output.write('TUTAM_QA_HOSTS_ISOLATED=1\n')
           PY
       - name: Prepare installed simulator dyld shared caches for tools QA
-        if: inputs.test_suite == 'closing' || inputs.test_suite == 'tools' || inputs.test_suite == 'audit' || inputs.test_suite == 'followup' || env.IOS_TEST_SUITE == 'share' || env.IOS_TEST_SUITE == 'smoke'
+        if: inputs.test_suite == 'closing' || inputs.test_suite == 'tools' || inputs.test_suite == 'audit' || inputs.test_suite == 'followup' || env.IOS_TEST_SUITE == 'share' || env.IOS_TEST_SUITE == 'smoke' || env.IOS_TEST_SUITE == 'crud'
         timeout-minutes: 10
         run: |
           set -euo pipefail

@@ -166,6 +166,43 @@ export async function storeApiResponse(url: URL, response: Response): Promise<vo
   }
 }
 
+async function newerBundledApiResponse(url: URL, cached: Response): Promise<Response | null> {
+  try {
+    const detail = /^\/api\/articles\/([^/]+)(\/chapters)?$/u.exec(url.pathname);
+    const legacyArticle = url.pathname === '/api/data/baiviet';
+    const legacyChapters = url.pathname === '/api/data/tap_noi_dung';
+    if (!detail && !legacyArticle && !legacyChapters) return null;
+    const id = detail ? decodeURIComponent(detail[1])
+      : (url.searchParams.get(legacyChapters ? 'bai_viet_id' : 'id') ?? '').replace(/^eq\./u, '');
+    if (!id) return null;
+    const ids = [id, id.startsWith('book_') ? id.slice(5) : `book_${id}`];
+    const chapters = Boolean(detail?.[2]) || legacyChapters;
+    const sourceDate = (payload: unknown, metadata: boolean): number | undefined => {
+      const rows: unknown[] = Array.isArray(payload) ? payload : [payload];
+      if (!rows.length || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) return NaN;
+      const values = rows as Record<string, unknown>[];
+      if (values.some(row => metadata ? !ids.includes(String(row.id ?? ''))
+        : row.bai_viet_id != null && !ids.includes(String(row.bai_viet_id)))) return NaN;
+      if (values.every(row => row.updated_at == null && row.updatedAt == null)) return undefined;
+      const dates = values.map(row => Date.parse(String(row.updated_at ?? row.updatedAt ?? '')));
+      return dates.every(Number.isFinite) ? Math.max(...dates) : NaN;
+    };
+    const date = sourceDate(await cached.clone().json(), !chapters);
+    // Không dùng giờ ghi cache làm phiên bản; dữ liệu không rõ ngày vẫn được giữ.
+    if (typeof date !== 'number' || !Number.isFinite(date)) return null;
+    const metadata = await resolveOfflineBundledResponse(`/api/articles/${encodeURIComponent(id)}`);
+    if (!metadata?.ok) return null;
+    const bundledDate = sourceDate(await metadata.json(), true);
+    if (typeof bundledDate !== 'number' || !Number.isFinite(bundledDate) || date >= bundledDate) return null;
+    const response = await resolveOfflineBundledResponse(`${url.pathname}${url.search}`);
+    if (!response?.ok) return null;
+    const payload: unknown = await response.clone().json();
+    return payload && typeof payload === 'object' && (Array.isArray(payload) ? payload.length > 0 : Object.keys(payload).length > 0) ? response : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Lấy bản đã lưu (nếu có), sau đó tới dữ liệu đóng gói sẵn trong app. */
 export async function readOfflineApiResponse(url: URL): Promise<Response | null> {
   if (urlTargetsRestricted(url)) {
@@ -180,6 +217,8 @@ export async function readOfflineApiResponse(url: URL): Promise<Response | null>
     try {
       const cached = await cache?.match(publicApiCacheKey(url));
       if (cached) {
+        const newer = await newerBundledApiResponse(url, cached);
+        if (newer) return newer;
         if (/^\/api\/articles\/[^/]+$/u.test(url.pathname)) {
           const original: unknown = await cached.clone().json();
           const row = legacyArticleRow(original);
