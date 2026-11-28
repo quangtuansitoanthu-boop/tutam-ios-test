@@ -292,6 +292,125 @@ class TuTapBridgeViewController: CAPBridgeViewController {
     private var qaLifecycleObservers: [NSObjectProtocol] = []
 #endif
 
+#if DEBUG && targetEnvironment(simulator)
+    // Chỉ quan sát recognizer sẵn có trong lượt QA; không thay đổi phân xử chạm.
+    private final class QAWeakGesture {
+        weak var recognizer: UIGestureRecognizer?
+        let index: Int
+        init(_ recognizer: UIGestureRecognizer, index: Int) {
+            self.recognizer = recognizer
+            self.index = index
+        }
+    }
+    private struct QAGestureChangedSignature: Equatable {
+        let touchCount: Int
+        let cancelsTouchesInView: Bool
+        let delaysTouchesBegan: Bool
+        let delaysTouchesEnded: Bool
+        let bounds: CGRect
+    }
+    private var qaExistingGestures: [QAWeakGesture] = []
+    private var qaGestureLastChangedSignatures: [Int: QAGestureChangedSignature] = [:]
+    private var qaGestureRecordCount = 0
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard ProcessInfo.processInfo.arguments.contains("-tutam-qa-events"),
+              let webView else { return }
+        removeQAExistingGestureTargets()
+        // BFS hữu hạn qua subviews công khai, không chọn theo tên lớp WebKit nội bộ.
+        var views: [UIView] = [webView, webView.scrollView]
+        var viewIDs = Set(views.map { ObjectIdentifier($0) })
+        var cursor = 0
+        while cursor < views.count {
+            let current = views[cursor]
+            cursor += 1
+            for child in current.subviews {
+                guard views.count < 16 else { break }
+                if viewIDs.insert(ObjectIdentifier(child)).inserted { views.append(child) }
+            }
+        }
+        var ancestor = webView.superview
+        var ancestorCount = 0
+        while let current = ancestor, ancestorCount < 8 {
+            if viewIDs.insert(ObjectIdentifier(current)).inserted { views.append(current) }
+            ancestor = current.superview
+            ancestorCount += 1
+        }
+        var seen = Set<ObjectIdentifier>()
+        for current in views {
+            for recognizer in current.gestureRecognizers ?? [] {
+                guard qaExistingGestures.count < 32 else { break }
+                guard seen.insert(ObjectIdentifier(recognizer)).inserted else { continue }
+                let observed = QAWeakGesture(recognizer, index: qaExistingGestures.count)
+                qaExistingGestures.append(observed)
+                recognizer.addTarget(self, action: #selector(qaExistingGestureChanged(_:)))
+                recordQAExistingGesture(recognizer, index: observed.index, phase: "installed")
+            }
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        removeQAExistingGestureTargets()
+        super.viewWillDisappear(animated)
+    }
+
+    private func removeQAExistingGestureTargets() {
+        for observed in qaExistingGestures {
+            observed.recognizer?.removeTarget(self, action: #selector(qaExistingGestureChanged(_:)))
+        }
+        qaExistingGestures.removeAll()
+        qaGestureLastChangedSignatures.removeAll()
+    }
+
+    @objc private func qaExistingGestureChanged(_ recognizer: UIGestureRecognizer) {
+        guard let observed = qaExistingGestures.first(where: { $0.recognizer === recognizer }) else { return }
+        recordQAExistingGesture(recognizer, index: observed.index, phase: "action")
+    }
+
+    private func recordQAExistingGesture(_ recognizer: UIGestureRecognizer, index: Int, phase: String) {
+        guard Thread.isMainThread, ProcessInfo.processInfo.arguments.contains("-tutam-qa-events"),
+              qaGestureRecordCount < 512, let observedView = recognizer.view else { return }
+        let bounds = observedView.bounds
+        let geometry = [bounds.origin.x, bounds.origin.y, bounds.width, bounds.height]
+        guard geometry.allSatisfy({ $0.isFinite }) else { return }
+        let state = recognizer.state
+        let signature = QAGestureChangedSignature(
+            touchCount: recognizer.numberOfTouches,
+            cancelsTouchesInView: recognizer.cancelsTouchesInView,
+            delaysTouchesBegan: recognizer.delaysTouchesBegan,
+            delaysTouchesEnded: recognizer.delaysTouchesEnded,
+            bounds: bounds
+        )
+        if phase == "action" && state == .changed {
+            // Chỉ gộp mẫu changed liên tiếp giống nhau của cùng recognizer.
+            guard qaGestureLastChangedSignatures[index] != signature else { return }
+        } else {
+            // Mỗi began/ended/cancelled/failed là sự kiện riêng, kể cả lặp giống nhau.
+            qaGestureLastChangedSignatures.removeValue(forKey: index)
+        }
+        let process = ProcessInfo.processInfo
+        let event: [String: Any] = [
+            "type": "native-gesture-state", "phase": phase, "index": index,
+            "pid": Int(process.processIdentifier), "uptime": process.systemUptime,
+            "recognizerClass": NSStringFromClass(type(of: recognizer)),
+            "viewClass": NSStringFromClass(type(of: observedView)),
+            "state": state.rawValue, "touchCount": signature.touchCount,
+            "cancelsTouchesInView": signature.cancelsTouchesInView,
+            "delaysTouchesBegan": signature.delaysTouchesBegan,
+            "delaysTouchesEnded": signature.delaysTouchesEnded,
+            "boundsX": Double(bounds.origin.x), "boundsY": Double(bounds.origin.y),
+            "boundsWidth": Double(bounds.width), "boundsHeight": Double(bounds.height)
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: event, options: [.sortedKeys]),
+              data.count <= 4096, let serialized = String(data: data, encoding: .utf8) else { return }
+        if phase == "action" && state == .changed {
+            qaGestureLastChangedSignatures[index] = signature
+        }
+        qaGestureRecordCount += 1
+        NSLog("[TutamQA] %@", serialized)
+    }
+#endif
     override func capacitorDidLoad() {
 #if DEBUG
         recordNativeStartup(.capacitorEntry)
@@ -500,10 +619,58 @@ class TuTapBridgeViewController: CAPBridgeViewController {
               log(detail);
             }, { capture: true, passive: true });
           }
+          const dialogNodeTokens = new WeakMap();
+          let nextDialogNodeToken = 0;
+          let dialogNodeSamples = 0;
+          let lastDialog = null;
+          let lastButton = null;
+          let dialogNodeUntil = 0;
+          const dialogNodeIdentity = (node) => {
+            if (!(node instanceof Node)) return null;
+            let token = dialogNodeTokens.get(node);
+            if (!token) { token = ++nextDialogNodeToken; dialogNodeTokens.set(node, token); }
+            return { token, tag: node instanceof Element ? node.tagName.slice(0, 40) : node.nodeType === 3 ? '#TEXT' : '#NODE' };
+          };
+          const dialogNodeSnapshot = (node) => {
+            const identity = dialogNodeIdentity(node);
+            if (!identity) return null;
+            const snapshot = { ...identity, connected: node.isConnected };
+            if (node instanceof Element) {
+              const rect = node.getBoundingClientRect();
+              const finite = value => Number.isFinite(value) ? value : 0;
+              snapshot.rect = { x: finite(rect.x), y: finite(rect.y), width: finite(rect.width), height: finite(rect.height) };
+            }
+            if (node instanceof HTMLDialogElement) {
+              snapshot.open = node.open;
+              try { snapshot.modal = node.matches(':modal'); } catch { snapshot.modal = null; }
+            }
+            return snapshot;
+          };
+          const logDialogEventNode = (event, capture) => {
+            if (dialogNodeSamples >= 256) { lastDialog = null; lastButton = null; return; }
+            const time = performance.now();
+            if (time > dialogNodeUntil) { lastDialog = null; lastButton = null; }
+            const raw = event.target;
+            const origin = raw instanceof Element ? raw : raw?.parentElement;
+            const dialog = origin?.closest('dialog[data-app-message]') || null;
+            const button = dialog ? origin?.closest('button') || null : null;
+            if (capture && event.type === 'pointerdown') {
+              lastDialog = dialog;
+              lastButton = button;
+              dialogNodeUntil = dialog ? time + 500 : 0;
+            }
+            if (!dialog && !lastDialog) return;
+            dialogNodeSamples += 1;
+            log({ type: 'dialog-event-node', eventType: event.type, phase: capture ? 'capture' : 'bubble', time,
+              target: dialogNodeSnapshot(raw), button: dialogNodeSnapshot(button), dialog: dialogNodeSnapshot(dialog),
+              lastButton: dialogNodeSnapshot(lastButton), lastDialog: dialogNodeSnapshot(lastDialog),
+              activeElement: dialogNodeIdentity(document.activeElement) });
+          };
           for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel', 'mousedown', 'mouseup', 'click', 'mouseover']) {
             for (const capture of [true, false]) {
               window.addEventListener(type, (event) => {
                 const detail = describe(event);
+                logDialogEventNode(event, capture);
                 if (!detail) return;
                 if (capture && ['pointerdown', 'pointerup', 'pointercancel'].includes(type)) logLibraryInput(event);
                 if (capture && detail.footer) {

@@ -3178,6 +3178,7 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
         guard webCandidates.isEmpty else { evidence(phase + "-unexpected-web-action", app: app); return nil }
         evidence(phase, app: app)
         let candidates = labels == saveLabels ? nativeShareSaveActions(app) : []
+        if candidates.count != 1 { observeNativeShareGuardFailure(app, phase: phase) }
         note(phase + "-candidates", candidates.map { "role=\($0.elementType) identifier=\($0.identifier) label=\($0.label) frame=\($0.frame)" }.joined(separator: "\n"))
         XCTAssertEqual(candidates.count, 1, "\(phase): cần đúng một Cell Save Image native có id/nhãn/khung và hit point đã xác minh")
         return candidates.count == 1 ? candidates[0] : nil
@@ -3185,9 +3186,12 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
 
     @MainActor
     private func shareSheetReady(_ app: XCUIApplication) -> Bool {
-        nativeShareSaveActions(app).count == 1 &&
-            app.webViews.buttons.matching(NSPredicate(format: "label IN %@", saveLabels as NSArray))
-                .allElementsBoundByIndex.allSatisfy { !$0.isHittable || !$0.isEnabled }
+        // Chỉ hai query presence trong waiter 15s; nativeAction vẫn xác minh đầy đủ trước thao tác.
+        let sheets = app.descendants(matching: .other)
+            .matching(NSPredicate(format: "identifier == %@", "ActivityListView")).allElementsBoundByIndex
+        guard sheets.count == 1 else { return false }
+        return sheets[0].cells.matching(NSPredicate(format: "identifier == %@ AND label IN %@",
+            "actionGroupCell", saveLabels as NSArray)).allElementsBoundByIndex.count == 1
     }
 
     @MainActor
@@ -3197,47 +3201,123 @@ final class NativeQuoteShareTests: NativeGuestUITestCase {
     }
 
     @MainActor
+    private func nativeShareGuardValues(_ element: XCUIElement, viewport: CGRect) -> [String: Any] {
+        guard element.exists else { return ["exists": false] }
+        var values: [String: Any] = ["exists": true]
+        do {
+            let snapshot = try element.snapshot()
+            values["snapshotRole"] = String(describing: snapshot.elementType)
+            values["snapshotIdentifier"] = snapshot.identifier
+            values["snapshotLabel"] = snapshot.label
+            values["snapshotFrameXYWH"] = [Double(snapshot.frame.minX), Double(snapshot.frame.minY), Double(snapshot.frame.width), Double(snapshot.frame.height)]
+            values["viewportContainsSnapshotFrame"] = viewport.contains(snapshot.frame)
+        } catch {
+            values["snapshotError"] = String(describing: error)
+            return values
+        }
+        let frame = element.frame
+        values["enabled"] = element.isEnabled
+        values["isHittable"] = element.isHittable
+        values["frameXYWH"] = [Double(frame.minX), Double(frame.minY), Double(frame.width), Double(frame.height)]
+        values["viewportContainsLiveFrame"] = viewport.contains(frame)
+        return values
+    }
+
+    @MainActor
+    private func observeNativeShareGuardFailure(_ app: XCUIApplication, phase: String) {
+        // Chỉ chạy sau strict action guard thất bại, không nằm trong predicate polling.
+        let viewport = app.frame
+        var values: [String: Any] = ["uptime": ProcessInfo.processInfo.systemUptime,
+            "appState": app.state.rawValue, "appAlertCount": app.alerts.count,
+            "systemAlertCount": XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.count,
+            "viewportXYWH": [Double(viewport.minX), Double(viewport.minY), Double(viewport.width), Double(viewport.height)]]
+        let sheetPredicate = NSPredicate(format: "identifier == %@", "ActivityListView")
+        let sheets = app.descendants(matching: .other).matching(sheetPredicate).allElementsBoundByIndex
+        values["sheetRawCount"] = sheets.count
+        values["webSheetRawCount"] = app.webViews.descendants(matching: .other).matching(sheetPredicate).count
+        if sheets.count == 1 {
+            values["sheet"] = nativeShareGuardValues(sheets[0], viewport: viewport)
+            let owners = sheets[0].descendants(matching: .other)
+                .matching(NSPredicate(format: "identifier == %@", "ShareSheet.RemoteContainerView")).allElementsBoundByIndex
+            values["ownerRawCount"] = owners.count
+            if owners.count == 1 {
+                values["owner"] = nativeShareGuardValues(owners[0], viewport: viewport)
+                values["sheetContainsOwnerLiveFrame"] = sheets[0].frame.contains(owners[0].frame)
+                let cells = owners[0].cells.matching(NSPredicate(format: "identifier == %@ AND label IN %@",
+                    "actionGroupCell", saveLabels as NSArray)).allElementsBoundByIndex
+                values["saveCellRawCount"] = cells.count
+                if cells.count == 1 {
+                    values["saveCell"] = nativeShareGuardValues(cells[0], viewport: viewport)
+                    values["sheetContainsCellLiveFrame"] = sheets[0].frame.contains(cells[0].frame)
+                }
+            }
+        }
+        let regions = app.descendants(matching: .other)
+            .matching(NSPredicate(format: "identifier == %@", "PopoverDismissRegion")).allElementsBoundByIndex
+        let popovers = app.descendants(matching: .popover).allElementsBoundByIndex
+        values["dismissRegionRawCount"] = regions.count
+        values["popoverRawCount"] = popovers.count
+        if regions.count == 1 { values["dismissRegion"] = nativeShareGuardValues(regions[0], viewport: viewport) }
+        if popovers.count == 1 { values["popover"] = nativeShareGuardValues(popovers[0], viewport: viewport) }
+        if let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) { note(phase + "-guard-values", text) }
+        else { note(phase + "-guard-values", String(describing: values)) }
+        evidence(phase + "-guard-failure", app: app)
+    }
+
+    @MainActor
     private func dismissNativeShare(_ app: XCUIApplication, phase: String) -> Bool {
-        evidence(phase + "-before-native-drag", app: app)
-        guard nativeShareSaveActions(app).count == 1, let native = nativeShareSheet(app),
-              let snapshot = try? native.sheet.snapshot() else {
-            XCTFail("Không xác minh được share sheet native đang hoạt động trước một lần Cancel bằng gesture")
+        evidence(phase + "-before-native-popover-dismiss", app: app)
+        guard let native = nativeShareSheet(app) else {
+            observeNativeShareGuardFailure(app, phase: phase)
+            XCTFail("Thiếu share owner native đã xác minh trước một lần Cancel")
             return false
         }
-        let sheet = native.sheet
-        let headers = native.owner.navigationBars.matching(NSPredicate(format: "identifier == %@", "UIActivityContentView"))
-            .allElementsBoundByIndex
-        XCTAssertEqual(headers.count, 1, "Cần đúng một header native đã quan sát, không dùng nút Đóng web phía sau")
-        guard headers.count == 1, let first = try? headers[0].snapshot(), let second = try? headers[0].snapshot(),
-              first.elementType == .navigationBar, second.elementType == .navigationBar,
-              first.identifier == "UIActivityContentView", second.identifier == "UIActivityContentView" else {
-            evidence(phase + "-native-header-unavailable", app: app)
-            XCTFail("Thiếu snapshot header native đúng role/id; không đoán điểm gesture")
+        let predicate = NSPredicate(format: "identifier == %@", "PopoverDismissRegion")
+        let regions = app.descendants(matching: .other).matching(predicate).allElementsBoundByIndex
+        let popovers = app.descendants(matching: .popover).allElementsBoundByIndex
+        if regions.count != 1 || popovers.count != 1 { observeNativeShareGuardFailure(app, phase: phase) }
+        XCTAssertEqual(regions.count, 1, "Cần đúng một native PopoverDismissRegion đã quan sát")
+        XCTAssertEqual(popovers.count, 1, "Chỉ Cancel presentation Popover đã quan sát; không đoán fallback")
+        guard regions.count == 1, popovers.count == 1,
+              app.webViews.descendants(matching: .other).matching(predicate).count == 0,
+              let region = try? regions[0].snapshot(), let regionAgain = try? regions[0].snapshot(),
+              region.elementType == .other, regionAgain.elementType == .other,
+              region.identifier == "PopoverDismissRegion", regionAgain.identifier == "PopoverDismissRegion",
+              let popover = try? popovers[0].snapshot(), let popoverAgain = try? popovers[0].snapshot(),
+              popover.elementType == .popover, popoverAgain.elementType == .popover,
+              popovers[0].descendants(matching: .other)
+                .matching(NSPredicate(format: "identifier == %@", "ActivityListView")).count == 1 else {
+            observeNativeShareGuardFailure(app, phase: phase)
+            XCTFail("Không xác minh được region native và Popover cùng sở hữu ActivityListView")
             return false
         }
         let viewport = app.frame
-        let sheetFrame = sheet.frame
-        let headerFrame = second.frame
-        let from = CGPoint(x: headerFrame.midX, y: headerFrame.minY + 8)
-        let to = CGPoint(x: from.x, y: min(sheetFrame.maxY - 16, viewport.maxY - 24))
-        let safeViewport = viewport.insetBy(dx: 8, dy: 24)
-        guard closePhotoFrames(snapshot.frame, sheetFrame), closePhotoFrames(first.frame, headerFrame),
-              closePhotoFrames(headerFrame, headers[0].frame), closePhotoFrames(viewport, app.frame),
-              viewport.contains(sheetFrame), sheetFrame.contains(headerFrame),
-              headerFrame.width > 0, headerFrame.height > 0, headerFrame.contains(from),
-              sheetFrame.contains(from), sheetFrame.contains(to), safeViewport.contains(from), safeViewport.contains(to),
-              to.y - from.y >= 44 else {
-            note(phase + "-rejected-geometry", "sheet=\(sheetFrame) header=\(headerFrame) viewport=\(viewport) from=\(from) to=\(to)")
-            evidence(phase + "-native-drag-rejected", app: app)
-            XCTFail("Gesture Cancel cần khung native ổn định và hai đầu nằm trong sheet/viewport, tránh cạnh hệ thống")
+        let regionFrame = regions[0].frame
+        let popoverFrame = popovers[0].frame
+        // Chọn giữa phần region phía trên popover, không chọn nút Đóng của web bên dưới.
+        let above = CGRect(x: regionFrame.minX, y: regionFrame.minY, width: regionFrame.width,
+            height: max(0, popoverFrame.minY - regionFrame.minY)).intersection(viewport.insetBy(dx: 24, dy: 44))
+        let point = CGPoint(x: above.midX, y: above.midY)
+        guard !above.isNull, above.width >= 44, above.height >= 44,
+              closePhotoFrames(region.frame, regionAgain.frame), closePhotoFrames(regionAgain.frame, regionFrame),
+              closePhotoFrames(popover.frame, popoverAgain.frame), closePhotoFrames(popoverAgain.frame, popoverFrame),
+              closePhotoFrames(viewport, app.frame), viewport.contains(regionFrame), viewport.contains(popoverFrame),
+              regionFrame.contains(native.sheet.frame),
+              regions[0].isEnabled, insideViewport(regions[0], app: app),
+              regionFrame.contains(point), region.frame.contains(point), regionAgain.frame.contains(point),
+              viewport.insetBy(dx: 24, dy: 44).contains(point),
+              !popoverFrame.contains(point), !popover.frame.contains(point), !popoverAgain.frame.contains(point),
+              !native.sheet.frame.contains(point), app.state == .runningForeground else {
+            observeNativeShareGuardFailure(app, phase: phase)
+            note(phase + "-rejected-point", "region=\(regionFrame) popover=\(popoverFrame) viewport=\(viewport) above=\(above) point=\(point)")
+            XCTFail("Cancel cần region native enabled/hittable, khung ổn định và điểm ở ngoài Popover, trong region/viewport")
             return false
         }
-        note(phase + "-native-drag", "sheet=\(sheetFrame) header=\(headerFrame) viewport=\(viewport) from=\(from) to=\(to) gestureCount=1")
-        let origin = app.coordinate(withNormalizedOffset: .zero)
-        let start = origin.withOffset(CGVector(dx: from.x - viewport.minX, dy: from.y - viewport.minY))
-        let end = origin.withOffset(CGVector(dx: to.x - viewport.minX, dy: to.y - viewport.minY))
-        start.press(forDuration: 0.1, thenDragTo: end)
-        // true chỉ xác nhận đã gửi một gesture; điều kiện sau Cancel và mở lại thật vẫn phải PASS.
+        note(phase + "-native-popover-dismiss", "region=\(regionFrame) popover=\(popoverFrame) viewport=\(viewport) point=\(point) tapCount=1")
+        regions[0].coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: point.x - regionFrame.minX, dy: point.y - regionFrame.minY)).tap()
+        // Chỉ xác nhận đã gửi một tap; sheetGone, Share enabled và mở lại thật vẫn phải PASS.
         return true
     }
 
